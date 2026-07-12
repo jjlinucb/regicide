@@ -77,6 +77,9 @@ export function GamePage({
       </div>
 
       <div className="hand-area">
+        <div className="hand-label">
+          Your hand: {myHand.length} / {state.maxHandSize}
+        </div>
         <Hand cards={myHand} selectedIds={selectedIds} onToggle={toggleCard} interactive={isMyTurn} />
       </div>
 

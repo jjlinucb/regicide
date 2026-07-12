@@ -1,17 +1,19 @@
 :root {
-  --bg: #14171f;
-  --bg-elevated: #1d2130;
-  --bg-card: #f4ecd8;
-  --ink: #eef0f6;
-  --ink-dim: #9aa0b4;
-  --accent: #c9a24b;
-  --danger: #c0524a;
-  --heart: #c0524a;
-  --diamond: #c9a24b;
-  --club: #2c2f36;
-  --spade: #2c2f36;
-  --border: #333a4d;
-  color-scheme: dark;
+  --bg: #f1e2c6;
+  --bg-elevated: #fffaef;
+  --bg-card: #fffaef;
+  --ink: #4a3222;
+  --ink-dim: #8a7156;
+  --accent: #c1651d;
+  --accent-ink: #fff6e9;
+  --danger: #b83227;
+  --heart: #b83227;
+  --diamond: #b83227;
+  --club: #4a3222;
+  --spade: #4a3222;
+  --border: #dcc19b;
+  --success: #5a8f3c;
+  color-scheme: light;
 }
 
 * {
@@ -67,13 +69,14 @@ button {
 .panel {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 20px;
   padding: 20px;
   width: 100%;
   max-width: 380px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  box-shadow: 0 8px 24px rgba(193, 101, 29, 0.15);
 }
 
 .panel input {
@@ -87,28 +90,38 @@ button {
 
 .btn {
   background: var(--accent);
-  color: #1a1408;
+  color: var(--accent-ink);
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 12px 16px;
-  font-weight: 600;
+  font-weight: 700;
   font-size: 1rem;
+  box-shadow: 0 4px 0 #8a4413;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 #8a4413;
 }
 
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .btn-secondary {
-  background: transparent;
+  background: #fffaf1;
   border: 1px solid var(--border);
   color: var(--ink);
+  box-shadow: none;
 }
 
 .btn-danger {
   background: var(--danger);
   color: white;
+  box-shadow: 0 4px 0 #8a271f;
 }
 
 .room-code {
@@ -139,12 +152,12 @@ button {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #3ecf72;
+  background: var(--success);
   flex-shrink: 0;
 }
 
 .dot.offline {
-  background: #666;
+  background: #d8c9b8;
 }
 
 .error-banner {
@@ -177,12 +190,13 @@ button {
 .enemy-card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 20px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  box-shadow: 0 8px 24px rgba(193, 101, 29, 0.15);
 }
 
 .enemy-title {
@@ -211,8 +225,21 @@ button {
 
 .health-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #8b1e1e, #c0524a);
+  background: linear-gradient(90deg, #dba63f, #b83227);
   transition: width 0.3s ease;
+}
+
+.boss-portrait {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  border: 4px solid var(--bg-elevated);
+  box-shadow: 0 0 0 3px var(--accent), 0 8px 18px rgba(74, 50, 34, 0.35);
+  margin-bottom: 4px;
 }
 
 .enemy-stats {
@@ -298,54 +325,65 @@ button {
   flex-shrink: 0;
 }
 
+.hand-label {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+  margin-bottom: 2px;
+}
+
 .hand-scroll {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   overflow-x: auto;
   padding: 4px 8px 12px;
   scroll-snap-type: x proximity;
+  justify-content: center;
 }
 
 .playing-card {
   scroll-snap-align: start;
   flex-shrink: 0;
-  width: 64px;
-  height: 90px;
+  width: 82px;
+  height: 114px;
   background: var(--bg-card);
-  color: #222;
-  border-radius: 8px;
-  border: 2px solid transparent;
+  color: #2c2530;
+  border-radius: 12px;
+  border: 2px solid var(--border);
+  box-shadow: 0 3px 8px rgba(58, 46, 57, 0.1);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   position: relative;
 }
 
 .playing-card.selected {
   transform: translateY(-10px);
   border-color: var(--accent);
+  box-shadow: 0 6px 14px rgba(193, 101, 29, 0.35);
 }
 
 .playing-card .rank {
-  font-size: 1.3rem;
+  font-size: 1.7rem;
   line-height: 1;
 }
 
 .playing-card .glyph {
-  font-size: 1.4rem;
+  font-size: 1.8rem;
   line-height: 1;
 }
 
 .playing-card.red {
-  color: #a3272a;
+  color: var(--heart);
 }
 
 .playing-card.jester {
-  background: #3a2f55;
-  color: #f0e6ff;
+  background: #8c6fea;
+  border-color: #8c6fea;
+  color: #fff8ee;
 }
 
 .confirm-bar {
@@ -395,8 +433,22 @@ button {
 
 @media (min-width: 640px) {
   .playing-card {
-    width: 76px;
-    height: 106px;
+    width: 100px;
+    height: 140px;
+  }
+
+  .playing-card .rank {
+    font-size: 2rem;
+  }
+
+  .playing-card .glyph {
+    font-size: 2.1rem;
+  }
+
+  .boss-portrait {
+    width: 128px;
+    height: 128px;
+    font-size: 4rem;
   }
 
   .game-top {
