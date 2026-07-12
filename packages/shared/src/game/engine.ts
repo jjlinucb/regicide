@@ -190,6 +190,9 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
   // Defeating player continues their turn against the new enemy (no defend, no turn advance).
   state.turnPhase = 'AWAIT_PLAY';
   state.pendingDamage = 0;
+  // The winning play may have emptied their hand; if yielding is also blocked right now,
+  // they have no legal move and the game is lost (mirrors the check after a normal turn ends).
+  checkForStuckLoss(state);
   return true;
 }
 

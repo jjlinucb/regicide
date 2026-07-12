@@ -308,6 +308,20 @@ describe('losing', () => {
     res = applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [hand[0].id] });
     expect(res.ok).toBe(false);
   });
+
+  it('loses immediately if defeating an enemy empties the hand and yielding is also blocked (bonus-turn edge case)', () => {
+    let state = startGame('stuck-after-defeat', 2);
+    state.lastActionWasYield = [false, true]; // player 1's last action was a yield
+    state.currentEnemy!.damageTaken = state.currentEnemy!.maxHealth - 6; // one more hit of 6 defeats it
+    const lastCard = suited('H', '6');
+    state = rig(state, [lastCard]); // this is the player's ONLY card
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [lastCard.id] });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    // Enemy defeated, bonus turn continues, but the hand is now empty and player 1 just yielded
+    // — player 0 can neither play nor yield, so the game must already be lost.
+    expect(newState.phase).toBe('LOST');
+  });
 });
 
 describe('winning', () => {
