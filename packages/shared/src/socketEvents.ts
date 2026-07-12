@@ -19,6 +19,7 @@ export interface ClientToServerEvents {
   'room:join': (payload: { code: string; name: string }, cb: (res: { ok: true; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
   'room:rejoin': (payload: { code: string; playerToken: string }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   'room:start': (payload: { code: string }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
+  'room:restart': (payload: { code: string }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   'game:action': (payload: { code: string; action: GameAction }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
 }
 

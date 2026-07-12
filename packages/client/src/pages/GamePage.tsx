@@ -11,13 +11,17 @@ import { JesterPicker } from '../components/JesterPicker';
 export function GamePage({
   state,
   myPlayerId,
+  isHost,
   sendAction,
   onLeave,
+  onRestart,
 }: {
   state: ClientGameState;
   myPlayerId: string;
+  isHost: boolean;
   sendAction: (action: GameAction) => void;
   onLeave: () => void;
+  onRestart: () => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -53,8 +57,15 @@ export function GamePage({
         <h1>{state.phase === 'WON' ? 'Victory!' : 'Defeat'}</h1>
         <p>{state.phase === 'WON' ? 'The realm is saved — every enemy has fallen.' : state.lossReason}</p>
         <ActionLog state={state} />
-        <button className="btn" onClick={onLeave}>
-          Back to start
+        {isHost ? (
+          <button className="btn" onClick={onRestart}>
+            Play again
+          </button>
+        ) : (
+          <p style={{ color: 'var(--ink-dim)' }}>Waiting for the host to start a new game...</p>
+        )}
+        <button className="btn btn-secondary" onClick={onLeave}>
+          Leave
         </button>
       </div>
     );
@@ -101,6 +112,7 @@ export function GamePage({
           pendingDamage={state.pendingDamage}
           selectedTotal={selectedTotal}
           selectedCount={selectedCards.length}
+          handSize={myHand.length}
           playError={playError}
           canYield={true}
           onClear={() => setSelectedIds(new Set())}

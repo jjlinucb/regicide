@@ -47,7 +47,12 @@ export function useGameConnection() {
 
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
-    socket.on('room:state', (payload) => setRoomState(payload));
+    socket.on('room:state', (payload) => {
+      setRoomState(payload);
+      // Back in the lobby (fresh join, or a restart) — clear any stale finished-game state
+      // so the UI falls back to the lobby view instead of showing an old Won/Lost screen.
+      if (!payload.started) setGameState(null);
+    });
     socket.on('game:state', (payload) => setGameState(payload));
     socket.on('error', (payload) => setError(payload.message));
 
@@ -102,6 +107,13 @@ export function useGameConnection() {
     });
   }, [session]);
 
+  const restartGame = useCallback((): void => {
+    if (!session) return;
+    socketRef.current?.emit('room:restart', { code: session.code }, (res) => {
+      if (!res.ok) setError(res.error);
+    });
+  }, [session]);
+
   const sendAction = useCallback(
     (action: GameAction): void => {
       if (!session) return;
@@ -129,6 +141,7 @@ export function useGameConnection() {
     createRoom,
     joinRoom,
     startGame,
+    restartGame,
     sendAction,
     leaveSession,
   };

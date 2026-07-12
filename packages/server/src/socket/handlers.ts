@@ -67,6 +67,15 @@ export function registerSocketHandlers(io: IOServer, socket: IOSocket, rooms: Ro
     broadcastRoom(io, result.room);
   });
 
+  socket.on('room:restart', ({ code }, cb) => {
+    const found = rooms.findPlayerBySocket(socket.id);
+    if (!found) return cb({ ok: false, error: 'Not in a room.' });
+    const result = rooms.restartGame(code, found.player.id);
+    if ('error' in result) return cb({ ok: false, error: result.error });
+    cb({ ok: true });
+    broadcastRoom(io, result.room);
+  });
+
   socket.on('game:action', ({ code, action }, cb) => {
     const result = rooms.applyGameAction(code, action);
     if ('error' in result) {

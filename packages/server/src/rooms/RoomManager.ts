@@ -121,6 +121,17 @@ export class RoomManager {
     return { room };
   }
 
+  restartGame(code: string, requestingPlayerId: string): { room: Room } | { error: string } {
+    const room = this.getRoom(code);
+    if (!room) return { error: 'Room not found.' };
+    if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can restart the game.' };
+    if (room.gameState.phase !== 'WON' && room.gameState.phase !== 'LOST') {
+      return { error: 'The game is still in progress.' };
+    }
+    room.gameState = createLobbyState();
+    return { room };
+  }
+
   applyGameAction(code: string, action: GameAction): { room: Room } | { error: string } {
     const room = this.getRoom(code);
     if (!room) return { error: 'Room not found.' };

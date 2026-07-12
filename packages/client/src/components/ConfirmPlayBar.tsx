@@ -5,6 +5,7 @@ interface Props {
   pendingDamage: number;
   selectedTotal: number;
   selectedCount: number;
+  handSize: number;
   playError: string | null;
   canYield: boolean;
   onPlay: () => void;
@@ -18,6 +19,7 @@ export function ConfirmPlayBar({
   pendingDamage,
   selectedTotal,
   selectedCount,
+  handSize,
   playError,
   canYield,
   onPlay,
@@ -27,6 +29,10 @@ export function ConfirmPlayBar({
 }: Props) {
   if (turnPhase === 'AWAIT_DEFEND') {
     const covered = selectedTotal >= pendingDamage;
+    const wholeHandSelected = selectedCount === handSize;
+    // A player with an empty hand has nothing to select, but still needs to be able to
+    // submit "discard nothing" so the engine can register that they can't cover the damage.
+    const canSubmit = covered || wholeHandSelected;
     return (
       <div className="confirm-bar">
         <span className="total">
@@ -38,8 +44,8 @@ export function ConfirmPlayBar({
             Clear
           </button>
         )}
-        <button className="btn btn-danger" disabled={selectedCount === 0} onClick={onDefend}>
-          {covered ? 'Discard' : 'Discard whole hand?'}
+        <button className="btn btn-danger" disabled={!canSubmit} onClick={onDefend}>
+          {covered ? 'Discard' : handSize === 0 ? 'Discard (empty hand)' : 'Discard whole hand?'}
         </button>
       </div>
     );
