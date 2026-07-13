@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { cardValue, validatePlayShape, type ClientGameState, type GameAction } from '@regicide/shared';
+import {
+  cardValue,
+  MAX_SOLO_JESTERS,
+  SOLO_JESTER_ABILITY_TEXT,
+  validatePlayShape,
+  type ClientGameState,
+  type GameAction,
+} from '@regicide/shared';
 import { EnemyDisplay } from '../components/EnemyDisplay';
 import { DeckPiles } from '../components/DeckPiles';
 import { PlayerList } from '../components/PlayerList';
@@ -7,6 +14,13 @@ import { ActionLog } from '../components/ActionLog';
 import { Hand } from '../components/Hand';
 import { ConfirmPlayBar } from '../components/ConfirmPlayBar';
 import { JesterPicker } from '../components/JesterPicker';
+import { VictoryCrest } from '../components/VictoryCrest';
+
+const MEDAL_INFO: Record<'gold' | 'silver' | 'bronze', { emoji: string; label: string }> = {
+  gold: { emoji: '🥇', label: 'Gold Victory' },
+  silver: { emoji: '🥈', label: 'Silver Victory' },
+  bronze: { emoji: '🥉', label: 'Bronze Victory' },
+};
 
 export function GamePage({
   state,
@@ -54,8 +68,19 @@ export function GamePage({
   if (state.phase === 'WON' || state.phase === 'LOST') {
     return (
       <div className="centered-page">
+        {state.phase === 'WON' && (
+          <div className="victory-crest">
+            <VictoryCrest />
+          </div>
+        )}
         <h1>{state.phase === 'WON' ? 'Victory!' : 'Defeat'}</h1>
         <p>{state.phase === 'WON' ? 'The realm is saved — every enemy has fallen.' : state.lossReason}</p>
+        {state.phase === 'WON' && state.victoryMedal && (
+          <p className={`victory-medal medal-${state.victoryMedal}`}>
+            {MEDAL_INFO[state.victoryMedal].emoji} {MEDAL_INFO[state.victoryMedal].label} — used {state.soloJestersUsed} of{' '}
+            {MAX_SOLO_JESTERS} solo Jesters.
+          </p>
+        )}
         <ActionLog state={state} />
         {isHost ? (
           <button className="btn" onClick={onRestart}>
@@ -80,6 +105,20 @@ export function GamePage({
               ? `Defend! Discard ${state.pendingDamage} damage worth of cards.`
               : 'Your turn — play a card, a combo, or yield.'
             : `Waiting for ${state.players[state.currentPlayerIndex]?.name}...`}
+          {isHost && (
+            <button
+              type="button"
+              className="btn-restart"
+              title="Restart with a fresh shuffle"
+              onClick={() => {
+                if (window.confirm('Restart the game with a new shuffle? This ends the current run.')) {
+                  onRestart();
+                }
+              }}
+            >
+              ↻ Restart
+            </button>
+          )}
         </div>
         {state.currentEnemy && <EnemyDisplay enemy={state.currentEnemy} />}
         <DeckPiles state={state} />
@@ -89,7 +128,25 @@ export function GamePage({
 
       <div className="hand-area">
         <div className="hand-label">
-          Your hand: {myHand.length} / {state.maxHandSize}
+          <span>
+            Your hand: {myHand.length} / {state.maxHandSize}
+          </span>
+          {state.players.length === 1 && (
+            <button
+              type="button"
+              className="btn-solo-jester"
+              title={SOLO_JESTER_ABILITY_TEXT}
+              disabled={!isMyTurn || state.soloJestersUsed >= MAX_SOLO_JESTERS}
+              onClick={() => {
+                const left = MAX_SOLO_JESTERS - state.soloJestersUsed;
+                if (window.confirm(`Flip a solo Jester: discard your whole hand and refill to ${state.maxHandSize}? (${left} left, affects your medal)`)) {
+                  sendAction({ type: 'USE_SOLO_JESTER', playerId: myPlayerId });
+                }
+              }}
+            >
+              🃏 Flip Jester ({MAX_SOLO_JESTERS - state.soloJestersUsed} left)
+            </button>
+          )}
         </div>
         <Hand cards={myHand} selectedIds={selectedIds} onToggle={toggleCard} interactive={isMyTurn} />
       </div>

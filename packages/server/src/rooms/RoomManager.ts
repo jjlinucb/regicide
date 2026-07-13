@@ -125,9 +125,8 @@ export class RoomManager {
     const room = this.getRoom(code);
     if (!room) return { error: 'Room not found.' };
     if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can restart the game.' };
-    if (room.gameState.phase !== 'WON' && room.gameState.phase !== 'LOST') {
-      return { error: 'The game is still in progress.' };
-    }
+    // Allowed at any phase (including mid-game) so a solo player can bail on a losing run
+    // and reshuffle immediately instead of waiting to die.
     room.gameState = createLobbyState();
     return { room };
   }

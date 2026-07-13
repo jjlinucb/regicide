@@ -230,16 +230,26 @@ button {
 }
 
 .boss-portrait {
-  width: 96px;
-  height: 96px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 3rem;
-  border: 4px solid var(--bg-elevated);
+  width: 110px;
+  height: 121px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 3px solid var(--bg-elevated);
   box-shadow: 0 0 0 3px var(--accent), 0 8px 18px rgba(74, 50, 34, 0.35);
   margin-bottom: 4px;
+}
+
+.boss-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.boss-flavor-name {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
 }
 
 .enemy-stats {
@@ -302,6 +312,10 @@ button {
 }
 
 .status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   text-align: center;
   padding: 8px;
   font-size: 0.9rem;
@@ -316,6 +330,22 @@ button {
   font-weight: 600;
 }
 
+.btn-restart {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.btn-restart:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ---------- Hand & cards ---------- */
 
 .hand-area {
@@ -326,10 +356,64 @@ button {
 }
 
 .hand-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   text-align: center;
   font-size: 0.8rem;
   color: var(--ink-dim);
   margin-bottom: 2px;
+}
+
+.btn-solo-jester {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid #8c6fea;
+  background: var(--bg-card);
+  color: #8c6fea;
+  cursor: pointer;
+}
+
+.btn-solo-jester:hover:not(:disabled) {
+  background: #8c6fea;
+  color: #fff8ee;
+}
+
+.btn-solo-jester:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.victory-crest {
+  width: 160px;
+  margin: 0 auto;
+}
+
+.victory-crest-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.35));
+}
+
+.victory-medal {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.medal-gold {
+  color: #c9a227;
+}
+
+.medal-silver {
+  color: #9aa0a6;
+}
+
+.medal-bronze {
+  color: #b06a3a;
 }
 
 .hand-scroll {
@@ -384,6 +468,13 @@ button {
   background: #8c6fea;
   border-color: #8c6fea;
   color: #fff8ee;
+  gap: 4px;
+}
+
+.jester-label {
+  font-size: 0.6rem;
+  letter-spacing: 0.05em;
+  font-weight: 700;
 }
 
 .confirm-bar {
@@ -446,9 +537,8 @@ button {
   }
 
   .boss-portrait {
-    width: 128px;
-    height: 128px;
-    font-size: 4rem;
+    width: 150px;
+    height: 165px;
   }
 
   .game-top {

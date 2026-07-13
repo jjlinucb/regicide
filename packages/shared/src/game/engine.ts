@@ -1,6 +1,6 @@
 import type { Card, EngineResult, GameAction, GameState, PlayerState } from './types.js';
 import { buildCastleDeck, buildTavernDeck, makeRng, MAX_HAND_SIZE_BY_PLAYER_COUNT } from './deck.js';
-import { cardValue, currentEnemyAttack, isSuitBlockedByImmunity, validatePlayShape } from './rules.js';
+import { cardValue, currentEnemyAttack, isSuitBlockedByImmunity, MAX_SOLO_JESTERS, validatePlayShape } from './rules.js';
 
 const MAX_LOG_LENGTH = 200;
 
@@ -182,6 +182,9 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
   if (state.castleDeck.length === 0) {
     state.phase = 'WON';
     state.currentEnemy = null;
+    if (state.players.length === 1) {
+      state.victoryMedal = state.soloJestersUsed === 0 ? 'gold' : state.soloJestersUsed === 1 ? 'silver' : 'bronze';
+    }
     log(state, `The last King has fallen — the realm is saved!`);
     return true;
   }
@@ -235,6 +238,8 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.log = [];
   state.lossReason = null;
   state.rngState = hashSeed(`${action.seed}:play`);
+  state.soloJestersUsed = 0;
+  state.victoryMedal = null;
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -336,6 +341,27 @@ function activateJester(state: GameState, action: Extract<GameAction, { type: 'A
   return ok(state);
 }
 
+function useSoloJester(state: GameState, action: Extract<GameAction, { type: 'USE_SOLO_JESTER' }>): EngineResult {
+  if (state.phase !== 'IN_PROGRESS') return fail('The game is not in progress.');
+  const cp = currentPlayer(state);
+  if (!cp || cp.id !== action.playerId) return fail('It is not your turn.');
+  if (state.players.length !== 1) return fail('The solo Jester is only available in 1-player games.');
+  if (state.turnPhase !== 'AWAIT_PLAY' && state.turnPhase !== 'AWAIT_DEFEND') {
+    return fail('The solo Jester can only be used before playing a card or before defending.');
+  }
+  if (state.soloJestersUsed >= MAX_SOLO_JESTERS) return fail('No solo Jesters remaining.');
+
+  const player = cp;
+  state.discardPile.push(...player.hand);
+  player.hand = [];
+  while (player.hand.length < state.maxHandSize && drawOneCard(state, player)) {
+    // keep drawing until the hand limit or the Tavern deck runs dry
+  }
+  state.soloJestersUsed += 1;
+  log(state, `${player.name} flips a Jester — hand discarded and refilled to ${player.hand.length}. (${MAX_SOLO_JESTERS - state.soloJestersUsed} left)`);
+  return ok(state);
+}
+
 function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }>): EngineResult {
   const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_DEFEND');
   if (err) return fail(err);
@@ -386,6 +412,8 @@ export function createLobbyState(): GameState {
     log: [],
     lossReason: null,
     rngState: 0,
+    soloJestersUsed: 0,
+    victoryMedal: null,
   };
 }
 
@@ -402,6 +430,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return activateJester(draft, action);
     case 'DEFEND':
       return defend(draft, action);
+    case 'USE_SOLO_JESTER':
+      return useSoloJester(draft, action);
     default:
       return fail('Unknown action.');
   }

@@ -339,5 +339,78 @@ describe('winning', () => {
     expect(res.ok).toBe(true);
     const newState = (res as any).state as GameState;
     expect(newState.phase).toBe('WON');
+    expect(newState.victoryMedal).toBeNull(); // 2-player games don't score a medal
+  });
+
+  it('awards Gold in a solo win with 0 solo Jesters used', () => {
+    let state = startGame('win-solo-gold', 1);
+    state.castleDeck = [];
+    state.currentEnemy!.rank = 'K';
+    state.currentEnemy!.maxHealth = 40;
+    state.currentEnemy!.damageTaken = 39;
+    const card = suited('H', '2');
+    state = rig(state, [card]);
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    expect(newState.phase).toBe('WON');
+    expect(newState.victoryMedal).toBe('gold');
+  });
+
+  it('downgrades the medal to Silver then Bronze as solo Jesters are used', () => {
+    let state = startGame('win-solo-bronze', 1);
+    let res = applyAction(state, { type: 'USE_SOLO_JESTER', playerId: state.players[0].id });
+    expect(res.ok).toBe(true);
+    state = (res as any).state;
+    res = applyAction(state, { type: 'USE_SOLO_JESTER', playerId: state.players[0].id });
+    expect(res.ok).toBe(true);
+    state = (res as any).state;
+    expect(state.soloJestersUsed).toBe(2);
+
+    state.castleDeck = [];
+    state.currentEnemy!.rank = 'K';
+    state.currentEnemy!.maxHealth = 40;
+    state.currentEnemy!.damageTaken = 39;
+    const card = suited('H', '2');
+    state = rig(state, [card]);
+    res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    expect(newState.phase).toBe('WON');
+    expect(newState.victoryMedal).toBe('bronze');
+  });
+});
+
+describe('solo Jester', () => {
+  it('discards the whole hand and refills to the hand limit, without consuming the turn', () => {
+    let state = startGame('solo-jester', 1);
+    const originalHandIds = state.players[0].hand.map((c) => c.id);
+    const tavernBefore = state.tavernDeck.length;
+    const res = applyAction(state, { type: 'USE_SOLO_JESTER', playerId: state.players[0].id });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    expect(newState.players[0].hand.length).toBe(newState.maxHandSize);
+    expect(newState.players[0].hand.some((c) => originalHandIds.includes(c.id))).toBe(false);
+    expect(newState.discardPile.length).toBe(originalHandIds.length);
+    expect(tavernBefore - newState.tavernDeck.length).toBe(newState.maxHandSize);
+    expect(newState.soloJestersUsed).toBe(1);
+    expect(newState.turnPhase).toBe('AWAIT_PLAY');
+    expect(newState.currentPlayerIndex).toBe(0);
+  });
+
+  it('rejects a third use', () => {
+    let state = startGame('solo-jester-limit', 1);
+    let res = applyAction(state, { type: 'USE_SOLO_JESTER', playerId: state.players[0].id });
+    state = (res as any).state;
+    res = applyAction(state, { type: 'USE_SOLO_JESTER', playerId: state.players[0].id });
+    state = (res as any).state;
+    res = applyAction(state, { type: 'USE_SOLO_JESTER', playerId: state.players[0].id });
+    expect(res.ok).toBe(false);
+  });
+
+  it('rejects use in a multiplayer game', () => {
+    const state = startGame('solo-jester-multiplayer', 2);
+    const res = applyAction(state, { type: 'USE_SOLO_JESTER', playerId: state.players[0].id });
+    expect(res.ok).toBe(false);
   });
 });

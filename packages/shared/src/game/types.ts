@@ -43,6 +43,9 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
 /** What the current player must do next. */
 export type TurnPhase = 'AWAIT_PLAY' | 'AWAIT_DEFEND';
 
+/** Official solo-variant scoring: winning having flipped 0/1/2 solo Jesters. Only set for 1-player games. */
+export type VictoryMedal = 'gold' | 'silver' | 'bronze';
+
 export interface GameState {
   phase: GamePhase;
   players: PlayerState[];
@@ -61,6 +64,10 @@ export interface GameState {
   lossReason: string | null;
   /** Internal PRNG state (uint32) for in-game randomness like Hearts reshuffles. */
   rngState: number;
+  /** Solo-variant only: how many of the 2 set-aside Jesters have been flipped (discard hand, refill to max) this game. */
+  soloJestersUsed: number;
+  /** Set once on WON, only for 1-player games, based on soloJestersUsed at that moment. */
+  victoryMedal: VictoryMedal | null;
 }
 
 export interface GameEvent {
@@ -72,7 +79,8 @@ export type GameAction =
   | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
   | { type: 'YIELD'; playerId: string }
   | { type: 'ACTIVATE_JESTER'; playerId: string; cardId: string; nextPlayerId: string }
-  | { type: 'DEFEND'; playerId: string; cardIds: string[] };
+  | { type: 'DEFEND'; playerId: string; cardIds: string[] }
+  | { type: 'USE_SOLO_JESTER'; playerId: string };
 
 export type EngineResult =
   | { ok: true; state: GameState; events: GameEvent[] }
@@ -100,6 +108,8 @@ export interface ClientGameState {
   maxHandSize: number;
   log: GameEvent[];
   lossReason: string | null;
+  soloJestersUsed: number;
+  victoryMedal: VictoryMedal | null;
   you: {
     playerId: string;
   };

@@ -67,6 +67,24 @@ export function validatePlayShape(cards: Card[]): PlayShape | { error: string } 
   return { totalValue, suits };
 }
 
+/** Reminder text for each suit's power, shown as a tooltip on cards so a solo player can decide how to use them. */
+export const SUIT_ABILITY_TEXT: Record<Suit, string> = {
+  H: 'Hearts: shuffles that many cards from the discard pile back under the Tavern deck (a "heal").',
+  D: 'Diamonds: draws that many cards from the Tavern deck, filling players up to their hand limit.',
+  C: 'Clubs: doubles the damage dealt to the enemy this play.',
+  S: 'Spades: reduces the enemy\'s attack by that much for the rest of the fight.',
+};
+
+export const JESTER_ABILITY_TEXT =
+  'Jester: play alone (does not use your turn) to cancel the current enemy\'s suit immunity, then choose who goes next.';
+
+/** Official 1-player variant: 2 Jesters are set aside (not in the deck) and may each be flipped once. */
+export const MAX_SOLO_JESTERS = 2;
+
+export const SOLO_JESTER_ABILITY_TEXT =
+  'Solo Jester: discard your whole hand and refill to your hand limit. Usable before playing a card or before defending. ' +
+  'Winning with 0 used = Gold, 1 used = Silver, 2 used = Bronze.';
+
 export function isSuitBlockedByImmunity(suit: Suit, enemy: EnemyState): boolean {
   return suit === enemy.suit && !enemy.immunityBroken;
 }

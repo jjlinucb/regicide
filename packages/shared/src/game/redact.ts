@@ -21,6 +21,8 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     maxHandSize: state.maxHandSize,
     log: state.log,
     lossReason: state.lossReason,
+    soloJestersUsed: state.soloJestersUsed,
+    victoryMedal: state.victoryMedal,
     you: { playerId: viewerPlayerId },
   };
 }
