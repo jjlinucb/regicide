@@ -65,16 +65,24 @@ export function GamePage({
     });
   }
 
+  const isLegacy = state.ruleset === 'legacy';
+
   if (state.phase === 'WON' || state.phase === 'LOST') {
     return (
       <div className="centered-page">
-        {state.phase === 'WON' && (
+        {state.phase === 'WON' && !isLegacy && (
           <div className="victory-crest">
             <VictoryCrest />
           </div>
         )}
-        <h1>{state.phase === 'WON' ? 'Victory!' : 'Defeat'}</h1>
-        <p>{state.phase === 'WON' ? 'The realm is saved — every enemy has fallen.' : state.lossReason}</p>
+        <h1>{state.phase === 'WON' ? (isLegacy ? 'Mission Complete!' : 'Victory!') : 'Defeat'}</h1>
+        <p>
+          {state.phase === 'WON'
+            ? isLegacy
+              ? 'Every enemy has fallen — the Golden Blade Syndicate carries the day.'
+              : 'The realm is saved — every enemy has fallen.'
+            : state.lossReason}
+        </p>
         {state.phase === 'WON' && state.victoryMedal && (
           <p className={`victory-medal medal-${state.victoryMedal}`}>
             {MEDAL_INFO[state.victoryMedal].emoji} {MEDAL_INFO[state.victoryMedal].label} — used {state.soloJestersUsed} of{' '}
@@ -120,6 +128,14 @@ export function GamePage({
             </button>
           )}
         </div>
+        {isLegacy && state.jesterClaim && !state.jesterClaim.claimedBy && (
+          <div className="legacy-jester-claim-banner">
+            <span>🃏 A Jester is up for grabs — any player may claim it and attack, ignoring this enemy's immunity!</span>
+            <button type="button" className="btn" onClick={() => sendAction({ type: 'CLAIM_JESTER', playerId: myPlayerId })}>
+              Claim it
+            </button>
+          </div>
+        )}
         {state.currentEnemy && <EnemyDisplay enemy={state.currentEnemy} />}
         <DeckPiles state={state} />
         <PlayerList state={state} myPlayerId={myPlayerId} />
@@ -131,7 +147,7 @@ export function GamePage({
           <span>
             Your hand: {myHand.length} / {state.maxHandSize}
           </span>
-          {state.players.length === 1 && (
+          {state.players.length === 1 && !isLegacy && (
             <button
               type="button"
               className="btn-solo-jester"
@@ -148,10 +164,35 @@ export function GamePage({
             </button>
           )}
         </div>
-        <Hand cards={myHand} selectedIds={selectedIds} onToggle={toggleCard} interactive={isMyTurn} />
+        <Hand
+          cards={myHand}
+          selectedIds={selectedIds}
+          onToggle={toggleCard}
+          interactive={isMyTurn && state.turnPhase !== 'AWAIT_JESTER_CLAIM'}
+        />
       </div>
 
-      {isMyTurn && isLoneJester && state.turnPhase === 'AWAIT_PLAY' && (
+      {isMyTurn && isLoneJester && state.turnPhase === 'AWAIT_PLAY' && isLegacy && (
+        <div className="jester-picker">
+          <span>Play the Jester into the open — any player (including you) may then claim it and attack, ignoring immunity.</span>
+          <div className="jester-picker-choices">
+            <button
+              className="btn"
+              onClick={() => {
+                sendAction({ type: 'PLAY_JESTER', playerId: myPlayerId, cardId: selectedCards[0].id });
+                setSelectedIds(new Set());
+              }}
+            >
+              Play the Jester
+            </button>
+            <button className="btn-secondary btn" onClick={() => setSelectedIds(new Set())}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isMyTurn && isLoneJester && state.turnPhase === 'AWAIT_PLAY' && !isLegacy && (
         <JesterPicker
           state={state}
           myPlayerId={myPlayerId}
@@ -163,7 +204,7 @@ export function GamePage({
         />
       )}
 
-      {isMyTurn && !(isLoneJester && state.turnPhase === 'AWAIT_PLAY') && (
+      {isMyTurn && state.turnPhase !== 'AWAIT_JESTER_CLAIM' && !(isLoneJester && state.turnPhase === 'AWAIT_PLAY') && (
         <ConfirmPlayBar
           turnPhase={state.turnPhase}
           pendingDamage={state.pendingDamage}

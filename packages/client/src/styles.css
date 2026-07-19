@@ -477,6 +477,21 @@ button {
   font-weight: 700;
 }
 
+.legacy-card-name {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  right: 4px;
+  font-size: 0.55rem;
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-dim);
+}
+
 .confirm-bar {
   display: flex;
   align-items: center;
@@ -520,6 +535,124 @@ button {
   justify-content: center;
   padding: 20px;
   z-index: 10;
+}
+
+/* ---------- Regicide Legacy ---------- */
+
+.legacy-panel {
+  max-width: 480px;
+  text-align: left;
+}
+
+.legacy-party-summary {
+  font-size: 0.9rem;
+  color: var(--ink-dim);
+}
+
+.legacy-mission-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px;
+}
+
+.legacy-mission-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+
+.legacy-mission-row.current {
+  background: var(--bg);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.legacy-mission-row.done {
+  color: var(--success);
+}
+
+.legacy-mission-num {
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.legacy-mission-title {
+  flex: 1;
+}
+
+.legacy-mission-brief {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.legacy-mission-brief h3 {
+  margin: 0 0 6px;
+}
+
+.legacy-mission-brief p {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  color: var(--ink-dim);
+}
+
+.legacy-recruit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.legacy-recruit-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 2px solid;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  font-size: 0.85rem;
+}
+
+.legacy-recruit-glyph {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 1rem;
+}
+
+.legacy-jester-claim-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #8c6fea;
+  color: #fff8ee;
+  font-size: 0.9rem;
+}
+
+.legacy-mode-toggle {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0;
 }
 
 @media (min-width: 640px) {

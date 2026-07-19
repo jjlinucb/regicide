@@ -1,4 +1,4 @@
-import type { ClientGameState, GameAction } from './game/types.js';
+import type { Card, ClientGameState, GameAction } from './game/types.js';
 
 export interface RoomPlayerInfo {
   id: string;
@@ -13,6 +13,13 @@ export interface RoomStatePayload {
   started: boolean;
 }
 
+export interface LegacyStatePayload {
+  campaignCode: string;
+  party: Card[];
+  missionsCompleted: number[];
+  currentMission: number;
+}
+
 // Client -> server
 export interface ClientToServerEvents {
   'room:create': (payload: { name: string }, cb: (res: { ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
@@ -21,11 +28,15 @@ export interface ClientToServerEvents {
   'room:start': (payload: { code: string }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   'room:restart': (payload: { code: string }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   'game:action': (payload: { code: string; action: GameAction }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
+  'legacy:create': (payload: { name: string }, cb: (res: { ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
+  'legacy:resume': (payload: { code: string; name: string }, cb: (res: { ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
+  'legacy:startMission': (payload: { code: string; missionId: number }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
 }
 
 // Server -> client
 export interface ServerToClientEvents {
   'room:state': (payload: RoomStatePayload) => void;
   'game:state': (payload: ClientGameState) => void;
+  'legacy:state': (payload: LegacyStatePayload) => void;
   error: (payload: { message: string }) => void;
 }

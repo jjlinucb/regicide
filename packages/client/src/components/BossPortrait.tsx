@@ -266,11 +266,11 @@ function ShadowWraithKing({ tier, theme }: { tier: 1 | 2 | 3; theme: (typeof SUI
   );
 }
 
-export function BossPortrait({ suit, rank }: { suit: Suit; rank: Rank }) {
+export function BossPortrait({ suit, rank, label }: { suit: Suit; rank: Rank; label?: string }) {
   const tier = TIER[rank];
   const theme = SUIT_THEME[suit];
   return (
-    <svg viewBox="0 0 200 220" className="boss-svg" role="img" aria-label={`${theme.name} boss portrait`}>
+    <svg viewBox="0 0 200 220" className="boss-svg" role="img" aria-label={label ?? `${theme.name} boss portrait`}>
       <defs>
         <radialGradient id={`bossBg-${suit}`} cx="50%" cy="35%" r="80%">
           <stop offset="0%" stopColor={theme.bgLight} />

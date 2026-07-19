@@ -5,3 +5,6 @@ export * from './game/engine.js';
 export * from './game/selectors.js';
 export * from './game/redact.js';
 export * from './socketEvents.js';
+export * from './legacy/classes.js';
+export * from './legacy/party.js';
+export * from './legacy/missions.js';

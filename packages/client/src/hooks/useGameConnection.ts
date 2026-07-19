@@ -4,6 +4,7 @@ import type {
   ClientGameState,
   ClientToServerEvents,
   GameAction,
+  LegacyStatePayload,
   RoomStatePayload,
   ServerToClientEvents,
 } from '@regicide/shared';
@@ -38,6 +39,7 @@ export function useGameConnection() {
   const [session, setSession] = useState<StoredSession | null>(() => loadSession());
   const [roomState, setRoomState] = useState<RoomStatePayload | null>(null);
   const [gameState, setGameState] = useState<ClientGameState | null>(null);
+  const [legacyState, setLegacyState] = useState<LegacyStatePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rejoinAttempted, setRejoinAttempted] = useState(false);
 
@@ -54,6 +56,7 @@ export function useGameConnection() {
       if (!payload.started) setGameState(null);
     });
     socket.on('game:state', (payload) => setGameState(payload));
+    socket.on('legacy:state', (payload) => setLegacyState(payload));
     socket.on('error', (payload) => setError(payload.message));
 
     return () => {
@@ -100,6 +103,42 @@ export function useGameConnection() {
     });
   }, []);
 
+  const createLegacyCampaign = useCallback((name: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('legacy:create', { name }, (res) => {
+        if (res.ok) {
+          const next: StoredSession = { code: res.code, playerToken: res.playerToken, playerId: res.playerId };
+          saveSession(next);
+          setSession(next);
+        }
+        resolve(res.ok ? { ok: true } : res);
+      });
+    });
+  }, []);
+
+  const resumeLegacyCampaign = useCallback((code: string, name: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('legacy:resume', { code: code.toUpperCase(), name }, (res) => {
+        if (res.ok) {
+          const next: StoredSession = { code: res.code, playerToken: res.playerToken, playerId: res.playerId };
+          saveSession(next);
+          setSession(next);
+        }
+        resolve(res.ok ? { ok: true } : res);
+      });
+    });
+  }, []);
+
+  const startLegacyMission = useCallback(
+    (missionId: number): void => {
+      if (!session) return;
+      socketRef.current?.emit('legacy:startMission', { code: session.code, missionId }, (res) => {
+        if (!res.ok) setError(res.error);
+      });
+    },
+    [session],
+  );
+
   const startGame = useCallback((): void => {
     if (!session) return;
     socketRef.current?.emit('room:start', { code: session.code }, (res) => {
@@ -129,6 +168,7 @@ export function useGameConnection() {
     setSession(null);
     setRoomState(null);
     setGameState(null);
+    setLegacyState(null);
   }, []);
 
   return {
@@ -136,6 +176,7 @@ export function useGameConnection() {
     session,
     roomState,
     gameState,
+    legacyState,
     error,
     clearError: () => setError(null),
     createRoom,
@@ -144,5 +185,8 @@ export function useGameConnection() {
     restartGame,
     sendAction,
     leaveSession,
+    createLegacyCampaign,
+    resumeLegacyCampaign,
+    startLegacyMission,
   };
 }

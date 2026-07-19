@@ -1,6 +1,6 @@
 import type { Server, Socket } from 'socket.io';
 import { redactStateFor } from '@regicide/shared';
-import type { ClientToServerEvents, RoomStatePayload, ServerToClientEvents } from '@regicide/shared';
+import type { ClientToServerEvents, LegacyStatePayload, RoomStatePayload, ServerToClientEvents } from '@regicide/shared';
 import { RoomManager, type Room } from '../rooms/RoomManager.js';
 
 type IOServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -17,8 +17,20 @@ function roomStatePayload(room: Room): RoomStatePayload {
   };
 }
 
+function legacyStatePayload(room: Room): LegacyStatePayload | null {
+  if (!room.legacy) return null;
+  return {
+    campaignCode: room.legacy.campaignCode,
+    party: room.legacy.party,
+    missionsCompleted: room.legacy.missionsCompleted,
+    currentMission: room.legacy.currentMission,
+  };
+}
+
 function broadcastRoom(io: IOServer, room: Room): void {
   io.to(room.code).emit('room:state', roomStatePayload(room));
+  const legacyState = legacyStatePayload(room);
+  if (legacyState) io.to(room.code).emit('legacy:state', legacyState);
   if (room.gameState.phase !== 'LOBBY') {
     for (const playerId of room.playerOrder) {
       const player = room.players.get(playerId);
@@ -76,13 +88,42 @@ export function registerSocketHandlers(io: IOServer, socket: IOSocket, rooms: Ro
     broadcastRoom(io, result.room);
   });
 
-  socket.on('game:action', ({ code, action }, cb) => {
-    const result = rooms.applyGameAction(code, action);
+  socket.on('game:action', async ({ code, action }, cb) => {
+    const result = await rooms.applyGameAction(code, action);
     if ('error' in result) {
       cb({ ok: false, error: result.error });
       socket.emit('error', { message: result.error });
       return;
     }
+    cb({ ok: true });
+    broadcastRoom(io, result.room);
+  });
+
+  socket.on('legacy:create', async ({ name }, cb) => {
+    const trimmed = (name || '').trim().slice(0, 24) || 'Player';
+    const { room, player } = await rooms.createLegacyCampaign(trimmed);
+    player.socketId = socket.id;
+    socket.join(room.code);
+    cb({ ok: true, code: room.code, playerToken: player.token, playerId: player.id });
+    broadcastRoom(io, room);
+  });
+
+  socket.on('legacy:resume', async ({ code, name }, cb) => {
+    const trimmed = (name || '').trim().slice(0, 24) || 'Player';
+    const result = await rooms.resumeLegacyCampaign(code, trimmed);
+    if ('error' in result) return cb({ ok: false, error: result.error });
+    const { room, player } = result;
+    player.socketId = socket.id;
+    socket.join(room.code);
+    cb({ ok: true, code: room.code, playerToken: player.token, playerId: player.id });
+    broadcastRoom(io, room);
+  });
+
+  socket.on('legacy:startMission', ({ code, missionId }, cb) => {
+    const found = rooms.findPlayerBySocket(socket.id);
+    if (!found) return cb({ ok: false, error: 'Not in a room.' });
+    const result = rooms.startLegacyMission(code, found.player.id, missionId);
+    if ('error' in result) return cb({ ok: false, error: result.error });
     cb({ ok: true });
     broadcastRoom(io, result.room);
   });

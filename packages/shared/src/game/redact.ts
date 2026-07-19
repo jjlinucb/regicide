@@ -4,6 +4,7 @@ import type { ClientGameState, GameState } from './types.js';
 export function redactStateFor(state: GameState, viewerPlayerId: string): ClientGameState {
   return {
     phase: state.phase,
+    ruleset: state.ruleset,
     players: state.players.map((p) => ({
       id: p.id,
       name: p.name,
@@ -23,6 +24,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     lossReason: state.lossReason,
     soloJestersUsed: state.soloJestersUsed,
     victoryMedal: state.victoryMedal,
+    jesterClaim: state.jesterClaim,
     you: { playerId: viewerPlayerId },
   };
 }

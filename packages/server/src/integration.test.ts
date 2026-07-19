@@ -6,6 +6,7 @@ import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import type { ClientGameState, ClientToServerEvents, RoomStatePayload, ServerToClientEvents } from '@regicide/shared';
 import { RoomManager } from './rooms/RoomManager.js';
 import { registerSocketHandlers } from './socket/handlers.js';
+import { InMemoryCampaignStore } from './db/campaigns.js';
 
 type Client = ClientSocket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -44,7 +45,7 @@ describe('server integration', () => {
   beforeAll(async () => {
     httpServer = createServer();
     const io = new Server(httpServer, { cors: { origin: '*' } });
-    const rooms = new RoomManager();
+    const rooms = new RoomManager(new InMemoryCampaignStore());
     io.on('connection', (socket) => registerSocketHandlers(io, socket, rooms));
     await new Promise<void>((resolve) => httpServer.listen(0, resolve));
     port = (httpServer.address() as AddressInfo).port;

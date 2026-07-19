@@ -1,4 +1,4 @@
-import type { Card, EnemyState, Suit } from './types.js';
+import type { Card, EnemyState, LegacyEnemySpec, Suit, SuitedCard } from './types.js';
 
 const SUITS: Suit[] = ['H', 'D', 'C', 'S'];
 const NUMBER_RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10'] as const;
@@ -60,6 +60,22 @@ export function makeEnemy(suit: Suit, rank: 'J' | 'Q' | 'K'): EnemyState {
   };
 }
 
+/** Legacy-only: builds a named mission enemy with custom stats (bypasses the fixed J/Q/K stat table). */
+export function makeLegacyEnemy(spec: LegacyEnemySpec): EnemyState {
+  return {
+    suit: spec.suit,
+    rank: 'J', // unused for display in Legacy (name takes over) — kept only to satisfy EnemyState's shape.
+    name: spec.name,
+    maxHealth: spec.health,
+    baseAttack: spec.attack,
+    damageTaken: 0,
+    spadesShield: 0,
+    blockedSpadesShield: 0,
+    immunityBroken: false,
+    tableCards: [],
+  };
+}
+
 /** Builds the 12-enemy Castle deck: 4 Jacks (shuffled) on top, then Queens, then Kings on the bottom. */
 export function buildCastleDeck(rng: () => number): EnemyState[] {
   const jacks = shuffle(SUITS.map((s) => makeEnemy(s, 'J')), rng);
@@ -69,21 +85,40 @@ export function buildCastleDeck(rng: () => number): EnemyState[] {
   return [...jacks, ...queens, ...kings];
 }
 
-const JESTERS_BY_PLAYER_COUNT: Record<number, number> = { 1: 0, 2: 0, 3: 1, 4: 2 };
+export const JESTERS_BY_PLAYER_COUNT: Record<number, number> = { 1: 0, 2: 0, 3: 1, 4: 2 };
 export const MAX_HAND_SIZE_BY_PLAYER_COUNT: Record<number, number> = { 1: 8, 2: 7, 3: 6, 4: 5 };
 
-/** Builds the Tavern deck: 2-10 of every suit, the 4 Animal Companions (Aces), and jesters per player count. */
-export function buildTavernDeck(playerCount: number, rng: () => number): Card[] {
-  const cards: Card[] = [];
+/**
+ * Builds the 40 standard cards — 2-10 of every suit plus the 4 Animal Companions (Aces) — with no jesters.
+ * Shared by classic Regicide's Tavern deck and Legacy's starting 40-member party (same card set, different display).
+ */
+export function buildStandardPartyCards(): SuitedCard[] {
+  const cards: SuitedCard[] = [];
   for (const suit of SUITS) {
     for (const rank of NUMBER_RANKS) {
       cards.push({ id: nextId(), kind: 'suited', suit, rank });
     }
     cards.push({ id: nextId(), kind: 'suited', suit, rank: 'A' });
   }
-  const jesterCount = JESTERS_BY_PLAYER_COUNT[playerCount] ?? 0;
-  for (let i = 0; i < jesterCount; i++) {
+  return cards;
+}
+
+function makeJesters(count: number): Card[] {
+  const cards: Card[] = [];
+  for (let i = 0; i < count; i++) {
     cards.push({ id: nextId(), kind: 'jester' });
   }
+  return cards;
+}
+
+/** Builds the Tavern deck: 2-10 of every suit, the 4 Animal Companions (Aces), and jesters per player count. */
+export function buildTavernDeck(playerCount: number, rng: () => number): Card[] {
+  const jesterCount = JESTERS_BY_PLAYER_COUNT[playerCount] ?? 0;
+  const cards = [...buildStandardPartyCards(), ...makeJesters(jesterCount)];
   return shuffle(cards, rng);
+}
+
+/** Legacy-only: shuffles a campaign's party together with a given number of jesters into a mission's reserve deck. */
+export function buildLegacyReserveDeck(party: Card[], jesterCount: number, rng: () => number): Card[] {
+  return shuffle([...party, ...makeJesters(jesterCount)], rng);
 }
