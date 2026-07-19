@@ -9,7 +9,7 @@ export function ArtStyleToggle() {
       <span className="art-style-switch" data-on={style === 'anime'}>
         <span className="knob" />
       </span>
-      <span className={style === 'anime' ? 'active' : ''}>Anime</span>
+      <span className={style === 'anime' ? 'active' : ''}>Art</span>
     </button>
   );
 }
