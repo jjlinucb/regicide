@@ -6,6 +6,7 @@ import { CampaignLobbyPage } from './pages/CampaignLobbyPage';
 import { RewardRevealPage } from './pages/RewardRevealPage';
 import { GamePage } from './pages/GamePage';
 import { RulesPage } from './pages/RulesPage';
+import { ArtStyleToggle } from './components/ArtStyleToggle';
 
 function useRoute() {
   const [path, setPath] = useState(() => window.location.pathname);
@@ -142,6 +143,7 @@ export function App() {
 
   return (
     <div className="app">
+      <ArtStyleToggle />
       {error && (
         <div className="error-banner" onClick={clearError}>
           {error}

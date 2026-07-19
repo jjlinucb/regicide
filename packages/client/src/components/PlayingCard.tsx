@@ -1,6 +1,9 @@
 import { cardValue, JESTER_ABILITY_TEXT, SUIT_ABILITY_TEXT, SUIT_TO_CLASS, type Card } from '@regicide/shared';
+import { useArtStyle } from '../lib/artStyle';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
+/** Original chibi-face icons standing in for the suit glyph when the anime art style is on — not a copy of any suit's real symbol. */
+const ANIME_SUIT_FACE: Record<string, string> = { H: '😤', D: '😏', C: '😠', S: '😌' };
 const SUIT_NAME: Record<string, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
 const RED_SUITS = new Set(['H', 'D']);
 
@@ -58,17 +61,19 @@ export function PlayingCard({
   const rankLabel = card.rank === 'A' ? 'A' : card.rank;
   const classInfo = legacy ? SUIT_TO_CLASS[card.suit] : null;
   const style = { ...(small ? { width: 44, height: 62 } : {}), ...(classInfo ? { color: classInfo.color } : {}) };
+  const [artStyle] = useArtStyle();
+  const glyph = artStyle === 'anime' ? ANIME_SUIT_FACE[card.suit] : classInfo ? classInfo.glyph : SUIT_GLYPH[card.suit];
   return (
     <button
       type="button"
-      className={`playing-card${red ? ' red' : ''}${selected ? ' selected' : ''}`}
+      className={`playing-card${red ? ' red' : ''}${selected ? ' selected' : ''}${artStyle === 'anime' ? ' anime-art' : ''}`}
       onClick={onClick}
       style={Object.keys(style).length > 0 ? style : undefined}
       aria-label={cardLabel(card)}
       title={cardAbilityText(card)}
     >
       <span className="rank">{rankLabel}</span>
-      <span className="glyph">{classInfo ? classInfo.glyph : SUIT_GLYPH[card.suit]}</span>
+      <span className="glyph">{glyph}</span>
       {legacy && !small && <span className="legacy-card-name">{card.name}</span>}
     </button>
   );
