@@ -3,9 +3,11 @@ import { useState } from 'react';
 export function HomePage({
   onCreate,
   onJoin,
+  onShowRules,
 }: {
   onCreate: (name: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   onJoin: (code: string, name: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onShowRules: () => void;
 }) {
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
@@ -50,6 +52,9 @@ export function HomePage({
             Join
           </button>
         </div>
+        <button type="button" className="rules-link" onClick={onShowRules}>
+          How to play (Regicide &amp; Regicide Legacy)
+        </button>
       </div>
     </div>
   );

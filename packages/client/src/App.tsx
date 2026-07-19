@@ -1,9 +1,26 @@
+import { useEffect, useState } from 'react';
 import { useGameConnection } from './hooks/useGameConnection';
 import { HomePage } from './pages/HomePage';
 import { LobbyPage } from './pages/LobbyPage';
 import { GamePage } from './pages/GamePage';
+import { RulesPage } from './pages/RulesPage';
+
+function useRoute() {
+  const [path, setPath] = useState(() => window.location.pathname);
+  useEffect(() => {
+    const onPopState = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+  const navigate = (to: string) => {
+    window.history.pushState({}, '', to);
+    setPath(to);
+  };
+  return { path, navigate };
+}
 
 export function App() {
+  const { path, navigate } = useRoute();
   const {
     connected,
     session,
@@ -20,8 +37,10 @@ export function App() {
   } = useGameConnection();
 
   let body: React.ReactNode;
-  if (!session) {
-    body = <HomePage onCreate={createRoom} onJoin={joinRoom} />;
+  if (path === '/rules') {
+    body = <RulesPage onBack={() => navigate('/')} />;
+  } else if (!session) {
+    body = <HomePage onCreate={createRoom} onJoin={joinRoom} onShowRules={() => navigate('/rules')} />;
   } else if (!connected || !roomState) {
     body = (
       <div className="centered-page">

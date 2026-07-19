@@ -3,3 +3,6 @@ dist/
 .DS_Store
 *.log
 .env
+
+# Copyrighted reference material (local use only, not for redistribution)
+*.pdf
