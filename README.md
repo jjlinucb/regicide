@@ -1,6 +1,6 @@
 # Regicide
 
-A digital version of the cooperative card game [Regicide](https://www.regicidegame.com/), playable with up to 4 players over the internet.
+A digital version of the cooperative card game [Regicide](https://www.regicidegame.com/), playable with up to 4 players over the internet — plus **Regicide Legacy**, an original 12-mission campaign built on the same rules, with a permanently-growing party across four classes (Warrior/Bard/Cleric/Paladin). Pick either mode from the home screen.
 
 ## Local development
 
@@ -23,8 +23,8 @@ npm start                          # serves the built client + Socket.io from :3
 ## Tests
 
 ```
-npm test -w packages/shared        # game engine scenario tests (vitest)
-npm test -w packages/server        # server/socket integration test
+npm test -w packages/shared        # game engine scenario tests, both rulesets (vitest)
+npm test -w packages/server        # server/socket integration tests, both rulesets
 ```
 
 ## Deploying (Render, free tier)
@@ -34,4 +34,11 @@ npm test -w packages/server        # server/socket integration test
 3. Once deployed, Render gives you a public URL — that's what you share with friends.
 4. Free tier note: the service spins down after ~15 minutes idle and takes ~30-50s to wake back up on the next request. Fine for a "give it a minute" game night, just a heads up.
 
-There's no database and no auth — game state lives in memory, so a server restart mid-game loses that game. Rooms are private by a 4-character code only (not listed anywhere), which is enough for sharing with friends directly.
+There's no auth — rooms/campaigns are private by a code only (not listed anywhere), which is enough for sharing with friends directly.
+
+### Regicide Legacy persistence (optional)
+
+Classic Regicide has always been pure in-memory (a server restart mid-game loses that game — see the free-tier note above). Regicide Legacy campaigns are meant to be played over many sessions, so they *can* survive a restart if you wire up a database — but it's optional:
+
+- **No `DATABASE_URL` set (default):** campaigns still work, but progress lives in memory only, same tradeoff as classic Regicide.
+- **With `DATABASE_URL` set:** campaign progress (party roster, missions completed) persists in Postgres. Create a free database (e.g. a [Supabase](https://supabase.com) project — avoid Render's free Postgres, which auto-expires after 90 days), run `packages/server/schema.sql` against it once, then set `DATABASE_URL` as an env var (locally via `.env`, or in Render's dashboard / `render.yaml`).
