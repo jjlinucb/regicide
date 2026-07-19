@@ -199,6 +199,20 @@ button {
   box-shadow: 0 8px 24px rgba(193, 101, 29, 0.15);
 }
 
+.boss-playing-card .playing-card {
+  width: 130px;
+  height: 182px;
+  cursor: default;
+}
+
+.boss-playing-card .playing-card .rank {
+  font-size: 2.6rem;
+}
+
+.boss-playing-card .playing-card .glyph {
+  font-size: 2.8rem;
+}
+
 .enemy-title {
   font-size: 1.4rem;
   font-weight: 700;

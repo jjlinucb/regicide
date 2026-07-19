@@ -1,5 +1,6 @@
 import type { EnemyState } from '@regicide/shared';
 import { SUIT_TO_CLASS } from '@regicide/shared';
+import { PlayingCard } from './PlayingCard';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
 const RANK_NAME: Record<string, string> = { J: 'Jack', Q: 'Queen', K: 'King' };
@@ -14,6 +15,9 @@ export function EnemyDisplay({ enemy }: { enemy: EnemyState }) {
 
   return (
     <div className="enemy-card">
+      <div className="boss-playing-card">
+        <PlayingCard card={{ id: 'boss', kind: 'suited', suit: enemy.suit, rank: enemy.rank, name: enemy.name }} />
+      </div>
       {isLegacy ? (
         <div className={`enemy-title suit-${enemy.suit}`}>
           {enemy.name}
