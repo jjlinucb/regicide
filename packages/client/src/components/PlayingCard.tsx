@@ -32,11 +32,14 @@ export function PlayingCard({
   selected,
   onClick,
   small,
+  blocked,
 }: {
   card: Card;
   selected?: boolean;
   onClick?: () => void;
   small?: boolean;
+  /** True when this card's suit power currently has no effect on the boss (immune, unbroken). */
+  blocked?: boolean;
 }) {
   if (card.kind === 'jester') {
     return (
@@ -59,18 +62,20 @@ export function PlayingCard({
   const classInfo = legacy ? SUIT_TO_CLASS[card.suit] : null;
   const style = { ...(small ? { width: 44, height: 62 } : {}), ...(classInfo ? { color: classInfo.color } : {}) };
   const glyph = classInfo ? classInfo.glyph : SUIT_GLYPH[card.suit];
+  const abilityText = cardAbilityText(card);
   return (
     <button
       type="button"
-      className={`playing-card${red ? ' red' : ''}${selected ? ' selected' : ''}`}
+      className={`playing-card${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}`}
       onClick={onClick}
       style={Object.keys(style).length > 0 ? style : undefined}
       aria-label={cardLabel(card)}
-      title={cardAbilityText(card)}
+      title={blocked ? `${abilityText} — no effect on this boss` : abilityText}
     >
       <span className="rank">{rankLabel}</span>
       <span className="glyph">{glyph}</span>
       {legacy && !small && <span className="legacy-card-name">{card.name}</span>}
+      {blocked && !small && <span className="no-effect-badge">No effect</span>}
     </button>
   );
 }

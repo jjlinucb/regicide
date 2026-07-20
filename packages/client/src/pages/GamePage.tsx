@@ -169,6 +169,7 @@ export function GamePage({
           selectedIds={selectedIds}
           onToggle={toggleCard}
           interactive={isMyTurn && state.turnPhase !== 'AWAIT_JESTER_CLAIM'}
+          enemy={state.currentEnemy}
         />
       </div>
 

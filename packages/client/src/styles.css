@@ -199,10 +199,49 @@ button {
   box-shadow: 0 8px 24px rgba(193, 101, 29, 0.15);
 }
 
+.boss-playing-card {
+  position: relative;
+  display: inline-block;
+}
+
 .boss-playing-card .playing-card {
   width: 130px;
   height: 182px;
   cursor: default;
+}
+
+.corruption-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.corruption-overlay .crack-line {
+  stroke: #1a1015;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+.corruption-overlay .crack-thin {
+  stroke-width: 1.2;
+  opacity: 0.4;
+}
+
+.corruption-overlay .vine-line {
+  stroke: #3c5a2e;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  fill: none;
+  opacity: 0.65;
+}
+
+.corruption-overlay .thorns path {
+  fill: #3c5a2e;
+  opacity: 0.7;
 }
 
 .boss-playing-card .playing-card .rank {
@@ -453,6 +492,28 @@ button {
 
 .playing-card.red {
   color: var(--heart);
+}
+
+.playing-card.blocked {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}
+
+.playing-card.blocked.selected {
+  opacity: 0.65;
+}
+
+.no-effect-badge {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
 }
 
 .playing-card.jester {
