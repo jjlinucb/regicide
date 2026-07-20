@@ -74,8 +74,8 @@ export function PlayingCard({
     >
       <span className="rank">{rankLabel}</span>
       <span className="glyph">{glyph}</span>
-      {legacy && !small && <span className="legacy-card-name">{card.name}</span>}
-      {blocked && !small && <span className="no-effect-badge">No effect</span>}
+      {legacy && !small && <span className="legacy-card-name">{blocked ? 'No effect' : card.name}</span>}
+      {blocked && !small && !legacy && <span className="no-effect-badge">No effect</span>}
     </button>
   );
 }
