@@ -6,3 +6,4 @@ dist/
 
 # Copyrighted reference material (local use only, not for redistribution)
 *.pdf
+tutorial_vids/*.mp4

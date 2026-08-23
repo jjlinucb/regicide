@@ -1,5 +1,14 @@
-import type { Card, EngineResult, GameAction, GameState, PlayerState, Suit } from './types.js';
-import { buildCastleDeck, buildLegacyReserveDeck, buildTavernDeck, makeLegacyEnemy, makeRng, MAX_HAND_SIZE_BY_PLAYER_COUNT } from './deck.js';
+import type { Card, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit } from './types.js';
+import {
+  buildCastleDeck,
+  buildEndlessCastleDeck,
+  buildEndlessTavernDeck,
+  buildLegacyReserveDeck,
+  buildTavernDeck,
+  makeLegacyEnemy,
+  makeRng,
+  MAX_HAND_SIZE_BY_PLAYER_COUNT,
+} from './deck.js';
 import { cardValue, currentEnemyAttack, isSuitBlockedByImmunity, MAX_SOLO_JESTERS, validatePlayShape } from './rules.js';
 import { classForSuit } from '../legacy/classes.js';
 
@@ -109,12 +118,13 @@ function drawOneCard(state: GameState, player: PlayerState): boolean {
   return true;
 }
 
-function resolveDiamonds(state: GameState, attackValue: number): void {
+function resolveDiamonds(state: GameState, attackValue: number, bonus = 0): void {
   let drawn = 0;
   let idx = state.currentPlayerIndex;
   let consecutiveSkips = 0;
   const n = state.players.length;
-  while (drawn < attackValue) {
+  const target = attackValue + bonus;
+  while (drawn < target) {
     if (state.tavernDeck.length === 0) break;
     const candidate = state.players[idx % n];
     if (candidate.hand.length < state.maxHandSize) {
@@ -127,51 +137,63 @@ function resolveDiamonds(state: GameState, attackValue: number): void {
     }
     idx += 1;
   }
-  if (drawn > 0) log(state, `${powerLabel(state, 'D')}: ${drawn} card(s) drawn.`);
+  if (drawn > 0) log(state, `${powerLabel(state, 'D')}: ${drawn} card(s) drawn${bonus > 0 ? ' (Inspire)' : ''}.`);
 }
 
-function resolveHearts(state: GameState, attackValue: number): void {
+function resolveHearts(state: GameState, attackValue: number, bonus = 0): void {
   const shuffled = shuffleWithState(state.discardPile, state);
-  const healCount = Math.min(attackValue, shuffled.length);
+  const healCount = Math.min(attackValue + bonus, shuffled.length);
   const healed = shuffled.slice(0, healCount);
   const remaining = shuffled.slice(healCount);
   state.tavernDeck.push(...healed); // "under the tavern deck" = bottom
   state.discardPile = remaining;
-  if (healCount > 0) log(state, `${powerLabel(state, 'H')}: ${healCount} card(s) shuffled back under the Tavern deck.`);
+  if (healCount > 0) log(state, `${powerLabel(state, 'H')}: ${healCount} card(s) shuffled back under the Tavern deck${bonus > 0 ? ' (Revive)' : ''}.`);
+}
+
+/** True if any played card carries the given signature ability (Legacy-only; see types.SpecialAbilityId). */
+function hasSpecial(cards: Card[], ability: SpecialAbilityId): boolean {
+  return cards.some((c) => c.kind === 'suited' && c.special === ability);
 }
 
 /**
- * Resolves suit/class powers for a play of the given total value against the current enemy. Returns whether damage should be doubled.
- * `ignoreImmunity` is Legacy-only: true for an attack combined with a claimed Jester, which ignores immunity for that attack only
- * (unlike classic Regicide's Jester, this does NOT permanently set enemy.immunityBroken).
+ * Resolves suit/class powers for a play of the given total value against the current enemy. Returns the damage
+ * multiplier to apply (1 normally, 2 for Clubs, 3 for Clubs + a Cleave card). `ignoreImmunity` is Legacy-only:
+ * true for an attack combined with a claimed Jester, which ignores immunity for that attack only (unlike classic
+ * Regicide's Jester, this does NOT permanently set enemy.immunityBroken).
  */
-function resolveSuitPowers(state: GameState, suits: ('H' | 'D' | 'C' | 'S')[], totalValue: number, ignoreImmunity = false): boolean {
+function resolveSuitPowers(state: GameState, cards: Card[], suits: ('H' | 'D' | 'C' | 'S')[], totalValue: number, ignoreImmunity = false): number {
   const enemy = state.currentEnemy!;
   const blocked = (s: 'H' | 'D' | 'C' | 'S') => !ignoreImmunity && isSuitBlockedByImmunity(s, enemy);
   const immuneNoun = state.ruleset === 'legacy' ? 'class' : 'suit';
 
   if (suits.includes('H')) {
     if (blocked('H')) log(state, `${powerLabel(state, 'H')} blocked — the enemy is immune to its own ${immuneNoun}.`);
-    else resolveHearts(state, totalValue);
+    else resolveHearts(state, totalValue, hasSpecial(cards, 'REVIVE') ? 2 : 0);
   }
   if (suits.includes('D')) {
     if (blocked('D')) log(state, `${powerLabel(state, 'D')} blocked — the enemy is immune to its own ${immuneNoun}.`);
-    else resolveDiamonds(state, totalValue);
+    else resolveDiamonds(state, totalValue, hasSpecial(cards, 'INSPIRE') ? 2 : 0);
   }
-  let clubsDoubled = false;
+  let clubsMultiplier = 1;
   if (suits.includes('C')) {
     if (blocked('C')) log(state, `${powerLabel(state, 'C')} blocked — the enemy is immune to its own ${immuneNoun}.`);
-    else clubsDoubled = true;
+    else {
+      clubsMultiplier = hasSpecial(cards, 'CLEAVE') ? 3 : 2;
+      if (clubsMultiplier === 3) log(state, `${powerLabel(state, 'C')}: damage tripled (Cleave).`);
+    }
   }
   if (suits.includes('S')) {
     if (blocked('S')) {
       enemy.blockedSpadesShield += totalValue;
       log(state, `${powerLabel(state, 'S')} blocked — the enemy is immune to its own ${immuneNoun} (shield banked for later).`);
+    } else if (hasSpecial(cards, 'BULWARK')) {
+      enemy.spadesShield = enemy.baseAttack;
+      log(state, `${powerLabel(state, 'S')}: the enemy's attack is reduced to 0 (Bulwark).`);
     } else {
       enemy.spadesShield += totalValue;
     }
   }
-  return clubsDoubled;
+  return clubsMultiplier;
 }
 
 function enemyLabel(enemy: { name?: string; rank: 'J' | 'Q' | 'K'; suit: string }): string {
@@ -265,6 +287,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.soloJestersUsed = 0;
   state.victoryMedal = null;
   state.jesterClaim = null;
+  state.endlessLoop = 0;
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -314,8 +337,53 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.soloJestersUsed = 0;
   state.victoryMedal = null;
   state.jesterClaim = null;
+  state.endlessLoop = 0;
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
+  return ok(state);
+}
+
+/**
+ * Classic Regicide only: continues a WON game into another round instead of ending it. Kings join the Tavern
+ * deck as playable cards (worth 20 per rules.cardValue) and the Castle deck is rebuilt scaled up by the loop
+ * count, so the fight escalates indefinitely.
+ */
+function startEndlessRound(state: GameState): EngineResult {
+  if (state.phase !== 'WON') return fail('Endless Mode can only be started after winning.');
+  if (state.ruleset !== 'regicide') return fail('Endless Mode is only available in classic Regicide.');
+
+  const n = state.players.length;
+  const loop = state.endlessLoop + 1;
+  const rng = () => nextRandom(state);
+  const castleDeck = buildEndlessCastleDeck(loop, rng);
+  const tavernDeck = buildEndlessTavernDeck(n, rng);
+
+  for (const player of state.players) {
+    player.hand = [];
+  }
+  for (const player of state.players) {
+    for (let i = 0; i < state.maxHandSize; i++) {
+      const card = tavernDeck.shift();
+      if (card) player.hand.push(card);
+    }
+  }
+
+  state.phase = 'IN_PROGRESS';
+  state.currentPlayerIndex = 0;
+  state.turnPhase = 'AWAIT_PLAY';
+  state.pendingDamage = 0;
+  state.castleDeck = castleDeck.slice(1);
+  state.currentEnemy = castleDeck[0];
+  state.tavernDeck = tavernDeck;
+  state.discardPile = [];
+  state.lastActionWasYield = state.players.map(() => false);
+  state.lossReason = null;
+  state.soloJestersUsed = 0;
+  state.victoryMedal = null;
+  state.jesterClaim = null;
+  state.endlessLoop = loop;
+
+  log(state, `Endless Round ${loop} begins! Kings now walk among the Tavern deck. First enemy: ${enemyLabel(state.currentEnemy)}.`);
   return ok(state);
 }
 
@@ -353,8 +421,8 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
     state,
     `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${shape.totalValue}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
   );
-  const clubsDoubled = resolveSuitPowers(state, shape.suits, shape.totalValue, Boolean(claimedJester));
-  const damage = shape.totalValue * (clubsDoubled ? 2 : 1);
+  const damageMultiplier = resolveSuitPowers(state, cards, shape.suits, shape.totalValue, Boolean(claimedJester));
+  const damage = shape.totalValue * damageMultiplier;
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
   const defeated = dealDamageAndCheckDefeat(state, damage);
@@ -555,6 +623,7 @@ export function createLobbyState(): GameState {
     soloJestersUsed: 0,
     victoryMedal: null,
     jesterClaim: null,
+    endlessLoop: 0,
   };
 }
 
@@ -579,6 +648,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return defend(draft, action);
     case 'USE_SOLO_JESTER':
       return useSoloJester(draft, action);
+    case 'START_ENDLESS_ROUND':
+      return startEndlessRound(draft);
     default:
       return fail('Unknown action.');
   }

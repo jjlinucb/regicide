@@ -26,6 +26,11 @@ function recruit(name: string, cls: ClassId, rank: RecruitSpec['rank']): Recruit
   return { name, class: cls, rank };
 }
 
+/** A standout reward: same as recruit(), but also grants the class's signature ability permanently. */
+function specialRecruit(name: string, cls: ClassId, rank: RecruitSpec['rank']): RecruitSpec {
+  return { name, class: cls, rank, special: true };
+}
+
 /** Converts a mission's enemy specs into the engine's LegacyEnemySpec shape (suit-keyed). */
 export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemySpec[] {
   return enemies.map((e) => ({
@@ -85,7 +90,7 @@ export const MISSIONS: Mission[] = [
     story:
       "A noble house has split in two, each half convinced the other is corrupted. Both are right, and both are wrong — the rot took root at the head of the table, in a duke and his sharp-tongued sister.",
     enemies: [enemy('Duke Ashen', 'WARRIOR', 34, 16), enemy('Lady Vire', 'BARD', 30, 15)],
-    reward: { recruits: [recruit('Kharsa Doomstrike', 'WARRIOR', '10')] },
+    reward: { recruits: [specialRecruit('Kharsa Doomstrike', 'WARRIOR', '10')] },
   },
   {
     id: 6,
@@ -121,7 +126,7 @@ export const MISSIONS: Mission[] = [
       'A self-styled inquisition has been "purifying" villages along the eastern road — burning the corrupted ' +
       'and the merely unlucky in equal measure. Its leaders have started to believe their own cause is holy.',
     enemies: [enemy('Inquisitor Bale', 'PALADIN', 42, 20), enemy('Executioner Vray', 'WARRIOR', 40, 19)],
-    reward: { recruits: [recruit('Matron Cyrene', 'CLERIC', '10')] },
+    reward: { recruits: [specialRecruit('Matron Cyrene', 'CLERIC', '10')] },
   },
   {
     id: 10,
@@ -130,7 +135,7 @@ export const MISSIONS: Mission[] = [
       'The Syndicate finally traces the corruption to its source: a sanctum built to contain something far ' +
       'older than any of the fights that came before it, its wards cracked from the inside out.',
     enemies: [enemy('Sanctum Warden', 'PALADIN', 36, 17), enemy('Sanctum Cantor', 'BARD', 40, 19), enemy('Sanctum Reaver', 'WARRIOR', 44, 21)],
-    reward: { recruits: [recruit('Maestro Voss', 'BARD', '10'), recruit('Kade Ironsong', 'WARRIOR', '9')] },
+    reward: { recruits: [specialRecruit('Maestro Voss', 'BARD', '10'), recruit('Kade Ironsong', 'WARRIOR', '9')] },
   },
   {
     id: 11,
@@ -139,7 +144,7 @@ export const MISSIONS: Mission[] = [
       "It has a name now, whispered out of the sanctum's ruins: the Rot King. These three stand between the " +
       'Syndicate and its throne, and none of them plan to move.',
     enemies: [enemy('Herald of Rot', 'CLERIC', 40, 19), enemy('Rot-Touched Champion', 'WARRIOR', 44, 21), enemy('The Last Ward', 'PALADIN', 48, 23)],
-    reward: { recruits: [recruit('Lord Bastian Vane', 'PALADIN', '10')] },
+    reward: { recruits: [specialRecruit('Lord Bastian Vane', 'PALADIN', '10')] },
   },
   {
     id: 12,
@@ -148,7 +153,7 @@ export const MISSIONS: Mission[] = [
       'The throne room is quiet in the way a held breath is quiet. What sits on the throne was a king once, ' +
       'before the rot wore his crown as a mask — and the Golden Blade Syndicate came all this way to take it back off.',
     enemies: [enemy('Herald of Rot', 'CLERIC', 40, 20), enemy('Rot-Touched Champion', 'WARRIOR', 46, 22), enemy('The Rot King', 'PALADIN', 60, 28)],
-    reward: { recruits: [recruit('Champion of the Golden Blade', 'WARRIOR', '10')] },
+    reward: { recruits: [specialRecruit('Champion of the Golden Blade', 'WARRIOR', '10')] },
   },
 ];
 

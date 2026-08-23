@@ -66,6 +66,14 @@ button {
   letter-spacing: 0.02em;
 }
 
+.version-tag {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink-dim);
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
 .panel {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -376,6 +384,17 @@ button {
   color: var(--accent);
 }
 
+.endless-badge {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff8ee;
+  letter-spacing: 0.02em;
+}
+
 /* ---------- Hand & cards ---------- */
 
 .hand-area {
@@ -542,6 +561,20 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--ink-dim);
+}
+
+.playing-card.special {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 3px 10px rgba(193, 101, 29, 0.3);
+}
+
+.special-badge {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--accent);
 }
 
 .confirm-bar {
