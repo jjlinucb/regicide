@@ -1,5 +1,22 @@
 import { MISSIONS } from '@regicide/shared';
-import type { LegacyStatePayload, RoomStatePayload } from '@regicide/shared';
+import type { LegacySavePayload, LegacyStatePayload, RoomStatePayload } from '@regicide/shared';
+
+/** Downloads the campaign's current progress as a JSON save file — a local backup independent of server persistence. */
+function downloadSave(legacyState: LegacyStatePayload): void {
+  const save: LegacySavePayload = {
+    party: legacyState.party,
+    missionsCompleted: legacyState.missionsCompleted,
+    currentMission: legacyState.currentMission,
+    permanentRules: legacyState.permanentRules,
+  };
+  const blob = new Blob([JSON.stringify(save, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `regicide-legacy-${legacyState.campaignCode}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function CampaignLobbyPage({
   roomState,
@@ -70,6 +87,14 @@ export function CampaignLobbyPage({
             )}
           </div>
         )}
+
+        <button className="btn btn-secondary" onClick={() => downloadSave(legacyState)}>
+          Download Save
+        </button>
+        <p style={{ fontSize: '0.8rem', color: 'var(--ink-dim)', margin: 0 }}>
+          Grabs your party and mission progress as a JSON file — keep it as a backup, or use "Restore from a save"
+          on the home screen to pick up your campaign anywhere.
+        </p>
 
         <button className="btn btn-secondary" onClick={onLeave}>
           Leave

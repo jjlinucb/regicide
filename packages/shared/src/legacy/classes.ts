@@ -1,16 +1,21 @@
 import type { SpecialAbilityId, Suit } from '../game/types.js';
 
-export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN';
+export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE';
 
 /**
- * Regicide Legacy's four classes map 1:1 onto classic Regicide's four suits — Warrior=Clubs (double damage),
+ * Regicide Legacy's four base classes map 1:1 onto classic Regicide's four suits — Warrior=Clubs (double damage),
  * Bard=Diamonds (draw), Cleric=Hearts (heal), Paladin=Spades (reduce enemy strength). Internally a Legacy party
  * card IS a suited card (see legacy/party.ts); this table is purely the display layer so suit letters never
  * leak into Legacy UI text.
+ *
+ * Mage (introduced Mission 3) is the odd one out: it has no suit of its own (there's no 5th suit in a standard
+ * deck). A Mage card keeps whatever suit it was printed with, purely for immunity bookkeeping, but its class
+ * power never joins the combined suit-power resolution — see SuitedCard.arcane and engine.ts's resolveArcaneBolts.
  */
 export interface ClassTheme {
   id: ClassId;
-  suit: Suit;
+  /** Absent only for MAGE — see class doc above. */
+  suit?: Suit;
   name: string;
   tag: string;
   glyph: string;
@@ -66,6 +71,16 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     specialName: 'Bulwark',
     specialText: 'Bulwark: reduces the enemy\'s attack to 0 for the rest of the fight.',
   },
+  MAGE: {
+    id: 'MAGE',
+    name: 'Mage',
+    tag: 'Arcane Bolt',
+    glyph: '✦',
+    color: '#5b3f8c',
+    specialAbility: 'ARCANE_SURGE',
+    specialName: 'Arcane Surge',
+    specialText: 'Arcane Surge: this Mage\'s arcane bolt hits for double its own card value.',
+  },
 };
 
 export const SUIT_TO_CLASS: Record<Suit, ClassTheme> = {
@@ -77,4 +92,12 @@ export const SUIT_TO_CLASS: Record<Suit, ClassTheme> = {
 
 export function classForSuit(suit: Suit): ClassTheme {
   return SUIT_TO_CLASS[suit];
+}
+
+/**
+ * A Legacy party card's real class theme. Almost always its suit's class — except a Mage card, whose suit is
+ * only along for immunity bookkeeping (see SuitedCard.arcane), so it must be checked first.
+ */
+export function classForCard(card: { suit: Suit; arcane?: boolean }): ClassTheme {
+  return card.arcane ? CLASS_THEME.MAGE : SUIT_TO_CLASS[card.suit];
 }

@@ -158,7 +158,7 @@ function LegacyTab() {
     <>
       <MountainBanner
         title="Regicide Legacy"
-        subtitle="A 12-mission campaign for the Golden Blade Syndicate — your party grows, and so do the threats."
+        subtitle="A growing campaign for the Golden Blade Syndicate — your party grows, and so do the threats."
       />
       <div className="rules-body">
         <section className="rules-section">
@@ -166,14 +166,13 @@ function LegacyTab() {
           <p>
             Legacy takes the same four-step heartbeat as Regicide and wraps it in a campaign. Instead of one deck of
             playing cards, you're fielding 40 named members of the Golden Blade Syndicate — a mercenary guild whose
-            roster permanently grows (and sometimes shrinks) as you complete each of the 12 missions. Suits become
-            classes, enemies get names and mission-specific twists, and choices you make ripple into every future
-            session.
+            roster permanently grows (and sometimes shrinks) as you complete each mission. Suits become classes,
+            enemies get names and mission-specific twists, and choices you make ripple into every future session.
           </p>
         </section>
 
         <section className="rules-section">
-          <h2>The Four Classes</h2>
+          <h2>The Classes</h2>
           <div className="rules-grid">
             <ClassCard icon="⚔" name="Warrior" tag="Double Damage" color="#8a3b3b">
               Plays like Clubs — the attack's damage is doubled against the enemy's health.
@@ -186,6 +185,10 @@ function LegacyTab() {
             </ClassCard>
             <ClassCard icon="🛡" name="Paladin" tag="Reduce Strength" color="#3f4f6b">
               Plays like Spades — knocks down the enemy's strength for the rest of the fight.
+            </ClassCard>
+            <ClassCard icon="✦" name="Mage" tag="Arcane Bolt" color="#5b3f8c">
+              Unlocked at Mission 3. No suit power of its own — instead it fires its own bolt, at its own card's
+              strength, before the rest of the attack resolves. Never blocked by an enemy's suit immunity.
             </ClassCard>
           </div>
         </section>

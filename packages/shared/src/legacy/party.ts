@@ -71,6 +71,8 @@ export interface RecruitSpec {
   rank: NonRoyalRank;
   /** True for a standout reward: grants the recruit's class's signature ability permanently, alongside their name. */
   special?: boolean;
+  /** Required for MAGE recruits only — Mage has no suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */
+  suit?: Suit;
 }
 
 /**
@@ -80,12 +82,15 @@ export interface RecruitSpec {
  */
 export function buildRecruitCard(spec: RecruitSpec): Card {
   const id = `recruit-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  const suit = CLASS_THEME[spec.class].suit ?? spec.suit;
+  if (!suit) throw new Error(`Recruit "${spec.name}" (${spec.class}) needs an explicit suit.`);
   return {
     id,
     kind: 'suited',
-    suit: CLASS_THEME[spec.class].suit,
+    suit,
     rank: spec.rank,
     name: spec.name,
+    ...(spec.class === 'MAGE' ? { arcane: true } : {}),
     ...(spec.special ? { special: CLASS_THEME[spec.class].specialAbility } : {}),
   };
 }

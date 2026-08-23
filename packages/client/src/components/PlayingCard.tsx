@@ -1,4 +1,4 @@
-import { cardValue, JESTER_ABILITY_TEXT, SUIT_ABILITY_TEXT, SUIT_TO_CLASS, type Card } from '@regicide/shared';
+import { cardValue, classForCard, JESTER_ABILITY_TEXT, SUIT_ABILITY_TEXT, type Card } from '@regicide/shared';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
 const SUIT_NAME: Record<string, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
@@ -9,10 +9,16 @@ function isLegacyCard(card: Card): card is Extract<Card, { kind: 'suited' }> & {
   return card.kind === 'suited' && Boolean(card.name);
 }
 
+/** Classic Regicide Endless Mode only: a King pushed past its ceiling shows as "K+N" (see SuitedCard.tier). */
+function tieredRankLabel(card: Extract<Card, { kind: 'suited' }>): string {
+  const base = card.rank === 'A' ? 'A' : card.rank;
+  return card.tier ? `${base}+${card.tier}` : base;
+}
+
 export function cardLabel(card: Card): string {
   if (card.kind === 'jester') return 'Jester';
-  const rankLabel = card.rank === 'A' ? 'A' : card.rank;
-  if (isLegacyCard(card)) return `${rankLabel} ${SUIT_TO_CLASS[card.suit].glyph}`;
+  const rankLabel = tieredRankLabel(card);
+  if (isLegacyCard(card)) return `${rankLabel} ${classForCard(card).glyph}`;
   return `${rankLabel}${SUIT_GLYPH[card.suit]}`;
 }
 
@@ -21,11 +27,12 @@ export function cardAbilityText(card: Card): string {
   if (card.kind === 'jester') return JESTER_ABILITY_TEXT;
   const rankLabel = card.rank === 'A' ? 'Ace' : card.rank;
   if (isLegacyCard(card)) {
-    const cls = SUIT_TO_CLASS[card.suit];
+    const cls = classForCard(card);
     const specialSuffix = card.special ? ` ${cls.specialText}` : '';
     return `${card.name} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}`;
   }
-  return `${rankLabel} of ${SUIT_NAME[card.suit]} — value ${cardValue(card)}. ${SUIT_ABILITY_TEXT[card.suit]}`;
+  const tierSuffix = card.tier ? ` (upgraded ${card.tier} tier${card.tier > 1 ? 's' : ''} past King, from an Endless Mode win)` : '';
+  return `${rankLabel} of ${SUIT_NAME[card.suit]} — value ${cardValue(card)}${tierSuffix}. ${SUIT_ABILITY_TEXT[card.suit]}`;
 }
 
 export function PlayingCard({
@@ -59,8 +66,8 @@ export function PlayingCard({
   }
   const legacy = isLegacyCard(card);
   const red = !legacy && RED_SUITS.has(card.suit);
-  const rankLabel = card.rank === 'A' ? 'A' : card.rank;
-  const classInfo = legacy ? SUIT_TO_CLASS[card.suit] : null;
+  const rankLabel = tieredRankLabel(card);
+  const classInfo = legacy ? classForCard(card) : null;
   const style = { ...(small ? { width: 44, height: 62 } : {}), ...(classInfo ? { color: classInfo.color } : {}) };
   const glyph = classInfo ? classInfo.glyph : SUIT_GLYPH[card.suit];
   const abilityText = cardAbilityText(card);

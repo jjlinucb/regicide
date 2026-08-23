@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { applyAction, createLobbyState } from '@regicide/shared';
-import type { Card, GameAction, GameState } from '@regicide/shared';
-import { applyReward, buildInitialParty, getMission, JESTERS_BY_PLAYER_COUNT, missionEnemiesToSpecs } from '@regicide/shared';
+import type { Card, GameAction, GameState, LegacySavePayload } from '@regicide/shared';
+import { applyReward, buildInitialParty, getMission, JESTERS_BY_PLAYER_COUNT, MISSIONS, missionEnemiesToSpecs } from '@regicide/shared';
 import { generateRoomCode } from './roomCode.js';
 import { generateUniqueCampaignCode, type CampaignRecord, type CampaignStore } from '../db/campaigns.js';
 
@@ -182,6 +182,41 @@ export class RoomManager {
       missionsCompleted: [],
       currentMission: 1,
       permanentRules: [],
+    };
+    const player: RoomPlayer = { id: randomUUID(), token: randomUUID(), name: hostName, socketId: null, connected: true };
+    const room: Room = {
+      code: campaignCode,
+      createdAt: Date.now(),
+      hostPlayerId: player.id,
+      playerOrder: [player.id],
+      players: new Map([[player.id, player]]),
+      gameState: createLobbyState(),
+      legacy,
+    };
+    this.rooms.set(campaignCode, room);
+    await this.campaignStore.create(toRecord(room));
+    return { room, player };
+  }
+
+  /**
+   * Restores a campaign from a client-uploaded save file. Always mints a brand-new campaign code — the server
+   * may have no record of whatever code the save was originally created under (e.g. an in-memory store that's
+   * been restarted, or a save being moved to a different deployment entirely), so this creates a fresh row
+   * seeded with the save's contents rather than trying to overwrite an existing one.
+   */
+  async createLegacyCampaignFromSave(hostName: string, save: LegacySavePayload): Promise<{ room: Room; player: RoomPlayer } | { error: string }> {
+    if (!Array.isArray(save.party) || save.party.length === 0) return { error: 'Save file has no party — it looks corrupted.' };
+    if (!Array.isArray(save.missionsCompleted)) return { error: 'Save file is missing its mission history.' };
+    if (typeof save.currentMission !== 'number' || save.currentMission < 1) return { error: 'Save file has an invalid current mission.' };
+    if (save.currentMission <= MISSIONS.length && !getMission(save.currentMission)) return { error: 'Save file references an unknown mission.' };
+
+    const campaignCode = await generateUniqueCampaignCode(this.campaignStore);
+    const legacy: LegacyRoomData = {
+      campaignCode,
+      party: save.party,
+      missionsCompleted: save.missionsCompleted,
+      currentMission: save.currentMission,
+      permanentRules: Array.isArray(save.permanentRules) ? save.permanentRules : [],
     };
     const player: RoomPlayer = { id: randomUUID(), token: randomUUID(), name: hostName, socketId: null, connected: true };
     const room: Room = {
