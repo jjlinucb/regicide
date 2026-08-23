@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import type { LegacySavePayload } from '@regicide/shared';
 
 type AsyncResult = Promise<{ ok: true } | { ok: false; error: string }>;
 
@@ -7,12 +8,14 @@ export function HomePage({
   onJoin,
   onCreateLegacy,
   onResumeLegacy,
+  onRestoreLegacy,
   onShowRules,
 }: {
   onCreate: (name: string) => AsyncResult;
   onJoin: (code: string, name: string) => AsyncResult;
   onCreateLegacy: (name: string) => AsyncResult;
   onResumeLegacy: (code: string, name: string) => AsyncResult;
+  onRestoreLegacy: (name: string, save: LegacySavePayload) => AsyncResult;
   onShowRules: () => void;
 }) {
   const [mode, setMode] = useState<'regicide' | 'legacy'>('regicide');
@@ -20,6 +23,7 @@ export function HomePage({
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isLegacy = mode === 'legacy';
 
@@ -36,6 +40,20 @@ export function HomePage({
     if (!code.trim()) return setLocalError(isLegacy ? 'Enter your campaign code.' : 'Enter a room code.');
     setBusy(true);
     const res = isLegacy ? await onResumeLegacy(code.trim(), name.trim()) : await onJoin(code.trim(), name.trim());
+    setBusy(false);
+    if (!res.ok) setLocalError(res.error);
+  }
+
+  async function handleRestoreFile(file: File) {
+    if (!name.trim()) return setLocalError('Enter your name first.');
+    let save: LegacySavePayload;
+    try {
+      save = JSON.parse(await file.text());
+    } catch {
+      return setLocalError('That file is not valid JSON.');
+    }
+    setBusy(true);
+    const res = await onRestoreLegacy(name.trim(), save);
     setBusy(false);
     if (!res.ok) setLocalError(res.error);
   }
@@ -72,9 +90,25 @@ export function HomePage({
           </button>
         </div>
         {isLegacy && (
-          <p style={{ fontSize: '0.8rem', color: 'var(--ink-dim)', margin: 0 }}>
-            Your campaign code is permanent — save it to resume your party's progress anytime.
-          </p>
+          <>
+            <p style={{ fontSize: '0.8rem', color: 'var(--ink-dim)', margin: 0 }}>
+              Your campaign code is permanent — save it to resume your party's progress anytime.
+            </p>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+              Restore from a save file
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (file) handleRestoreFile(file);
+              }}
+            />
+          </>
         )}
         <button type="button" className="rules-link" onClick={onShowRules}>
           How to play (Regicide &amp; Regicide Legacy)

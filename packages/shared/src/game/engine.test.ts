@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState } from './engine.js';
+import { cardValue } from './rules.js';
 import type { Card, GameState, SuitedCard } from './types.js';
 
 function startGame(seed: string, n: number): GameState {
@@ -531,5 +532,53 @@ describe('endless mode', () => {
     const newState = (res as any).state as GameState;
     expect(newState.endlessLoop).toBe(2);
     expect(newState.currentEnemy!.baseAttack).toBeGreaterThan(firstRoundAttack);
+  });
+
+  describe('defeated-enemy rank upgrades', () => {
+    /** Rigs a game already inside the given endless loop, with the current enemy set to the given rank and 2 health. */
+    function rigLoop(loop: number, enemyRank: 'J' | 'Q' | 'K'): GameState {
+      let state = winGame(startGame('endless-upgrade', 1));
+      for (let i = 0; i < loop; i++) {
+        const res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
+        state = (res as any).state as GameState;
+        if (i < loop - 1) state = winGame(state); // only clear between rounds, not after the last one
+      }
+      expect(state.endlessLoop).toBe(loop);
+      return rig(state, [suited('C', '2')], { rank: enemyRank, maxHealth: 2 });
+    }
+
+    it('a Jack defeated in loop 1 returns to the deck upgraded to a Queen', () => {
+      const state = rigLoop(1, 'J');
+      const card = suited(state.currentEnemy!.suit, '2');
+      const res = applyAction(rig(state, [card]), { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
+      expect(res.ok).toBe(true);
+      const newState = (res as any).state as GameState;
+      const returned = newState.tavernDeck[0];
+      expect(returned.kind === 'suited' && returned.rank).toBe('Q');
+      expect(returned.kind === 'suited' && returned.tier).toBeUndefined();
+    });
+
+    it('a Queen defeated in loop 1 returns to the deck upgraded to a King', () => {
+      const state = rigLoop(1, 'Q');
+      const card = suited(state.currentEnemy!.suit, '2');
+      const res = applyAction(rig(state, [card]), { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
+      const newState = (res as any).state as GameState;
+      const returned = newState.tavernDeck[0];
+      expect(returned.kind === 'suited' && returned.rank).toBe('K');
+      expect(returned.kind === 'suited' && returned.tier).toBeUndefined();
+    });
+
+    it('a King defeated in loop 2 steps past the printed ceiling with a tier of 2, outranking a fresh King', () => {
+      const state = rigLoop(2, 'K');
+      const card = suited(state.currentEnemy!.suit, '2');
+      const res = applyAction(rig(state, [card]), { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
+      const newState = (res as any).state as GameState;
+      const returned = newState.tavernDeck[0];
+      expect(returned.kind === 'suited' && returned.rank).toBe('K');
+      expect(returned.kind === 'suited' && returned.tier).toBe(2);
+      if (returned.kind === 'suited') {
+        expect(cardValue(returned)).toBeGreaterThan(cardValue({ ...returned, tier: undefined }));
+      }
+    });
   });
 });

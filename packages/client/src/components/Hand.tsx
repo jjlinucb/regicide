@@ -2,7 +2,9 @@ import { isSuitBlockedByImmunity, type Card, type EnemyState } from '@regicide/s
 import { PlayingCard } from './PlayingCard';
 
 function isBlocked(card: Card, enemy?: EnemyState | null): boolean {
-  return card.kind === 'suited' && Boolean(enemy) && isSuitBlockedByImmunity(card.suit, enemy!);
+  // A Mage's arcane bolt isn't a suit power, so enemy suit immunity never blocks it (see engine.ts's resolveArcaneBolts).
+  if (card.kind !== 'suited' || card.arcane) return false;
+  return Boolean(enemy) && isSuitBlockedByImmunity(card.suit, enemy!);
 }
 
 export function Hand({

@@ -156,6 +156,24 @@ function hasSpecial(cards: Card[], ability: SpecialAbilityId): boolean {
 }
 
 /**
+ * Legacy-only, Mission 3+: resolves each played Mage card's arcane bolt — at that card's own value, one after
+ * another, and always before the rest of the play's class powers resolve (see resolveSuitPowers). Returns the
+ * total bonus damage to add on top of the play's normal totalValue * multiplier.
+ */
+function resolveArcaneBolts(state: GameState, cards: Card[]): number {
+  let bonus = 0;
+  for (const c of cards) {
+    if (c.kind !== 'suited' || !c.arcane) continue;
+    const base = cardValue(c);
+    const surged = c.special === 'ARCANE_SURGE';
+    const bolt = surged ? base * 2 : base;
+    bonus += bolt;
+    log(state, `${c.name ?? 'A Mage'}'s arcane bolt strikes for ${bolt}${surged ? ' (Arcane Surge)' : ''}.`);
+  }
+  return bonus;
+}
+
+/**
  * Resolves suit/class powers for a play of the given total value against the current enemy. Returns the damage
  * multiplier to apply (1 normally, 2 for Clubs, 3 for Clubs + a Cleave card). `ignoreImmunity` is Legacy-only:
  * true for an attack combined with a claimed Jester, which ignores immunity for that attack only (unlike classic
@@ -200,6 +218,23 @@ function enemyLabel(enemy: { name?: string; rank: 'J' | 'Q' | 'K'; suit: string 
   return enemy.name ?? `${enemy.rank} of ${enemy.suit}`;
 }
 
+const RANK_ORDER: ('J' | 'Q' | 'K')[] = ['J', 'Q', 'K'];
+const RANK_NAME: Record<'J' | 'Q' | 'K', string> = { J: 'Jack', Q: 'Queen', K: 'King' };
+
+/**
+ * Classic Regicide Endless Mode only: a defeated enemy's card carries its escalation into the player's own deck.
+ * Fought during endless loop N, its rank is promoted N steps up the J→Q→K chain (defeat a Jack in loop 1, it comes
+ * back a Queen; loop 2, a King). Once a promotion would go past King — there's no rank above it — the excess
+ * instead becomes `tier`, so a King defeated in loop 2 comes back a King worth two tiers more than a fresh one,
+ * stepping past both the printed ceiling and any King already sitting in the deck from an earlier, lower-tier win.
+ */
+function upgradeDefeatedRank(rank: 'J' | 'Q' | 'K', loop: number): { rank: 'J' | 'Q' | 'K'; tier: number } {
+  if (loop <= 0) return { rank, tier: 0 };
+  const idx = RANK_ORDER.indexOf(rank) + loop;
+  if (idx < RANK_ORDER.length) return { rank: RANK_ORDER[idx], tier: 0 };
+  return { rank: 'K', tier: idx - (RANK_ORDER.length - 1) };
+}
+
 /** Returns true if the enemy was defeated by this hit (win or new enemy revealed either way). */
 function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
   const enemy = state.currentEnemy!;
@@ -213,13 +248,24 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
     log(state, `${enemyLabel(enemy)} defeated!`);
   } else {
     const exact = remaining === 0;
-    const defeatedCard: Card = { id: `enemy-${enemy.suit}${enemy.rank}-${Date.now()}-${Math.floor(nextRandom(state) * 1e6)}`, kind: 'suited', suit: enemy.suit, rank: enemy.rank };
+    const upgrade = upgradeDefeatedRank(enemy.rank, state.endlessLoop);
+    const upgraded = upgrade.rank !== enemy.rank || upgrade.tier > 0;
+    const defeatedCard: Card = {
+      id: `enemy-${enemy.suit}${enemy.rank}-${Date.now()}-${Math.floor(nextRandom(state) * 1e6)}`,
+      kind: 'suited',
+      suit: enemy.suit,
+      rank: upgrade.rank,
+      ...(upgrade.tier > 0 ? { tier: upgrade.tier } : {}),
+    };
+    const upgradeNote = upgraded
+      ? ` — upgraded to a ${RANK_NAME[upgrade.rank]}${upgrade.tier > 0 ? ` (tier ${upgrade.tier} past King)` : ''} in your deck!`
+      : '';
     if (exact) {
       state.tavernDeck.unshift(defeatedCard); // top of tavern deck
-      log(state, `${enemyLabel(enemy)} defeated with an exact hit — returns to the top of the Tavern deck!`);
+      log(state, `${enemyLabel(enemy)} defeated with an exact hit — returns to the top of the Tavern deck${upgradeNote || '!'}`);
     } else {
       state.discardPile.push(defeatedCard);
-      log(state, `${enemyLabel(enemy)} defeated!`);
+      log(state, `${enemyLabel(enemy)} defeated${upgradeNote || '!'}`);
     }
   }
   state.discardPile.push(...enemy.tableCards);
@@ -421,8 +467,14 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
     state,
     `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${shape.totalValue}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
   );
-  const damageMultiplier = resolveSuitPowers(state, cards, shape.suits, shape.totalValue, Boolean(claimedJester));
-  const damage = shape.totalValue * damageMultiplier;
+  const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
+  // Mage cards' suits don't join the combined suit-power resolution below — their class power is the arcane
+  // bolt above instead, which already resolved (Mage always goes first, per legacy/classes.ts).
+  const nonArcaneSuits = Array.from(
+    new Set(cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane).map((c) => c.suit)),
+  );
+  const damageMultiplier = resolveSuitPowers(state, cards, nonArcaneSuits, shape.totalValue, Boolean(claimedJester));
+  const damage = shape.totalValue * damageMultiplier + arcaneBonus;
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
   const defeated = dealDamageAndCheckDefeat(state, damage);

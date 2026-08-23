@@ -3,18 +3,22 @@ import type { Card, EnemyState, Suit } from './types.js';
 /** Value of a card both as an attack value and as a discard-to-defend value (rules are identical for both uses). */
 export function cardValue(card: Card): number {
   if (card.kind === 'jester') return 0;
-  switch (card.rank) {
-    case 'A':
-      return 1;
-    case 'J':
-      return 10;
-    case 'Q':
-      return 15;
-    case 'K':
-      return 20;
-    default:
-      return Number(card.rank);
-  }
+  const base = (() => {
+    switch (card.rank) {
+      case 'A':
+        return 1;
+      case 'J':
+        return 10;
+      case 'Q':
+        return 15;
+      case 'K':
+        return 20;
+      default:
+        return Number(card.rank);
+    }
+  })();
+  // Classic Regicide Endless Mode only: a King pushed past its ceiling carries a tier (see types.SuitedCard.tier).
+  return base + (card.tier ?? 0) * 5;
 }
 
 export function isAnimalCompanion(card: Card): boolean {

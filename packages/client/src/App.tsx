@@ -40,6 +40,7 @@ export function App() {
     leaveSession,
     createLegacyCampaign,
     resumeLegacyCampaign,
+    restoreLegacyCampaign,
     startLegacyMission,
   } = useGameConnection();
 
@@ -66,6 +67,10 @@ export function App() {
     setMode('legacy');
     return resumeLegacyCampaign(code, name);
   }
+  function handleRestoreLegacy(name: string, save: Parameters<typeof restoreLegacyCampaign>[1]) {
+    setMode('legacy');
+    return restoreLegacyCampaign(name, save);
+  }
   function handleLeave() {
     setMode('regicide');
     leaveSession();
@@ -81,6 +86,7 @@ export function App() {
         onJoin={handleJoin}
         onCreateLegacy={handleCreateLegacy}
         onResumeLegacy={handleResumeLegacy}
+        onRestoreLegacy={handleRestoreLegacy}
         onShowRules={() => navigate('/rules')}
       />
     );

@@ -24,6 +24,7 @@ function legacyStatePayload(room: Room): LegacyStatePayload | null {
     party: room.legacy.party,
     missionsCompleted: room.legacy.missionsCompleted,
     currentMission: room.legacy.currentMission,
+    permanentRules: room.legacy.permanentRules,
   };
 }
 
@@ -111,6 +112,17 @@ export function registerSocketHandlers(io: IOServer, socket: IOSocket, rooms: Ro
   socket.on('legacy:resume', async ({ code, name }, cb) => {
     const trimmed = (name || '').trim().slice(0, 24) || 'Player';
     const result = await rooms.resumeLegacyCampaign(code, trimmed);
+    if ('error' in result) return cb({ ok: false, error: result.error });
+    const { room, player } = result;
+    player.socketId = socket.id;
+    socket.join(room.code);
+    cb({ ok: true, code: room.code, playerToken: player.token, playerId: player.id });
+    broadcastRoom(io, room);
+  });
+
+  socket.on('legacy:restore', async ({ name, save }, cb) => {
+    const trimmed = (name || '').trim().slice(0, 24) || 'Player';
+    const result = await rooms.createLegacyCampaignFromSave(trimmed, save);
     if ('error' in result) return cb({ ok: false, error: result.error });
     const { room, player } = result;
     player.socketId = socket.id;

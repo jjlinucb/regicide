@@ -5,9 +5,10 @@ export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'A' | 
  * A signature ability a Legacy card can carry on top of its base suit power, one per class
  * (see legacy/classes.ts). Boosts the normal suit effect when the card is played: CLEAVE triples
  * (instead of doubles) Clubs damage, INSPIRE draws 2 extra on Diamonds, REVIVE heals 2 extra on
- * Hearts, BULWARK reduces the enemy's attack to 0 for the fight instead of by the play's value.
+ * Hearts, BULWARK reduces the enemy's attack to 0 for the fight instead of by the play's value,
+ * ARCANE_SURGE doubles a Mage card's own arcane bolt.
  */
-export type SpecialAbilityId = 'CLEAVE' | 'INSPIRE' | 'REVIVE' | 'BULWARK';
+export type SpecialAbilityId = 'CLEAVE' | 'INSPIRE' | 'REVIVE' | 'BULWARK' | 'ARCANE_SURGE';
 
 export interface SuitedCard {
   id: string;
@@ -18,6 +19,20 @@ export interface SuitedCard {
   name?: string;
   /** Legacy-only: a signature class ability this card carries permanently, on top of its suit power. */
   special?: SpecialAbilityId;
+  /**
+   * Legacy-only: marks a Mage card. A Mage still carries a suit (for immunity bookkeeping) but its class
+   * powers don't resolve as part of the combined suit powers — instead it fires its own arcane bolt, at its
+   * own card value, before the play's other class powers resolve (see engine.ts's resolveArcaneBolts).
+   */
+  arcane?: boolean;
+  /**
+   * Classic Regicide Endless Mode only: how many steps past King this card has been upgraded, from being the
+   * card of an enemy defeated during an endless round (see engine.ts's upgradeDefeatedRank). A Jack or Queen
+   * defeated during endless rounds has its `rank` itself promoted up the J→Q→K chain instead (no tier needed);
+   * `tier` only kicks in once a card is already King and gets pushed past that ceiling. Each tier is worth +5
+   * card value on top of King's 20, mirroring the same +5/loop step the enemies themselves scale by.
+   */
+  tier?: number;
 }
 
 export interface JesterCard {

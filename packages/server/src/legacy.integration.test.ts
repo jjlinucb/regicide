@@ -129,4 +129,45 @@ describe('legacy campaign integration', () => {
     expect(res.ok).toBe(false);
     client.close();
   });
+
+  it('restores a campaign from an uploaded save file under a brand-new code', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+
+    const legacyStatePromise = waitFor<LegacyStatePayload>(client, 'legacy:state');
+    const save = {
+      party: Array.from({ length: 41 }, (_, i) => ({ id: `c${i}`, kind: 'suited' as const, suit: 'H' as const, rank: '2' as const, name: `Card ${i}` })),
+      missionsCompleted: [1],
+      currentMission: 2,
+      permanentRules: [],
+    };
+    const res = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }>(
+      client,
+      'legacy:restore',
+      { name: 'Carol', save },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const legacyState = await legacyStatePromise;
+    expect(legacyState.campaignCode).toBe(res.code);
+    expect(legacyState.party.length).toBe(41);
+    expect(legacyState.missionsCompleted).toEqual([1]);
+    expect(legacyState.currentMission).toBe(2);
+
+    // Restoring from a save mints a fresh code, distinct from any prior campaign's.
+    const priorCode = rooms.getRoom(res.code)?.legacy?.campaignCode;
+    expect(priorCode).toBe(res.code);
+    client.close();
+  });
+
+  it('rejects restoring a save with no party', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const res = await emitAsync<{ ok: true } | { ok: false; error: string }>(client, 'legacy:restore', {
+      name: 'Dave',
+      save: { party: [], missionsCompleted: [], currentMission: 1, permanentRules: [] },
+    });
+    expect(res.ok).toBe(false);
+    client.close();
+  });
 });

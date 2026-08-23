@@ -4,6 +4,7 @@ import type {
   ClientGameState,
   ClientToServerEvents,
   GameAction,
+  LegacySavePayload,
   LegacyStatePayload,
   RoomStatePayload,
   ServerToClientEvents,
@@ -129,6 +130,19 @@ export function useGameConnection() {
     });
   }, []);
 
+  const restoreLegacyCampaign = useCallback((name: string, save: LegacySavePayload): Promise<{ ok: true } | { ok: false; error: string }> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('legacy:restore', { name, save }, (res) => {
+        if (res.ok) {
+          const next: StoredSession = { code: res.code, playerToken: res.playerToken, playerId: res.playerId };
+          saveSession(next);
+          setSession(next);
+        }
+        resolve(res.ok ? { ok: true } : res);
+      });
+    });
+  }, []);
+
   const startLegacyMission = useCallback(
     (missionId: number): void => {
       if (!session) return;
@@ -187,6 +201,7 @@ export function useGameConnection() {
     leaveSession,
     createLegacyCampaign,
     resumeLegacyCampaign,
+    restoreLegacyCampaign,
     startLegacyMission,
   };
 }

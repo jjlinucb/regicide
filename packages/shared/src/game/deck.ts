@@ -86,16 +86,18 @@ export function buildCastleDeck(rng: () => number): EnemyState[] {
 }
 
 /**
- * Endless Mode (classic Regicide only): after the first WON, the Castle deck is rebuilt scaled up by
- * `loop` (1-indexed) so the fight keeps escalating, and stays in J/Q/K order each pass.
+ * Endless Mode (classic Regicide only): after the first WON, the Castle deck is rebuilt one tier stronger by
+ * `loop` (1-indexed) and stays in J/Q/K order each pass. Every rank's stats climb by a flat +10 health / +5
+ * attack per loop — the same step that separates J from Q and Q from K in the base game — so at loop 1, Jacks
+ * fight at the base game's Queen stats (30/15), Queens at King stats (40/20), and Kings step past their own
+ * ceiling to 50/25. Loop 2 pushes every rank one more step, and so on indefinitely.
  */
 export function buildEndlessCastleDeck(loop: number, rng: () => number): EnemyState[] {
-  const scale = 1 + loop * 0.35;
   const scaled = (rank: 'J' | 'Q' | 'K', suit: Suit): EnemyState => {
     const enemy = makeEnemy(suit, rank);
     const stats = ENEMY_STATS[rank];
-    enemy.maxHealth = Math.round(stats.health * scale);
-    enemy.baseAttack = Math.round(stats.attack * scale);
+    enemy.maxHealth = stats.health + 10 * loop;
+    enemy.baseAttack = stats.attack + 5 * loop;
     return enemy;
   };
   const jacks = shuffle(SUITS.map((s) => scaled('J', s)), rng);

@@ -18,6 +18,15 @@ export interface LegacyStatePayload {
   party: Card[];
   missionsCompleted: number[];
   currentMission: number;
+  permanentRules: string[];
+}
+
+/** The portable, downloadable shape of a Legacy campaign's progress — same fields as LegacyStatePayload minus the server-assigned code, since restoring a save always mints a fresh one. */
+export interface LegacySavePayload {
+  party: Card[];
+  missionsCompleted: number[];
+  currentMission: number;
+  permanentRules: string[];
 }
 
 // Client -> server
@@ -30,6 +39,8 @@ export interface ClientToServerEvents {
   'game:action': (payload: { code: string; action: GameAction }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   'legacy:create': (payload: { name: string }, cb: (res: { ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
   'legacy:resume': (payload: { code: string; name: string }, cb: (res: { ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
+  /** Restores a campaign from a downloaded save file, minting a brand-new campaign code (never reuses the old one — the server may have no record of it, e.g. a restart with no database configured). */
+  'legacy:restore': (payload: { name: string; save: LegacySavePayload }, cb: (res: { ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
   'legacy:startMission': (payload: { code: string; missionId: number }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
 }
 

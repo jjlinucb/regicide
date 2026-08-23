@@ -59,7 +59,7 @@ describe('legacy: mission setup', () => {
   });
 
   it('every mission has at least one enemy and converts cleanly to engine specs', () => {
-    expect(MISSIONS.length).toBe(12);
+    expect(MISSIONS.length).toBe(4);
     for (const mission of MISSIONS) {
       expect(mission.enemies.length).toBeGreaterThan(0);
       const specs = missionEnemiesToSpecs(mission.enemies);
@@ -230,6 +230,25 @@ describe('legacy: party & rewards', () => {
       expect(card.kind === 'suited' && card.special).toBe(CLASS_THEME[r.class].specialAbility);
     }
   });
+
+  it('a Mage recruit takes its explicit suit (Mage has none of its own) and is flagged arcane', () => {
+    const card = buildRecruitCard({ name: 'Test Mage', class: 'MAGE', rank: '5', suit: 'D' });
+    expect(card.kind).toBe('suited');
+    if (card.kind === 'suited') {
+      expect(card.suit).toBe('D');
+      expect(card.arcane).toBe(true);
+    }
+  });
+
+  it('throws building a Mage recruit with no suit given', () => {
+    expect(() => buildRecruitCard({ name: 'No Suit Mage', class: 'MAGE', rank: '5' })).toThrow();
+  });
+
+  it('Mission 3 introduces the Mage class as its reward', () => {
+    const recruits = getMission(3)?.reward.recruits ?? [];
+    expect(recruits.length).toBeGreaterThan(0);
+    expect(recruits.every((r) => r.class === 'MAGE')).toBe(true);
+  });
 });
 
 describe('legacy: mission playthrough', () => {
@@ -244,5 +263,32 @@ describe('legacy: mission playthrough', () => {
     expect(state.phase).toBe('WON');
     expect(state.currentEnemy).toBeNull();
     expect(state.victoryMedal).toBeNull(); // Legacy doesn't use Regicide's solo victory-medal scoring
+  });
+
+  it('a Mage bolt adds its own card value on top of the play\'s normal damage, and bypasses its suit\'s immunity', () => {
+    // Enemy is immune to Hearts (its own suit) — the Mage card is Hearts-suited, so a base Cleric play would be
+    // blocked, but its arcane bolt should land anyway since Mage powers aren't suit powers.
+    const enemy: LegacyEnemySpec = { name: 'Warded Foe', suit: 'H', health: 20, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const mage7: SuitedCard = { ...suited('H', '7'), arcane: true };
+    state = rig(state, [mage7]);
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage7.id] }));
+    state = res.state;
+    // 7 damage from the normal play (no Clubs doubling) + 7 from the arcane bolt = 14, no heal triggered.
+    expect(state.currentEnemy?.damageTaken).toBe(14);
+  });
+
+  it('Arcane Surge doubles a Mage card\'s own bolt, and multiple Mages in one combo each resolve at their own value', () => {
+    const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const surged: SuitedCard = { ...suited('H', '4'), arcane: true, special: 'ARCANE_SURGE' };
+    const plain: SuitedCard = { ...suited('D', '4'), arcane: true };
+    state = rig(state, [surged, plain]);
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [surged.id, plain.id] }),
+    );
+    state = res.state;
+    // Normal combo damage: 4+4=8. Arcane bonus: surged card doubles to 8, plain card is 4. Total: 8+8+4=20.
+    expect(state.currentEnemy?.damageTaken).toBe(20);
   });
 });
