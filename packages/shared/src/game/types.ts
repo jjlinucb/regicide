@@ -1,6 +1,14 @@
 export type Suit = 'H' | 'D' | 'C' | 'S';
 export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'A' | 'J' | 'Q' | 'K';
 
+/**
+ * A signature ability a Legacy card can carry on top of its base suit power, one per class
+ * (see legacy/classes.ts). Boosts the normal suit effect when the card is played: CLEAVE triples
+ * (instead of doubles) Clubs damage, INSPIRE draws 2 extra on Diamonds, REVIVE heals 2 extra on
+ * Hearts, BULWARK reduces the enemy's attack to 0 for the fight instead of by the play's value.
+ */
+export type SpecialAbilityId = 'CLEAVE' | 'INSPIRE' | 'REVIVE' | 'BULWARK';
+
 export interface SuitedCard {
   id: string;
   kind: 'suited';
@@ -8,6 +16,8 @@ export interface SuitedCard {
   rank: Rank;
   /** Legacy-only: a party member's name (e.g. "Herbod"), shown instead of rank-of-suit. */
   name?: string;
+  /** Legacy-only: a signature class ability this card carries permanently, on top of its suit power. */
+  special?: SpecialAbilityId;
 }
 
 export interface JesterCard {
@@ -91,6 +101,8 @@ export interface GameState {
    * combined attack resolves. `claimedBy` is null while the window is open to any player.
    */
   jesterClaim: { card: Card; claimedBy: string | null } | null;
+  /** Classic Regicide only: 0 until the first WON, then increments each time Endless Mode is continued into a new round (Kings join the deck, enemies scale up). */
+  endlessLoop: number;
 }
 
 export interface GameEvent {
@@ -119,7 +131,9 @@ export type GameAction =
   /** Legacy-only: claim an open Jester window. Validated against the window being open, not turn ownership — any player may claim. */
   | { type: 'CLAIM_JESTER'; playerId: string }
   | { type: 'DEFEND'; playerId: string; cardIds: string[] }
-  | { type: 'USE_SOLO_JESTER'; playerId: string };
+  | { type: 'USE_SOLO_JESTER'; playerId: string }
+  /** Classic Regicide only, from WON: continues into another round with Kings shuffled into the Tavern deck and enemies scaled up. */
+  | { type: 'START_ENDLESS_ROUND' };
 
 export type EngineResult =
   | { ok: true; state: GameState; events: GameEvent[] }
@@ -152,6 +166,7 @@ export interface ClientGameState {
   victoryMedal: VictoryMedal | null;
   /** Legacy-only: the Jester sitting in the open claim window, if any (public information — it's on the table). */
   jesterClaim: { card: Card; claimedBy: string | null } | null;
+  endlessLoop: number;
   you: {
     playerId: string;
   };

@@ -85,6 +85,36 @@ export function buildCastleDeck(rng: () => number): EnemyState[] {
   return [...jacks, ...queens, ...kings];
 }
 
+/**
+ * Endless Mode (classic Regicide only): after the first WON, the Castle deck is rebuilt scaled up by
+ * `loop` (1-indexed) so the fight keeps escalating, and stays in J/Q/K order each pass.
+ */
+export function buildEndlessCastleDeck(loop: number, rng: () => number): EnemyState[] {
+  const scale = 1 + loop * 0.35;
+  const scaled = (rank: 'J' | 'Q' | 'K', suit: Suit): EnemyState => {
+    const enemy = makeEnemy(suit, rank);
+    const stats = ENEMY_STATS[rank];
+    enemy.maxHealth = Math.round(stats.health * scale);
+    enemy.baseAttack = Math.round(stats.attack * scale);
+    return enemy;
+  };
+  const jacks = shuffle(SUITS.map((s) => scaled('J', s)), rng);
+  const queens = shuffle(SUITS.map((s) => scaled('Q', s)), rng);
+  const kings = shuffle(SUITS.map((s) => scaled('K', s)), rng);
+  return [...jacks, ...queens, ...kings];
+}
+
+/**
+ * Endless Mode's Tavern deck: the standard 40 cards plus the 4 Kings (now playable, worth 20 per rules.cardValue)
+ * and jesters per player count.
+ */
+export function buildEndlessTavernDeck(playerCount: number, rng: () => number): Card[] {
+  const jesterCount = JESTERS_BY_PLAYER_COUNT[playerCount] ?? 0;
+  const kings: SuitedCard[] = SUITS.map((s) => ({ id: nextId(), kind: 'suited', suit: s, rank: 'K' }));
+  const cards = [...buildStandardPartyCards(), ...kings, ...makeJesters(jesterCount)];
+  return shuffle(cards, rng);
+}
+
 export const JESTERS_BY_PLAYER_COUNT: Record<number, number> = { 1: 0, 2: 0, 3: 1, 4: 2 };
 export const MAX_HAND_SIZE_BY_PLAYER_COUNT: Record<number, number> = { 1: 8, 2: 7, 3: 6, 4: 5 };
 

@@ -25,6 +25,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     soloJestersUsed: state.soloJestersUsed,
     victoryMedal: state.victoryMedal,
     jesterClaim: state.jesterClaim,
+    endlessLoop: state.endlessLoop,
     you: { playerId: viewerPlayerId },
   };
 }

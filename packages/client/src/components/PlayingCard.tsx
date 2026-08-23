@@ -22,7 +22,8 @@ export function cardAbilityText(card: Card): string {
   const rankLabel = card.rank === 'A' ? 'Ace' : card.rank;
   if (isLegacyCard(card)) {
     const cls = SUIT_TO_CLASS[card.suit];
-    return `${card.name} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.`;
+    const specialSuffix = card.special ? ` ${cls.specialText}` : '';
+    return `${card.name} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}`;
   }
   return `${rankLabel} of ${SUIT_NAME[card.suit]} — value ${cardValue(card)}. ${SUIT_ABILITY_TEXT[card.suit]}`;
 }
@@ -66,12 +67,13 @@ export function PlayingCard({
   return (
     <button
       type="button"
-      className={`playing-card${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}`}
+      className={`playing-card${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}`}
       onClick={onClick}
       style={Object.keys(style).length > 0 ? style : undefined}
       aria-label={cardLabel(card)}
       title={blocked ? `${abilityText} — no effect on this boss` : abilityText}
     >
+      {card.special && !small && <span className="special-badge" aria-hidden="true">✦</span>}
       <span className="rank">{rankLabel}</span>
       <span className="glyph">{glyph}</span>
       {legacy && !small && <span className="legacy-card-name">{blocked ? 'No effect' : card.name}</span>}

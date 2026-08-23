@@ -414,3 +414,122 @@ describe('solo Jester', () => {
     expect(res.ok).toBe(false);
   });
 });
+
+function specialCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special: NonNullable<SuitedCard['special']>): SuitedCard {
+  return { ...suited(suit, rank), special };
+}
+
+describe('special abilities', () => {
+  it('Cleave triples Clubs damage instead of doubling it', () => {
+    let state = startGame('cleave', 1);
+    state.currentEnemy!.suit = 'H';
+    state.currentEnemy!.maxHealth = 40; // enough headroom that a tripled 8 (24) doesn't defeat it
+    const card = specialCard('C', '8', 'CLEAVE');
+    state = rig(state, [card]);
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
+    expect(res.ok).toBe(true);
+    expect((res as any).state.currentEnemy!.damageTaken).toBe(24); // 8 * 3
+  });
+
+  it('Inspire draws 2 cards on top of the normal Diamonds draw', () => {
+    let state = startGame('inspire', 1);
+    state.currentEnemy!.suit = 'H';
+    const card = specialCard('D', '3', 'INSPIRE');
+    state = rig(state, [card]);
+    const tavernBefore = state.tavernDeck.length;
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    // hand is empty after the play; drawing 3 (base) + 2 (Inspire) = 5, well under the 8-card solo hand limit
+    expect(tavernBefore - newState.tavernDeck.length).toBe(5);
+  });
+
+  it('Revive shuffles 2 extra cards back from the discard pile', () => {
+    let state = startGame('revive', 1);
+    state.currentEnemy!.suit = 'D';
+    state.discardPile = [suited('S', '2'), suited('S', '3'), suited('S', '4'), suited('S', '5'), suited('S', '6')];
+    const card = specialCard('H', '2', 'REVIVE');
+    state = rig(state, [card]);
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    expect(newState.discardPile.length).toBe(1); // 5 - (2 base heal + 2 bonus)
+  });
+
+  it('Bulwark reduces the enemy attack to 0 for the rest of the fight', () => {
+    let state = startGame('bulwark', 1);
+    state.currentEnemy!.suit = 'D';
+    state.currentEnemy!.baseAttack = 10;
+    const card = specialCard('S', '2', 'BULWARK');
+    state = rig(state, [card]);
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    expect(newState.currentEnemy!.spadesShield).toBe(10);
+    // No pending damage / defend phase, since attack is fully blocked
+    expect(newState.turnPhase).toBe('AWAIT_PLAY');
+  });
+
+  it('a special ability has no effect while blocked by suit immunity', () => {
+    let state = startGame('cleave-blocked', 1);
+    state.currentEnemy!.suit = 'C'; // immune to Clubs
+    const card = specialCard('C', '8', 'CLEAVE');
+    state = rig(state, [card]);
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
+    expect(res.ok).toBe(true);
+    expect((res as any).state.currentEnemy!.damageTaken).toBe(8); // no multiplier applied
+  });
+});
+
+describe('endless mode', () => {
+  function winGame(state: GameState): GameState {
+    const s = structuredClone(state);
+    s.phase = 'WON';
+    s.currentEnemy = null;
+    s.castleDeck = [];
+    return s;
+  }
+
+  it('rejects starting before a win', () => {
+    const state = startGame('endless-early', 1);
+    const res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
+    expect(res.ok).toBe(false);
+  });
+
+  it('rejects Endless Mode in a Legacy game', () => {
+    const state = winGame(startGame('endless-legacy', 1));
+    state.ruleset = 'legacy';
+    const res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
+    expect(res.ok).toBe(false);
+  });
+
+  it('rebuilds the game with Kings in the Tavern deck, scaled-up enemies, and increments the loop counter', () => {
+    const state = winGame(startGame('endless-start', 2));
+    const res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    expect(newState.phase).toBe('IN_PROGRESS');
+    expect(newState.endlessLoop).toBe(1);
+    expect(newState.castleDeck.length + 1).toBe(12);
+    // Scaled-up first enemy (Jack normally 20/10) should now hit harder
+    expect(newState.currentEnemy!.maxHealth).toBeGreaterThan(20);
+    expect(newState.currentEnemy!.baseAttack).toBeGreaterThan(10);
+    // Kings should be present somewhere in the game's cards (tavern deck or dealt hands)
+    const allCards = [...newState.tavernDeck, ...newState.players.flatMap((p) => p.hand)];
+    const kingCount = allCards.filter((c) => c.kind === 'suited' && c.rank === 'K').length;
+    expect(kingCount).toBe(4);
+  });
+
+  it('escalates further on a second consecutive endless round', () => {
+    let state = winGame(startGame('endless-escalate', 1));
+    let res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
+    state = (res as any).state;
+    const firstRoundAttack = state.currentEnemy!.baseAttack;
+    state = winGame(state);
+    res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    expect(newState.endlessLoop).toBe(2);
+    expect(newState.currentEnemy!.baseAttack).toBeGreaterThan(firstRoundAttack);
+  });
+});

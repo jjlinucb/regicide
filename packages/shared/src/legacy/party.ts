@@ -69,6 +69,8 @@ export interface RecruitSpec {
   name: string;
   class: ClassId;
   rank: NonRoyalRank;
+  /** True for a standout reward: grants the recruit's class's signature ability permanently, alongside their name. */
+  special?: boolean;
 }
 
 /**
@@ -84,6 +86,7 @@ export function buildRecruitCard(spec: RecruitSpec): Card {
     suit: CLASS_THEME[spec.class].suit,
     rank: spec.rank,
     name: spec.name,
+    ...(spec.special ? { special: CLASS_THEME[spec.class].specialAbility } : {}),
   };
 }
 

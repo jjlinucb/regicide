@@ -3,7 +3,7 @@ import { applyAction, createLobbyState } from '../game/engine.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs } from './missions.js';
-import { applyReward, buildInitialParty } from './party.js';
+import { applyReward, buildInitialParty, buildRecruitCard } from './party.js';
 
 function suited(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
   return { id: `${suit}${rank}-${Math.random()}`, kind: 'suited', suit, rank };
@@ -210,6 +210,25 @@ describe('legacy: party & rewards', () => {
     }
     // Original party is untouched (pure function).
     expect(party.length).toBe(40);
+  });
+
+  it('grants a special reward its class signature ability, and leaves it off a normal reward', () => {
+    const specialCard = buildRecruitCard({ name: 'Champion', class: 'WARRIOR', rank: '10', special: true });
+    expect(specialCard.kind).toBe('suited');
+    if (specialCard.kind === 'suited') expect(specialCard.special).toBe(CLASS_THEME.WARRIOR.specialAbility);
+
+    const normalCard = buildRecruitCard({ name: 'Regular', class: 'WARRIOR', rank: '5' });
+    expect(normalCard.kind).toBe('suited');
+    if (normalCard.kind === 'suited') expect(normalCard.special).toBeUndefined();
+  });
+
+  it('every mission-reward special recruit is tagged with a class matching its own signature ability', () => {
+    const specials = MISSIONS.flatMap((m) => m.reward.recruits).filter((r) => r.special);
+    expect(specials.length).toBeGreaterThan(0);
+    for (const r of specials) {
+      const card = buildRecruitCard(r);
+      expect(card.kind === 'suited' && card.special).toBe(CLASS_THEME[r.class].specialAbility);
+    }
   });
 });
 

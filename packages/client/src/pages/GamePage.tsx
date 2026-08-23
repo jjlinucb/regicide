@@ -89,7 +89,19 @@ export function GamePage({
             {MAX_SOLO_JESTERS} solo Jesters.
           </p>
         )}
+        {state.phase === 'WON' && !isLegacy && state.endlessLoop > 0 && (
+          <p style={{ color: 'var(--ink-dim)' }}>Endless Mode: survived {state.endlessLoop} round{state.endlessLoop === 1 ? '' : 's'}.</p>
+        )}
         <ActionLog state={state} />
+        {state.phase === 'WON' && !isLegacy && isHost && (
+          <button
+            className="btn"
+            title="Continue with the Kings shuffled into the Tavern deck and every enemy scaled up"
+            onClick={() => sendAction({ type: 'START_ENDLESS_ROUND' })}
+          >
+            ♛ Continue in Endless Mode
+          </button>
+        )}
         {isHost ? (
           <button className="btn" onClick={onRestart}>
             Play again
@@ -108,6 +120,7 @@ export function GamePage({
     <div className="game-page">
       <div className="game-top">
         <div className={`status-banner${isMyTurn ? ' your-turn' : ''}`}>
+          {state.endlessLoop > 0 && <span className="endless-badge" title="Endless Mode round">♛ Round {state.endlessLoop}</span>}
           {isMyTurn
             ? state.turnPhase === 'AWAIT_DEFEND'
               ? `Defend! Discard ${state.pendingDamage} damage worth of cards.`
