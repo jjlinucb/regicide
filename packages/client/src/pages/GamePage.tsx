@@ -66,6 +66,9 @@ export function GamePage({
   }
 
   const isLegacy = state.ruleset === 'legacy';
+  const isComboAssistWindow = state.turnPhase === 'AWAIT_COMBO_ASSIST' && Boolean(state.comboAssist);
+  const isComboAttacker = state.comboAssist?.attackerId === myPlayerId;
+  const canAssistCombo = isComboAssistWindow && !isComboAttacker;
 
   if (state.phase === 'WON' || state.phase === 'LOST') {
     return (
@@ -121,11 +124,15 @@ export function GamePage({
       <div className="game-top">
         <div className={`status-banner${isMyTurn ? ' your-turn' : ''}`}>
           {state.endlessLoop > 0 && <span className="endless-badge" title="Endless Mode round">♛ Round {state.endlessLoop}</span>}
-          {isMyTurn
-            ? state.turnPhase === 'AWAIT_DEFEND'
-              ? `Defend! Discard ${state.pendingDamage} damage worth of cards.`
-              : 'Your turn — play a card, a combo, or yield.'
-            : `Waiting for ${state.players[state.currentPlayerIndex]?.name}...`}
+          {isComboAssistWindow
+            ? isComboAttacker
+              ? 'Your attack is open for the Kinfolk Flute — resolve it when ready.'
+              : 'An attack is open for the Kinfolk Flute — silently add a matching card, or leave it alone.'
+            : isMyTurn
+              ? state.turnPhase === 'AWAIT_DEFEND'
+                ? `Defend! Discard ${state.pendingDamage} damage worth of cards.`
+                : 'Your turn — play a card, a combo, or yield.'
+              : `Waiting for ${state.players[state.currentPlayerIndex]?.name}...`}
           {isHost && (
             <button
               type="button"
@@ -147,6 +154,23 @@ export function GamePage({
             <button type="button" className="btn" onClick={() => sendAction({ type: 'CLAIM_JESTER', playerId: myPlayerId })}>
               Claim it
             </button>
+          </div>
+        )}
+        {isComboAssistWindow && (
+          <div className="legacy-jester-claim-banner">
+            {isComboAttacker ? (
+              <>
+                <span>🎵 Kinfolk Flute: your attack is open — anyone else may silently add a matching card before you resolve it.</span>
+                <button type="button" className="btn" onClick={() => sendAction({ type: 'RESOLVE_COMBO', playerId: myPlayerId })}>
+                  Resolve attack
+                </button>
+              </>
+            ) : (
+              <span>
+                🎵 Kinfolk Flute: {state.players.find((p) => p.id === state.comboAssist!.attackerId)?.name} committed an attack —
+                pick a matching card from your hand below to silently add it, or leave it alone.
+              </span>
+            )}
           </div>
         )}
         {state.currentEnemy && <EnemyDisplay enemy={state.currentEnemy} />}
@@ -181,10 +205,31 @@ export function GamePage({
           cards={myHand}
           selectedIds={selectedIds}
           onToggle={toggleCard}
-          interactive={isMyTurn && state.turnPhase !== 'AWAIT_JESTER_CLAIM'}
+          interactive={canAssistCombo || (isMyTurn && !isComboAssistWindow && state.turnPhase !== 'AWAIT_JESTER_CLAIM')}
           enemy={state.currentEnemy}
         />
       </div>
+
+      {canAssistCombo && (
+        <div className="jester-picker">
+          <span>Pick exactly one matching card from your hand to silently add to the open attack.</span>
+          <div className="jester-picker-choices">
+            <button
+              className="btn"
+              disabled={selectedCards.length !== 1}
+              onClick={() => {
+                sendAction({ type: 'ASSIST_COMBO', playerId: myPlayerId, cardId: selectedCards[0].id });
+                setSelectedIds(new Set());
+              }}
+            >
+              Add to attack
+            </button>
+            <button className="btn-secondary btn" onClick={() => setSelectedIds(new Set())}>
+              Leave it alone
+            </button>
+          </div>
+        </div>
+      )}
 
       {isMyTurn && isLoneJester && state.turnPhase === 'AWAIT_PLAY' && isLegacy && (
         <div className="jester-picker">
@@ -218,7 +263,7 @@ export function GamePage({
         />
       )}
 
-      {isMyTurn && state.turnPhase !== 'AWAIT_JESTER_CLAIM' && !(isLoneJester && state.turnPhase === 'AWAIT_PLAY') && (
+      {isMyTurn && !isComboAssistWindow && state.turnPhase !== 'AWAIT_JESTER_CLAIM' && !(isLoneJester && state.turnPhase === 'AWAIT_PLAY') && (
         <ConfirmPlayBar
           turnPhase={state.turnPhase}
           pendingDamage={state.pendingDamage}

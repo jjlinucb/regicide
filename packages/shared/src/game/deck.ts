@@ -64,6 +64,7 @@ export function makeEnemy(suit: Suit, rank: 'J' | 'Q' | 'K'): EnemyState {
 export function makeLegacyEnemy(spec: LegacyEnemySpec): EnemyState {
   return {
     suit: spec.suit,
+    secondSuit: spec.secondSuit,
     rank: 'J', // unused for display in Legacy (name takes over) — kept only to satisfy EnemyState's shape.
     name: spec.name,
     maxHealth: spec.health,

@@ -1,11 +1,13 @@
 import type { LegacyEnemySpec, Suit } from '../game/types.js';
 import type { ClassId } from './classes.js';
 import { CLASS_THEME } from './classes.js';
-import type { RecruitSpec } from './party.js';
+import type { MissionReward, RecruitSpec } from './party.js';
 
 export interface MissionEnemySpec {
   name: string;
   class: ClassId;
+  /** A second class this enemy is also immune to at once (e.g. a two-headed hydra). */
+  secondClass?: ClassId;
   health: number;
   attack: number;
 }
@@ -15,11 +17,15 @@ export interface Mission {
   title: string;
   story: string;
   enemies: MissionEnemySpec[];
-  reward: { recruits: RecruitSpec[] };
+  reward: MissionReward;
+  /** When true, ignores `enemies` and fights the standard 12-enemy Castle deck (classic Regicide's own rules, no Legacy quirks). */
+  standardCastle?: boolean;
+  /** When true, only an exact-damage hit defeats an enemy — overkilling recycles it, wounds healed, to the back of the line. */
+  exactKillOnly?: boolean;
 }
 
-function enemy(name: string, cls: ClassId, health: number, attack: number): MissionEnemySpec {
-  return { name, class: cls, health, attack };
+function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
+  return { name, class: cls, secondClass: secondCls, health, attack };
 }
 
 function recruit(name: string, cls: ClassId, rank: RecruitSpec['rank'], suit?: Suit): RecruitSpec {
@@ -36,6 +42,7 @@ export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemyS
   return enemies.map((e) => ({
     name: e.name,
     suit: CLASS_THEME[e.class].suit!,
+    secondSuit: e.secondClass ? CLASS_THEME[e.secondClass].suit : undefined,
     health: e.health,
     attack: e.attack,
   }));
@@ -51,26 +58,40 @@ export const MISSIONS: Mission[] = [
     id: 1,
     title: 'The First Contract',
     story:
-      'A rot has crept into the border town of Callow Ridge, and the Golden Blade Syndicate takes its first ' +
-      'commission to root it out. The party finds the source hiding in the old grain hall: a warlord already ' +
-      'half-consumed by the corruption he serves.',
-    enemies: [enemy('Grommash the Cinder-Handed', 'WARRIOR', 20, 10)],
-    reward: { recruits: [recruit('Sister Ilona', 'CLERIC', '6')] },
+      "A rot has crept into the capital itself, and the Golden Blade Syndicate takes its first commission to " +
+      "root it out: storm the old stronghold and put down its full corrupted court, twelve strong — the same " +
+      "fight every recruit trains on, before the campaign starts bending the rules on them.",
+    enemies: [],
+    standardCastle: true,
+    // Reward: the Kinfolk Flute relic — once a player commits cards to an attack, any other player may
+    // silently slip in a matching card from hand to help complete the combo, no discussion allowed.
+    reward: { recruits: [], relics: ['KINFOLK_FLUTE'] },
   },
   {
     id: 2,
-    title: 'Whispers in the Vale',
+    title: 'Coils of the Fen',
     story:
-      'Reports of a corrupted bard leading travelers astray lead the party into Nettlevale, where they find a ' +
-      'second corruption already waiting: something that has learned to wear silence like armor.',
-    enemies: [enemy('Sable Thorn', 'BARD', 18, 9), enemy('Korrath the Hollow', 'CLERIC', 24, 12)],
-    reward: { recruits: [recruit('Finn Cutter', 'BARD', '7'), recruit('Bruno Halfhand', 'WARRIOR', '5')] },
+      "The road out of the capital drops into the Grey Fen, where a brood of six hydra-kin has laired for a " +
+      "generation. Each head answers to two disciplines at once, shrugging off anything but a killing blow " +
+      "measured to the hair — anything less, and the beast just knits itself back together for another round.",
+    enemies: [
+      enemy('Coilfang Broodling', 'CLERIC', 16, 8, 'BARD'),
+      enemy('Ashmaw Broodling', 'CLERIC', 18, 9, 'WARRIOR'),
+      enemy('Duskscale Broodling', 'CLERIC', 20, 10, 'PALADIN'),
+      enemy('Bramble-Throat Broodling', 'BARD', 22, 11, 'WARRIOR'),
+      enemy('Grey Fen Broodling', 'BARD', 24, 12, 'PALADIN'),
+      enemy('The Nine-Coiled Matriarch', 'WARRIOR', 30, 15, 'PALADIN'),
+    ],
+    exactKillOnly: true,
+    // Reward: Dual-class Stickers — 4 random existing party members each gain a second class icon, so that
+    // single card triggers both class powers whenever it's played.
+    reward: { recruits: [], dualClassStickers: 4 },
   },
   {
     id: 3,
     title: 'The Ashen Archive',
     story:
-      "Every road out of Nettlevale leads the party to the same place: a scholars' tower half-collapsed into " +
+      "Every road out of the Fen leads the party to the same place: a scholars' tower half-collapsed into " +
       'ash, where the corruption didn\'t creep in from outside — it was summoned on purpose. The wardens who ' +
       'raised the tower\'s wards against it have been trapped behind their own seals for a generation, and ' +
       'freeing them is the only way through.',

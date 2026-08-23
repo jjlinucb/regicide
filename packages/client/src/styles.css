@@ -513,6 +513,13 @@ button {
   color: var(--heart);
 }
 
+.playing-card .second-class-glyph {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 1rem;
+}
+
 .playing-card.blocked {
   opacity: 0.45;
   filter: grayscale(0.6);

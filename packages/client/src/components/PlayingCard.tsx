@@ -1,4 +1,4 @@
-import { cardValue, classForCard, JESTER_ABILITY_TEXT, SUIT_ABILITY_TEXT, type Card } from '@regicide/shared';
+import { cardValue, classForCard, JESTER_ABILITY_TEXT, SUIT_ABILITY_TEXT, SUIT_TO_CLASS, type Card } from '@regicide/shared';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
 const SUIT_NAME: Record<string, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
@@ -18,7 +18,10 @@ function tieredRankLabel(card: Extract<Card, { kind: 'suited' }>): string {
 export function cardLabel(card: Card): string {
   if (card.kind === 'jester') return 'Jester';
   const rankLabel = tieredRankLabel(card);
-  if (isLegacyCard(card)) return `${rankLabel} ${classForCard(card).glyph}`;
+  if (isLegacyCard(card)) {
+    const secondGlyph = card.secondSuit ? SUIT_TO_CLASS[card.secondSuit].glyph : '';
+    return `${rankLabel} ${classForCard(card).glyph}${secondGlyph}`;
+  }
   return `${rankLabel}${SUIT_GLYPH[card.suit]}`;
 }
 
@@ -29,7 +32,8 @@ export function cardAbilityText(card: Card): string {
   if (isLegacyCard(card)) {
     const cls = classForCard(card);
     const specialSuffix = card.special ? ` ${cls.specialText}` : '';
-    return `${card.name} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}`;
+    const dualSuffix = card.secondSuit ? ` Also a ${SUIT_TO_CLASS[card.secondSuit].name} (Dual-class Sticker).` : '';
+    return `${card.name} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}`;
   }
   const tierSuffix = card.tier ? ` (upgraded ${card.tier} tier${card.tier > 1 ? 's' : ''} past King, from an Endless Mode win)` : '';
   return `${rankLabel} of ${SUIT_NAME[card.suit]} — value ${cardValue(card)}${tierSuffix}. ${SUIT_ABILITY_TEXT[card.suit]}`;
@@ -83,6 +87,11 @@ export function PlayingCard({
       {card.special && !small && <span className="special-badge" aria-hidden="true">✦</span>}
       <span className="rank">{rankLabel}</span>
       <span className="glyph">{glyph}</span>
+      {legacy && card.secondSuit && !small && (
+        <span className="glyph second-class-glyph" style={{ color: SUIT_TO_CLASS[card.secondSuit].color }}>
+          {SUIT_TO_CLASS[card.secondSuit].glyph}
+        </span>
+      )}
       {legacy && !small && <span className="legacy-card-name">{blocked ? 'No effect' : card.name}</span>}
       {blocked && !small && !legacy && <span className="no-effect-badge">No effect</span>}
     </button>
