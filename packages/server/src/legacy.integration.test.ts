@@ -77,11 +77,13 @@ describe('legacy campaign integration', () => {
     expect(startResult.ok).toBe(true);
     const gameState = await gameStatePromise;
     expect(gameState.ruleset).toBe('legacy');
-    expect(gameState.currentEnemy?.name).toBe('Grommash the Cinder-Handed');
+    // Mission 1 is now the standard 12-enemy Castle deck (classic Regicide's own rules) — no named enemy.
+    expect(gameState.currentEnemy?.name).toBeUndefined();
 
-    // White-box rig: force the enemy down to 1 health so the next card played wins the mission,
-    // instead of simulating an unpredictable number of random turns.
+    // White-box rig: clear out the rest of the Castle deck and force the current enemy down to 1 health,
+    // so the next card played wins the whole mission instead of simulating 12 unpredictable fights.
     const room = rooms.getRoom(created.code)!;
+    room.gameState.castleDeck = [];
     room.gameState.currentEnemy!.maxHealth = 1;
 
     const playerId = room.gameState.players[room.gameState.currentPlayerIndex].id;
@@ -100,7 +102,8 @@ describe('legacy campaign integration', () => {
     const legacyAfterWin = await legacyAfterWinPromise;
     expect(legacyAfterWin.missionsCompleted).toEqual([1]);
     expect(legacyAfterWin.currentMission).toBe(2);
-    expect(legacyAfterWin.party.length).toBe(41); // mission 1's reward grants exactly 1 recruit
+    expect(legacyAfterWin.party.length).toBe(40); // mission 1's reward is the Kinfolk Flute relic, not a recruit
+    expect(legacyAfterWin.permanentRules).toEqual(['KINFOLK_FLUTE']);
 
     // Same flow as classic Regicide: after a mission ends, the host restarts (LOBBY) before the
     // next mission can be started or a new player can join.
@@ -118,7 +121,8 @@ describe('legacy campaign integration', () => {
     );
     expect(resumed.ok).toBe(true);
     const resumedLegacyState = await resumedLegacyStatePromise;
-    expect(resumedLegacyState.party.length).toBe(41);
+    expect(resumedLegacyState.party.length).toBe(40);
+    expect(resumedLegacyState.permanentRules).toEqual(['KINFOLK_FLUTE']);
     expect(resumedLegacyState.currentMission).toBe(2);
   });
 

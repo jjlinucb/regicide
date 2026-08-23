@@ -25,6 +25,11 @@ export function isAnimalCompanion(card: Card): boolean {
   return card.kind === 'suited' && card.rank === 'A';
 }
 
+/** A card's class suit(s) — two for a Dual-class Stickers card (see SuitedCard.secondSuit), one otherwise. */
+export function cardSuits(card: Extract<Card, { kind: 'suited' }>): Suit[] {
+  return card.secondSuit ? [card.suit, card.secondSuit] : [card.suit];
+}
+
 export interface PlayShape {
   totalValue: number;
   suits: Suit[];
@@ -41,13 +46,13 @@ export function validatePlayShape(cards: Card[]): PlayShape | { error: string } 
   const animalCount = suited.filter((c) => c.rank === 'A').length;
 
   if (cards.length === 1) {
-    return { totalValue: cardValue(cards[0]), suits: [suited[0].suit] };
+    return { totalValue: cardValue(cards[0]), suits: cardSuits(suited[0]) };
   }
 
   if (cards.length === 2 && animalCount >= 1) {
     // Animal Companion paired with one other card (which may be another Animal Companion). No sum cap.
     const totalValue = suited.reduce((sum, c) => sum + cardValue(c), 0);
-    const suits = Array.from(new Set(suited.map((c) => c.suit)));
+    const suits = Array.from(new Set(suited.flatMap(cardSuits)));
     return { totalValue, suits };
   }
 
@@ -67,7 +72,7 @@ export function validatePlayShape(cards: Card[]): PlayShape | { error: string } 
   if (totalValue > 10) {
     return { error: 'Combo total must be 10 or less.' };
   }
-  const suits = Array.from(new Set(suited.map((c) => c.suit)));
+  const suits = Array.from(new Set(suited.flatMap(cardSuits)));
   return { totalValue, suits };
 }
 
@@ -90,7 +95,7 @@ export const SOLO_JESTER_ABILITY_TEXT =
   'Winning with 0 used = Gold, 1 used = Silver, 2 used = Bronze.';
 
 export function isSuitBlockedByImmunity(suit: Suit, enemy: EnemyState): boolean {
-  return suit === enemy.suit && !enemy.immunityBroken;
+  return (suit === enemy.suit || suit === enemy.secondSuit) && !enemy.immunityBroken;
 }
 
 export function currentEnemyAttack(enemy: EnemyState): number {

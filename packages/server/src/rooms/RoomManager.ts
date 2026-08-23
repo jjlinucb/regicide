@@ -287,8 +287,11 @@ export class RoomManager {
       playerNames,
       seed: `${code}-${Date.now()}`,
       party: room.legacy.party,
-      enemies: missionEnemiesToSpecs(mission.enemies),
+      enemies: mission.standardCastle ? [] : missionEnemiesToSpecs(mission.enemies),
       jesterCount: JESTERS_BY_PLAYER_COUNT[n] ?? 0,
+      standardCastle: mission.standardCastle,
+      exactKillOnly: mission.exactKillOnly,
+      relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };
     room.gameState = result.state;
@@ -302,7 +305,10 @@ export class RoomManager {
     if (outcome === 'won') {
       const mission = getMission(missionId);
       if (mission) {
-        legacy.party = applyReward(legacy.party, mission.reward.recruits);
+        legacy.party = applyReward(legacy.party, mission.reward);
+        if (mission.reward.relics?.length) {
+          legacy.permanentRules = [...legacy.permanentRules, ...mission.reward.relics];
+        }
         legacy.missionsCompleted = [...legacy.missionsCompleted, missionId];
         legacy.currentMission = missionId + 1;
       }

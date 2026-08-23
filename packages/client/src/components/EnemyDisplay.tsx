@@ -12,6 +12,7 @@ export function EnemyDisplay({ enemy }: { enemy: EnemyState }) {
   // Only Legacy enemies carry a `name` — use its presence as the display-mode signal (same trick as PlayingCard).
   const isLegacy = Boolean(enemy.name);
   const classInfo = SUIT_TO_CLASS[enemy.suit];
+  const secondClassInfo = enemy.secondSuit ? SUIT_TO_CLASS[enemy.secondSuit] : null;
 
   return (
     <div className="enemy-card">
@@ -45,7 +46,9 @@ export function EnemyDisplay({ enemy }: { enemy: EnemyState }) {
       {isLegacy ? (
         <div className={`enemy-title suit-${enemy.suit}`}>
           {enemy.name}
-          {enemy.immunityBroken ? '' : ` 🛡️ immune to ${classInfo.name} abilities`}
+          {enemy.immunityBroken
+            ? ''
+            : ` 🛡️ immune to ${classInfo.name}${secondClassInfo ? ` & ${secondClassInfo.name}` : ''} abilities`}
         </div>
       ) : (
         <div className={`enemy-title suit-${enemy.suit}`}>

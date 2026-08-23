@@ -26,6 +26,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     victoryMedal: state.victoryMedal,
     jesterClaim: state.jesterClaim,
     endlessLoop: state.endlessLoop,
+    comboAssist: state.comboAssist,
     you: { playerId: viewerPlayerId },
   };
 }

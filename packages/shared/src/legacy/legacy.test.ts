@@ -3,7 +3,7 @@ import { applyAction, createLobbyState } from '../game/engine.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs } from './missions.js';
-import { applyReward, buildInitialParty, buildRecruitCard } from './party.js';
+import { applyDualClassStickers, applyReward, buildInitialParty, buildRecruitCard } from './party.js';
 
 function suited(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
   return { id: `${suit}${rank}-${Math.random()}`, kind: 'suited', suit, rank };
@@ -58,9 +58,10 @@ describe('legacy: mission setup', () => {
     expect(handCount + state.tavernDeck.length).toBe(40);
   });
 
-  it('every mission has at least one enemy and converts cleanly to engine specs', () => {
+  it('every non-standard-castle mission has at least one enemy and converts cleanly to engine specs', () => {
     expect(MISSIONS.length).toBe(4);
     for (const mission of MISSIONS) {
+      if (mission.standardCastle) continue;
       expect(mission.enemies.length).toBeGreaterThan(0);
       const specs = missionEnemiesToSpecs(mission.enemies);
       for (const spec of specs) {
@@ -70,6 +71,81 @@ describe('legacy: mission setup', () => {
     }
     expect(getMission(1)?.title).toBeTruthy();
     expect(getMission(999)).toBeUndefined();
+  });
+
+  it('mission 1 is the standard 12-enemy Castle deck and rewards the Kinfolk Flute relic', () => {
+    const mission1 = getMission(1)!;
+    expect(mission1.standardCastle).toBe(true);
+    expect(mission1.reward.relics).toEqual(['KINFOLK_FLUTE']);
+    const ids = ['p0'];
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: ['Player 0'],
+      seed: 'mission-1-test',
+      party: buildInitialParty(),
+      enemies: [],
+      jesterCount: 0,
+      standardCastle: true,
+    });
+    const state = ensureOk(res).state;
+    expect(state.castleDeck.length + 1).toBe(12);
+    expect(state.currentEnemy?.name).toBeUndefined();
+  });
+
+  it('mission 2 hydras are immune to two classes at once, only die to an exact hit, and reward Dual-class Stickers', () => {
+    const mission2 = getMission(2)!;
+    expect(mission2.exactKillOnly).toBe(true);
+    expect(mission2.reward.dualClassStickers).toBe(4);
+    const specs = missionEnemiesToSpecs(mission2.enemies);
+    expect(specs.length).toBe(6);
+    expect(specs.every((s) => s.secondSuit)).toBe(true);
+  });
+});
+
+describe('legacy: exact-kill-only recycling (hydra mission)', () => {
+  const hydra: LegacyEnemySpec = { name: 'Test Hydra', suit: 'H', secondSuit: 'D', health: 20, attack: 10 };
+
+  function startExactKillMission(enemies: LegacyEnemySpec[]): GameState {
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'hydra-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      exactKillOnly: true,
+    });
+    return ensureOk(res).state;
+  }
+
+  it('is immune to both of its classes (blocks the class power, not the raw damage)', () => {
+    let state = startExactKillMission([hydra]);
+    state = rig(state, [suited('D', '5')]); // Diamonds = hydra's secondSuit
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
+    state = res.state;
+    expect(state.currentEnemy?.damageTaken).toBe(5); // damage still lands
+    expect(state.log.some((e) => e.message.includes('blocked'))).toBe(true); // but the Diamonds draw power is blocked
+  });
+
+  it('overkilling a hydra recycles it to the back of the line with wounds healed, instead of defeating it', () => {
+    let state = startExactKillMission([hydra, { name: 'Second Hydra', suit: 'C', health: 15, attack: 5 }]);
+    state = rig(state, [suited('C', '10')], { damageTaken: 15 }); // 15 already taken, +10 overkills a 20-health hydra
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
+    state = res.state;
+    expect(state.currentEnemy?.name).toBe('Second Hydra'); // moved on to the next enemy
+    expect(state.castleDeck.length).toBe(1);
+    expect(state.castleDeck[0].name).toBe('Test Hydra'); // recycled to the back, not discarded
+    expect(state.castleDeck[0].damageTaken).toBe(0); // wounds healed
+  });
+
+  it('an exact hit permanently defeats a hydra instead of recycling it', () => {
+    let state = startExactKillMission([hydra]);
+    state = rig(state, [suited('S', '10')], { damageTaken: 10 }); // Spades doesn't double damage — exactly lethal
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
+    state = res.state;
+    expect(state.phase).toBe('WON');
   });
 });
 
@@ -200,7 +276,7 @@ describe('legacy: party & rewards', () => {
 
   it('applies a mission reward by adding named recruits mapped to the right class/suit', () => {
     const party = buildInitialParty();
-    const grown = applyReward(party, [{ name: 'Test Recruit', class: 'WARRIOR', rank: '5' }]);
+    const grown = applyReward(party, { recruits: [{ name: 'Test Recruit', class: 'WARRIOR', rank: '5' }] });
     expect(grown.length).toBe(41);
     const recruitCard = grown[grown.length - 1];
     expect(recruitCard.kind).toBe('suited');
@@ -290,5 +366,95 @@ describe('legacy: mission playthrough', () => {
     state = res.state;
     // Normal combo damage: 4+4=8. Arcane bonus: surged card doubles to 8, plain card is 4. Total: 8+8+4=20.
     expect(state.currentEnemy?.damageTaken).toBe(20);
+  });
+});
+
+describe('legacy: Dual-class Stickers reward (mission 2)', () => {
+  it('gives exactly `count` eligible cards a second, different class icon, leaving everything else untouched', () => {
+    const party = buildInitialParty();
+    const stickered = applyDualClassStickers(party, 4);
+    const withSecondSuit = stickered.filter((c) => c.kind === 'suited' && c.secondSuit);
+    expect(withSecondSuit.length).toBe(4);
+    for (const c of withSecondSuit) {
+      if (c.kind === 'suited') expect(c.secondSuit).not.toBe(c.suit);
+    }
+    // Original party is untouched (pure function).
+    expect(party.every((c) => c.kind === 'suited' && !c.secondSuit)).toBe(true);
+  });
+
+  it('skips Mage (arcane) cards and cards that already have a second class', () => {
+    const party = buildInitialParty().slice(0, 2);
+    const arcaneCard: Card = { ...suited('H', '4'), arcane: true };
+    const alreadyStickered: Card = { ...suited('D', '5'), secondSuit: 'C' };
+    const stickered = applyDualClassStickers([arcaneCard, alreadyStickered], 2);
+    expect(stickered).toEqual([arcaneCard, alreadyStickered]); // neither was eligible
+  });
+});
+
+describe('legacy: Kinfolk Flute relic (mission 1) — combo-assist window', () => {
+  function startMissionWithFlute(n: number, enemies: LegacyEnemySpec[]): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'flute-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      relics: ['KINFOLK_FLUTE'],
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  const target: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
+
+  it('opens an assist window instead of resolving immediately when there is room left in the combo', () => {
+    let state = startMissionWithFlute(2, [target]);
+    state = rig(state, [suited('H', '3')]);
+    const attackerId = state.players[state.currentPlayerIndex].id;
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_COMBO_ASSIST');
+    expect(state.comboAssist?.attackerId).toBe(attackerId);
+    expect(state.currentEnemy?.damageTaken).toBe(0); // not resolved yet
+  });
+
+  it('lets another player silently add a matching card, then the attacker resolves for the combined total', () => {
+    let state = startMissionWithFlute(2, [target]);
+    state = rig(state, [suited('H', '3')]);
+    const attackerId = state.players[0].id;
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    state = structuredClone(state);
+    state.players[1].hand = [suited('H', '3')];
+    res = ensureOk(applyAction(state, { type: 'ASSIST_COMBO', playerId: state.players[1].id, cardId: state.players[1].hand[0].id }));
+    state = res.state;
+    expect(state.comboAssist?.cardIds.length).toBe(2);
+    expect(state.turnPhase).toBe('AWAIT_COMBO_ASSIST'); // still open until the attacker resolves
+
+    res = ensureOk(applyAction(state, { type: 'RESOLVE_COMBO', playerId: attackerId }));
+    state = res.state;
+    expect(state.comboAssist).toBeNull();
+    expect(state.currentEnemy?.damageTaken).toBe(6); // 3+3 combo total
+  });
+
+  it('rejects an assist card that would break the combo (mismatched rank), and rejects the attacker assisting their own attack', () => {
+    let state = startMissionWithFlute(2, [target]);
+    state = rig(state, [suited('H', '3')]);
+    const attackerId = state.players[0].id;
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    state = structuredClone(state);
+    state.players[1].hand = [suited('H', '4')]; // wrong rank
+    const badAssist = applyAction(state, { type: 'ASSIST_COMBO', playerId: state.players[1].id, cardId: state.players[1].hand[0].id });
+    expect(badAssist.ok).toBe(false);
+
+    const selfAssist = applyAction(state, { type: 'ASSIST_COMBO', playerId: attackerId, cardId: suited('H', '3').id });
+    expect(selfAssist.ok).toBe(false);
   });
 });

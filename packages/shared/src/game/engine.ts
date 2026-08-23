@@ -9,7 +9,7 @@ import {
   makeRng,
   MAX_HAND_SIZE_BY_PLAYER_COUNT,
 } from './deck.js';
-import { cardValue, currentEnemyAttack, isSuitBlockedByImmunity, MAX_SOLO_JESTERS, validatePlayShape } from './rules.js';
+import { cardSuits, cardValue, currentEnemyAttack, isSuitBlockedByImmunity, MAX_SOLO_JESTERS, validatePlayShape } from './rules.js';
 import { classForSuit } from '../legacy/classes.js';
 
 const SUIT_NAME: Record<Suit, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
@@ -242,10 +242,29 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
   const remaining = enemy.maxHealth - enemy.damageTaken;
   if (remaining > 0) return false;
 
+  if (state.ruleset === 'legacy' && state.exactKillOnly && remaining < 0) {
+    // Overkill on an exact-kill-only enemy doesn't defeat it — it recycles to the back of the enemy line,
+    // wounds healed, to be fought again later (see GameState.exactKillOnly).
+    log(state, `${enemyLabel(enemy)} shrugs off the overkill and slinks to the back of the line, wounds healed!`);
+    state.discardPile.push(...enemy.tableCards);
+    enemy.damageTaken = 0;
+    enemy.spadesShield = 0;
+    enemy.blockedSpadesShield = 0;
+    enemy.immunityBroken = false;
+    enemy.tableCards = [];
+    state.castleDeck.push(enemy);
+    state.currentEnemy = state.castleDeck.shift()!;
+    log(state, `A new enemy is revealed: ${enemyLabel(state.currentEnemy)}.`);
+    state.turnPhase = 'AWAIT_PLAY';
+    state.pendingDamage = 0;
+    checkForStuckLoss(state);
+    return true;
+  }
+
   if (state.ruleset === 'legacy') {
     // Legacy enemies always go to the discard pile — no exact-damage/return-to-deck effect (that's mission-specific
     // in the physical game, and doesn't apply cleanly since Legacy enemies don't carry a J/Q/K-style card value).
-    log(state, `${enemyLabel(enemy)} defeated!`);
+    log(state, state.exactKillOnly ? `${enemyLabel(enemy)} felled by an exact hit — banished for good!` : `${enemyLabel(enemy)} defeated!`);
   } else {
     const exact = remaining === 0;
     const upgrade = upgradeDefeatedRank(enemy.rank, state.endlessLoop);
@@ -334,6 +353,9 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.victoryMedal = null;
   state.jesterClaim = null;
   state.endlessLoop = 0;
+  state.exactKillOnly = false;
+  state.relics = [];
+  state.comboAssist = null;
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -344,10 +366,10 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   const n = action.playerIds.length;
   if (n < 1 || n > 4) return fail('Regicide Legacy supports 1-4 players.');
   if (action.playerIds.length !== action.playerNames.length) return fail('Player id/name mismatch.');
-  if (action.enemies.length === 0) return fail('A mission needs at least one enemy.');
+  if (!action.standardCastle && action.enemies.length === 0) return fail('A mission needs at least one enemy.');
 
   const buildRng = makeRng(action.seed);
-  const enemyDeck = action.enemies.map(makeLegacyEnemy);
+  const enemyDeck = action.standardCastle ? buildCastleDeck(buildRng) : action.enemies.map(makeLegacyEnemy);
   const reserveDeck = buildLegacyReserveDeck(action.party, action.jesterCount, buildRng);
   const maxHandSize = MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5;
 
@@ -384,6 +406,9 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.victoryMedal = null;
   state.jesterClaim = null;
   state.endlessLoop = 0;
+  state.exactKillOnly = action.exactKillOnly ?? false;
+  state.relics = action.relics ?? [];
+  state.comboAssist = null;
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
   return ok(state);
@@ -433,6 +458,49 @@ function startEndlessRound(state: GameState): EngineResult {
   return ok(state);
 }
 
+/**
+ * Resolves a play already committed to the enemy's table (cards moved out of hand, already in tableCards):
+ * class powers, damage, and the resulting AWAIT_DEFEND/turn-advance. Shared by the immediate PLAY_CARDS path
+ * and by RESOLVE_COMBO, once an open Kinfolk Flute assist window is locked in.
+ */
+function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null): EngineResult {
+  const shape = validatePlayShape(cards);
+  if ('error' in shape) return fail(shape.error);
+
+  log(
+    state,
+    `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${shape.totalValue}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
+  );
+  const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
+  // Mage cards' suits don't join the combined suit-power resolution below — their class power is the arcane
+  // bolt above instead, which already resolved (Mage always goes first, per legacy/classes.ts).
+  const nonArcaneSuits = Array.from(
+    new Set(
+      cards
+        .filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane)
+        .flatMap(cardSuits),
+    ),
+  );
+  const damageMultiplier = resolveSuitPowers(state, cards, nonArcaneSuits, shape.totalValue, Boolean(claimedJester));
+  const damage = shape.totalValue * damageMultiplier + arcaneBonus;
+  state.lastActionWasYield[state.currentPlayerIndex] = false;
+
+  const defeated = dealDamageAndCheckDefeat(state, damage);
+
+  if (state.phase !== 'IN_PROGRESS') return ok(state);
+  if (defeated) return ok(state); // enemy was defeated, same player continues against the next one
+
+  const enemyAttack = currentEnemyAttack(state.currentEnemy!);
+  if (enemyAttack <= 0) {
+    log(state, `The enemy's attack has been reduced to 0 — no damage suffered.`);
+    advanceToNextPlayer(state);
+    return ok(state);
+  }
+  state.pendingDamage = enemyAttack;
+  state.turnPhase = 'AWAIT_DEFEND';
+  return ok(state);
+}
+
 function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_CARDS' }>): EngineResult {
   const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_PLAY');
   if (err) return fail(err);
@@ -463,34 +531,58 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
     state.jesterClaim = null;
   }
 
-  log(
-    state,
-    `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${shape.totalValue}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
-  );
-  const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
-  // Mage cards' suits don't join the combined suit-power resolution below — their class power is the arcane
-  // bolt above instead, which already resolved (Mage always goes first, per legacy/classes.ts).
-  const nonArcaneSuits = Array.from(
-    new Set(cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane).map((c) => c.suit)),
-  );
-  const damageMultiplier = resolveSuitPowers(state, cards, nonArcaneSuits, shape.totalValue, Boolean(claimedJester));
-  const damage = shape.totalValue * damageMultiplier + arcaneBonus;
-  state.lastActionWasYield[state.currentPlayerIndex] = false;
+  // Kinfolk Flute: with room left in the combo (fewer than 4 cards, total under 10) and no claimed Jester
+  // complicating things, open an assist window instead of resolving immediately — any other player may
+  // silently add one matching card before the attacker calls RESOLVE_COMBO.
+  const canOpenComboAssist =
+    state.ruleset === 'legacy' &&
+    state.relics.includes('KINFOLK_FLUTE') &&
+    !claimedJester &&
+    cards.every((c) => c.kind === 'suited') &&
+    cards.length < 4 &&
+    shape.totalValue < 10;
 
-  const defeated = dealDamageAndCheckDefeat(state, damage);
-
-  if (state.phase !== 'IN_PROGRESS') return ok(state);
-  if (defeated) return ok(state); // enemy was defeated, same player continues against the next one
-
-  const enemyAttack = currentEnemyAttack(state.currentEnemy!);
-  if (enemyAttack <= 0) {
-    log(state, `The enemy's attack has been reduced to 0 — no damage suffered.`);
-    advanceToNextPlayer(state);
+  if (canOpenComboAssist) {
+    state.comboAssist = { attackerId: player.id, cardIds: cards.map((c) => c.id) };
+    state.turnPhase = 'AWAIT_COMBO_ASSIST';
+    log(state, `${player.name} commits ${cards.length > 1 ? 'a combo' : 'a card'} to the attack — the Kinfolk Flute lets others silently add a matching card before it resolves.`);
     return ok(state);
   }
-  state.pendingDamage = enemyAttack;
-  state.turnPhase = 'AWAIT_DEFEND';
+
+  return resolveCommittedPlay(state, player, cards, claimedJester);
+}
+
+function assistCombo(state: GameState, action: Extract<GameAction, { type: 'ASSIST_COMBO' }>): EngineResult {
+  if (state.turnPhase !== 'AWAIT_COMBO_ASSIST' || !state.comboAssist) return fail('No open attack to assist.');
+  if (action.playerId === state.comboAssist.attackerId) {
+    return fail("You can't assist your own attack — resolve it instead.");
+  }
+  const assister = state.players.find((p) => p.id === action.playerId);
+  if (!assister) return fail('Unknown player.');
+  const card = assister.hand.find((c) => c.id === action.cardId);
+  if (!card) return fail('Card is not in your hand.');
+  if (card.kind !== 'suited') return fail('Only a suited card can be added to a combo.');
+
+  const existing = state.currentEnemy!.tableCards.filter((c) => state.comboAssist!.cardIds.includes(c.id));
+  const combined = validatePlayShape([...existing, card]);
+  if ('error' in combined) return fail(`That card doesn't fit the combo: ${combined.error}`);
+
+  assister.hand = assister.hand.filter((c) => c.id !== card.id);
+  state.currentEnemy!.tableCards.push(card);
+  state.comboAssist.cardIds.push(card.id);
+  log(state, `${assister.name} silently slips a card into the open attack (Kinfolk Flute).`);
   return ok(state);
+}
+
+function resolveComboAssist(state: GameState, action: Extract<GameAction, { type: 'RESOLVE_COMBO' }>): EngineResult {
+  if (state.turnPhase !== 'AWAIT_COMBO_ASSIST' || !state.comboAssist) return fail('No open attack to resolve.');
+  if (action.playerId !== state.comboAssist.attackerId) return fail('Only the attacking player can resolve this combo.');
+
+  const player = currentPlayer(state);
+  const cards = state.currentEnemy!.tableCards.filter((c) => state.comboAssist!.cardIds.includes(c.id));
+  state.comboAssist = null;
+  state.turnPhase = 'AWAIT_PLAY';
+  return resolveCommittedPlay(state, player, cards, null);
 }
 
 function yieldTurn(state: GameState, action: Extract<GameAction, { type: 'YIELD' }>): EngineResult {
@@ -676,6 +768,9 @@ export function createLobbyState(): GameState {
     victoryMedal: null,
     jesterClaim: null,
     endlessLoop: 0,
+    exactKillOnly: false,
+    relics: [],
+    comboAssist: null,
   };
 }
 
@@ -696,6 +791,10 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return playJester(draft, action);
     case 'CLAIM_JESTER':
       return claimJester(draft, action);
+    case 'ASSIST_COMBO':
+      return assistCombo(draft, action);
+    case 'RESOLVE_COMBO':
+      return resolveComboAssist(draft, action);
     case 'DEFEND':
       return defend(draft, action);
     case 'USE_SOLO_JESTER':

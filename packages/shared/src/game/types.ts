@@ -26,6 +26,11 @@ export interface SuitedCard {
    */
   arcane?: boolean;
   /**
+   * Legacy-only: a second class icon this card carries, from the Dual-class Stickers reward. Both this suit's
+   * and secondSuit's class powers trigger whenever the card is played (see rules.ts's cardSuits).
+   */
+  secondSuit?: Suit;
+  /**
    * Classic Regicide Endless Mode only: how many steps past King this card has been upgraded, from being the
    * card of an enemy defeated during an endless round (see engine.ts's upgradeDefeatedRank). A Jack or Queen
    * defeated during endless rounds has its `rank` itself promoted up the J→Q→K chain instead (no tier needed);
@@ -51,6 +56,8 @@ export interface PlayerState {
 
 export interface EnemyState {
   suit: Suit;
+  /** Legacy-only: a second class this enemy is also immune to (e.g. a two-headed hydra). Absent for single-class enemies. */
+  secondSuit?: Suit;
   rank: 'J' | 'Q' | 'K';
   /** Legacy-only: a named mission enemy (e.g. "Letholdus the Justicar") shown instead of rank-of-suit. */
   name?: string;
@@ -72,14 +79,16 @@ export interface LegacyEnemySpec {
   name: string;
   /** The class the enemy is immune to, modeled internally as a suit (see legacy/classes.ts). */
   suit: Suit;
+  /** A second class this enemy is also immune to (e.g. a two-headed hydra). Absent for single-class enemies. */
+  secondSuit?: Suit;
   health: number;
   attack: number;
 }
 
 export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
 
-/** What the current player must do next. AWAIT_JESTER_CLAIM is Legacy-only (see jesterClaim). */
-export type TurnPhase = 'AWAIT_PLAY' | 'AWAIT_DEFEND' | 'AWAIT_JESTER_CLAIM';
+/** What the current player must do next. AWAIT_JESTER_CLAIM and AWAIT_COMBO_ASSIST are Legacy-only. */
+export type TurnPhase = 'AWAIT_PLAY' | 'AWAIT_DEFEND' | 'AWAIT_JESTER_CLAIM' | 'AWAIT_COMBO_ASSIST';
 
 /** Which rules variant this game is running — gates every Legacy-only mechanic below. */
 export type Ruleset = 'regicide' | 'legacy';
@@ -118,6 +127,20 @@ export interface GameState {
   jesterClaim: { card: Card; claimedBy: string | null } | null;
   /** Classic Regicide only: 0 until the first WON, then increments each time Endless Mode is continued into a new round (Kings join the deck, enemies scale up). */
   endlessLoop: number;
+  /**
+   * Legacy-only: when true, only an exact-damage hit defeats (and permanently banishes) the current enemy —
+   * overkilling it instead resets its wounds and sends it to the back of the mission's enemy line to be fought
+   * again later (see engine.ts's dealDamageAndCheckDefeat).
+   */
+  exactKillOnly: boolean;
+  /** Legacy-only: relic ids the campaign has earned and carries into every mission (e.g. 'KINFOLK_FLUTE'). */
+  relics: string[];
+  /**
+   * Legacy-only, gated by the 'KINFOLK_FLUTE' relic: the open combo-assist window. Non-null from the moment a
+   * player commits cards to an attack (with room left in the combo) until it's resolved — any other player may
+   * silently add one matching card via ASSIST_COMBO before the attacker calls RESOLVE_COMBO.
+   */
+  comboAssist: { attackerId: string; cardIds: string[] } | null;
 }
 
 export interface GameEvent {
@@ -133,10 +156,16 @@ export type GameAction =
       seed: string;
       /** The campaign's current party roster (not a fresh standard deck). */
       party: Card[];
-      /** This mission's enemies, in the fixed order they'll be faced. */
+      /** This mission's enemies, in the fixed order they'll be faced. Ignored when `standardCastle` is true. */
       enemies: LegacyEnemySpec[];
       /** How many Jesters to shuffle into this mission's reserve deck (by player count, per the rulebook). */
       jesterCount: number;
+      /** When true, ignores `enemies` and builds the standard 12-enemy Castle deck (classic Regicide's own rules). */
+      standardCastle?: boolean;
+      /** See GameState.exactKillOnly. */
+      exactKillOnly?: boolean;
+      /** See GameState.relics. */
+      relics?: string[];
     }
   | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
   | { type: 'YIELD'; playerId: string }
@@ -145,6 +174,10 @@ export type GameAction =
   | { type: 'PLAY_JESTER'; playerId: string; cardId: string }
   /** Legacy-only: claim an open Jester window. Validated against the window being open, not turn ownership — any player may claim. */
   | { type: 'CLAIM_JESTER'; playerId: string }
+  /** Legacy-only, gated by the 'KINFOLK_FLUTE' relic: silently add a matching card from hand to the open combo-assist window. Any player except the attacker. */
+  | { type: 'ASSIST_COMBO'; playerId: string; cardId: string }
+  /** Legacy-only, gated by the 'KINFOLK_FLUTE' relic: the attacker locks in and resolves the open combo-assist window. */
+  | { type: 'RESOLVE_COMBO'; playerId: string }
   | { type: 'DEFEND'; playerId: string; cardIds: string[] }
   | { type: 'USE_SOLO_JESTER'; playerId: string }
   /** Classic Regicide only, from WON: continues into another round with Kings shuffled into the Tavern deck and enemies scaled up. */
@@ -182,6 +215,8 @@ export interface ClientGameState {
   /** Legacy-only: the Jester sitting in the open claim window, if any (public information — it's on the table). */
   jesterClaim: { card: Card; claimedBy: string | null } | null;
   endlessLoop: number;
+  /** See GameState.comboAssist. */
+  comboAssist: { attackerId: string; cardIds: string[] } | null;
   you: {
     playerId: string;
   };

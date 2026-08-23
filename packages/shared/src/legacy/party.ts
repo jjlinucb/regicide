@@ -1,7 +1,9 @@
-import { buildStandardPartyCards } from '../game/deck.js';
+import { buildStandardPartyCards, shuffle } from '../game/deck.js';
 import type { Card, Rank, Suit } from '../game/types.js';
 import type { ClassId } from './classes.js';
 import { CLASS_THEME } from './classes.js';
+
+const ALL_SUITS: Suit[] = ['H', 'D', 'C', 'S'];
 
 type NonRoyalRank = Exclude<Rank, 'J' | 'Q' | 'K'>;
 
@@ -95,7 +97,33 @@ export function buildRecruitCard(spec: RecruitSpec): Card {
   };
 }
 
-/** Adds a mission's reward recruits to the campaign's permanent party roster. */
-export function applyReward(party: Card[], recruits: RecruitSpec[]): Card[] {
-  return [...party, ...recruits.map(buildRecruitCard)];
+export interface MissionReward {
+  recruits: RecruitSpec[];
+  /** Relic ids granted by this mission (see game/types.ts's GameState.relics for how they're consumed in play). */
+  relics?: string[];
+  /** Dual-class Stickers reward: gives this many random, eligible existing party members a second class icon. */
+  dualClassStickers?: number;
+}
+
+/**
+ * Dual-class Stickers reward: randomly picks `count` eligible party members (suited, non-Mage, no existing
+ * second class) and gives each a second class icon (a random suit other than their own) — from then on, that
+ * single card triggers both class powers whenever it's played (see rules.ts's cardSuits).
+ */
+export function applyDualClassStickers(party: Card[], count: number): Card[] {
+  const eligibleIds = party.filter((c) => c.kind === 'suited' && !c.arcane && !c.secondSuit).map((c) => c.id);
+  const chosenIds = new Set(shuffle(eligibleIds, Math.random).slice(0, count));
+  return party.map((c) => {
+    if (c.kind !== 'suited' || !chosenIds.has(c.id)) return c;
+    const options = ALL_SUITS.filter((s) => s !== c.suit);
+    const secondSuit = options[Math.floor(Math.random() * options.length)];
+    return { ...c, secondSuit };
+  });
+}
+
+/** Adds a mission's reward — recruits and any Dual-class Stickers — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
+export function applyReward(party: Card[], reward: MissionReward): Card[] {
+  let next = [...party, ...reward.recruits.map(buildRecruitCard)];
+  if (reward.dualClassStickers) next = applyDualClassStickers(next, reward.dualClassStickers);
+  return next;
 }
