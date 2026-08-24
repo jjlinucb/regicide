@@ -182,6 +182,16 @@ export function GamePage({
             </span>
           </div>
         )}
+        {state.pilgrimMechanic && state.pilgrimZone.length > 0 && (
+          <div className="legacy-jester-claim-banner">
+            <span>
+              🌊 Pilgrim Zone ({state.pilgrimZone.length} waiting, combined strength{' '}
+              {state.pilgrimZone.reduce((sum, c) => sum + cardValue(c), 0)}): play an attack matching one's exact value to rescue
+              them — {state.pilgrimZone.map((c) => (c.kind === 'suited' ? `${c.name ?? c.rank} (${cardValue(c)})` : 'Jester')).join(', ')}.
+              Every kill burns that much off the top of the reserve deck.
+            </span>
+          </div>
+        )}
         {state.currentEnemy && (
           <EnemyDisplay
             enemy={state.currentEnemy}

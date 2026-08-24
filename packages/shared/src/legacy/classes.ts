@@ -1,6 +1,6 @@
 import type { SpecialAbilityId, Suit } from '../game/types.js';
 
-export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAVER' | 'GUARDIAN';
+export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAVER' | 'GUARDIAN' | 'DRUID';
 
 /**
  * Regicide Legacy's four base classes map 1:1 onto classic Regicide's four suits — Warrior=Clubs (double damage),
@@ -102,6 +102,16 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     specialName: 'Aegis',
     specialText: 'Aegis: the shield holds permanently, reducing the enemy\'s attack to 0 for the rest of the fight.',
   },
+  DRUID: {
+    id: 'DRUID',
+    name: 'Druid',
+    tag: 'Regrowth',
+    glyph: '🌱',
+    color: '#4a7c3f',
+    specialAbility: 'WELLSPRING',
+    specialName: 'Wellspring',
+    specialText: 'Wellspring: Regrowth salvages 2 cards from the banish pile instead of 1.',
+  },
 };
 
 export const SUIT_TO_CLASS: Record<Suit, ClassTheme> = {
@@ -119,9 +129,10 @@ export function classForSuit(suit: Suit): ClassTheme {
  * A Legacy party card's real class theme. Almost always its suit's class — except a Mage or Reaver card, whose
  * suit is only along for immunity bookkeeping (see SuitedCard.arcane/reaver), so those must be checked first.
  */
-export function classForCard(card: { suit: Suit; arcane?: boolean; reaver?: boolean; guardian?: boolean }): ClassTheme {
+export function classForCard(card: { suit: Suit; arcane?: boolean; reaver?: boolean; guardian?: boolean; druid?: boolean }): ClassTheme {
   if (card.arcane) return CLASS_THEME.MAGE;
   if (card.reaver) return CLASS_THEME.REAVER;
   if (card.guardian) return CLASS_THEME.GUARDIAN;
+  if (card.druid) return CLASS_THEME.DRUID;
   return SUIT_TO_CLASS[card.suit];
 }

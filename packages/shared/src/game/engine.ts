@@ -117,6 +117,7 @@ function advanceToNextPlayer(state: GameState): void {
   state.turnPhase = 'AWAIT_PLAY';
   state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
   flipMissionZoneCard(state);
+  flipPilgrimCard(state);
   checkForStuckLoss(state);
 }
 
@@ -139,6 +140,35 @@ function flipMissionZoneCard(state: GameState): void {
   } else {
     log(state, 'The mission zone flips a Jester.');
   }
+}
+
+/**
+ * Mission 7 ("Tales of Rebirth") only: at the start of every turn, the top of the face-down Pilgrim deck flips
+ * face-up into the shared Pilgrim zone — a rescue puzzle separate from missionZone's suit-immunity mechanic (see
+ * GameState.pilgrimZone). Called both once at mission start (the first player's first turn) and from
+ * advanceToNextPlayer; like flipMissionZoneCard, it's naturally skipped when a kill lets the same player
+ * continue their turn against a new enemy, since that path doesn't call advanceToNextPlayer.
+ */
+function flipPilgrimCard(state: GameState): void {
+  if (!state.pilgrimMechanic) return;
+  const card = state.pilgrimDeck.shift();
+  if (!card) return;
+  state.pilgrimZone.push(card);
+  log(state, `A Pilgrim surfaces in the mission zone: ${card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester'}.`);
+}
+
+/**
+ * Mission 7 only: an attack whose total played value exactly matches a Pilgrim currently sitting in the zone
+ * rescues them — permanently banished (out of the burn-penalty math for good), not sent to the discard pile.
+ * Uses the play's raw totalValue (the cards' own printed sum), before any class-power multiplier or bonus.
+ */
+function checkPilgrimRescue(state: GameState, totalValue: number): void {
+  if (!state.pilgrimMechanic) return;
+  const idx = state.pilgrimZone.findIndex((c) => cardValue(c) === totalValue);
+  if (idx === -1) return;
+  const [rescued] = state.pilgrimZone.splice(idx, 1);
+  state.banishPile.push(rescued);
+  log(state, `${rescued.kind === 'suited' ? rescued.name ?? `the ${rescued.rank}` : 'A Jester'} is rescued from the mission zone — banished safely, for good.`);
 }
 
 function drawOneCard(state: GameState, player: PlayerState): boolean {
@@ -361,6 +391,18 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
         log(state, `${sacrificed.kind === 'suited' ? sacrificed.name ?? `the ${sacrificed.rank}` : 'the Jester'} is drawn permanently into the mission zone.`);
       }
     }
+    if (state.pilgrimMechanic) {
+      // Mission 7: every kill burns cards off the top of the reserve deck straight into the discard pile, equal
+      // to the combined value of every Pilgrim still waiting (unrescued) in the mission zone.
+      const burnTotal = state.pilgrimZone.reduce((sum, c) => sum + cardValue(c), 0);
+      if (burnTotal > 0) {
+        const burned = state.tavernDeck.splice(0, burnTotal);
+        if (burned.length > 0) {
+          state.discardPile.push(...burned);
+          log(state, `The ${state.pilgrimZone.length} Pilgrim(s) still waiting (combined strength ${burnTotal}) burn ${burned.length} card(s) off the reserve deck into the discard pile.`);
+        }
+      }
+    }
   } else {
     const exact = remaining === 0;
     const upgrade = upgradeDefeatedRank(enemy.rank, state.endlessLoop);
@@ -492,6 +534,9 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.exactKillToReserveDeck = false;
   state.exactKillSplashDamage = false;
   state.zoneVengeanceOnKill = false;
+  state.pilgrimMechanic = false;
+  state.pilgrimDeck = [];
+  state.pilgrimZone = [];
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -556,8 +601,14 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.exactKillToReserveDeck = action.exactKillToReserveDeck ?? false;
   state.exactKillSplashDamage = action.exactKillSplashDamage ?? false;
   state.zoneVengeanceOnKill = action.zoneVengeanceOnKill ?? false;
+  state.pilgrimMechanic = action.pilgrimMechanic ?? false;
+  // A small, fixed set of named survivors (not shuffled) — they surface in the same narrative order every time,
+  // like Mission 5/6's presetMissionZone.
+  state.pilgrimDeck = action.pilgrimCards ? [...action.pilgrimCards] : [];
+  state.pilgrimZone = [];
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
+  flipPilgrimCard(state); // the first player's turn is starting right now, so the Mission 7 flip applies here too
   return ok(state);
 }
 
@@ -618,13 +669,15 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     state,
     `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${shape.totalValue}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
   );
+  if (state.ruleset === 'legacy') checkPilgrimRescue(state, shape.totalValue);
   const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
-  // Mage, Reaver, and Guardian cards' printed suits don't join the combined suit-power resolution below — a
-  // Mage's class power is the arcane bolt above instead (which already resolved), a Reaver's is the
-  // reserve-deck tear resolved just below, and a Guardian's is the permanent shield resolved just after that
-  // (Mage always goes first, per legacy/classes.ts).
+  // Mage, Reaver, Guardian, and Druid cards' printed suits don't join the combined suit-power resolution below —
+  // a Mage's class power is the arcane bolt above instead (which already resolved), a Reaver's is the
+  // reserve-deck tear resolved just below, a Guardian's is the permanent shield resolved just after that, and a
+  // Druid's is the banish-pile salvage resolved after that (Mage always goes first, per legacy/classes.ts).
   const nonArcaneCards = cards.filter(
-    (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian,
+    (c): c is Extract<Card, { kind: 'suited' }> =>
+      c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid,
   );
   const nonArcaneSuits = Array.from(new Set(nonArcaneCards.flatMap(cardSuits)));
 
@@ -680,6 +733,29 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     } else {
       guardianBlocksNextAttack = true;
       log(state, `${guardianCards[0].name ?? 'A Guardian'} raises an absolute shield, blocking the enemy's next attack entirely.`);
+    }
+  }
+
+  // Druids (Mission 7): playing one activates Regrowth — salvage cards back out of the banish pile and return
+  // them to the bottom of the reserve deck. Wellspring salvages 2 instead of 1. Pulls the most recently banished
+  // cards first (end of banishPile), same "reverse of banishment" ordering used nowhere else yet but the
+  // simplest deterministic choice here.
+  const druidCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.druid));
+  if (state.ruleset === 'legacy' && druidCards.length > 0) {
+    const salvageCount = hasSpecial(druidCards, 'WELLSPRING') ? 2 : 1;
+    const salvaged: Card[] = [];
+    for (let i = 0; i < salvageCount; i++) {
+      const card = state.banishPile.pop();
+      if (card) salvaged.push(card);
+    }
+    if (salvaged.length > 0) {
+      state.tavernDeck.push(...salvaged);
+      const salvagedLabel = salvaged
+        .map((c) => (c.kind === 'suited' ? c.name ?? `a ${c.rank}` : 'a Jester'))
+        .join(' and ');
+      log(state, `${druidCards[0].name ?? 'A Druid'} channels Regrowth — ${salvagedLabel} returns from the banish pile to the bottom of the reserve deck.`);
+    } else {
+      log(state, 'The banish pile is empty — nothing for Regrowth to salvage.');
     }
   }
 
@@ -992,6 +1068,9 @@ export function createLobbyState(): GameState {
     exactKillToReserveDeck: false,
     exactKillSplashDamage: false,
     zoneVengeanceOnKill: false,
+    pilgrimMechanic: false,
+    pilgrimDeck: [],
+    pilgrimZone: [],
   };
 }
 

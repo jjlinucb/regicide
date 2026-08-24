@@ -30,6 +30,9 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     discardTopBuffsAttack: state.discardTopBuffsAttack,
     missionZone: state.missionZone,
     zoneVengeanceOnKill: state.zoneVengeanceOnKill,
+    pilgrimMechanic: state.pilgrimMechanic,
+    pilgrimZone: state.pilgrimZone,
+    pilgrimDeckCount: state.pilgrimDeck.length,
     you: { playerId: viewerPlayerId },
   };
 }

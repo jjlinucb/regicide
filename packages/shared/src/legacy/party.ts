@@ -73,7 +73,7 @@ export interface RecruitSpec {
   rank: NonRoyalRank;
   /** True for a standout reward: grants the recruit's class's signature ability permanently, alongside their name. */
   special?: boolean;
-  /** Required for MAGE, REAVER, and GUARDIAN recruits only — none has a suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */
+  /** Required for MAGE, REAVER, GUARDIAN, and DRUID recruits only — none has a suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */
   suit?: Suit;
 }
 
@@ -95,6 +95,7 @@ export function buildRecruitCard(spec: RecruitSpec): Card {
     ...(spec.class === 'MAGE' ? { arcane: true } : {}),
     ...(spec.class === 'REAVER' ? { reaver: true } : {}),
     ...(spec.class === 'GUARDIAN' ? { guardian: true } : {}),
+    ...(spec.class === 'DRUID' ? { druid: true } : {}),
     ...(spec.special ? { special: CLASS_THEME[spec.class].specialAbility } : {}),
   };
 }
@@ -122,7 +123,7 @@ export function applyDualClassStickers(party: Card[], count: number): Card[] {
   for (const rank of LUCKY_FOUR_RANKS) {
     if (chosenIds.size >= count) break;
     const eligible = party.filter(
-      (c) => c.kind === 'suited' && c.rank === rank && !c.arcane && !c.reaver && !c.guardian && !c.secondSuit,
+      (c) => c.kind === 'suited' && c.rank === rank && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.secondSuit,
     );
     if (eligible.length === 0) continue;
     const pick = eligible[Math.floor(Math.random() * eligible.length)];
