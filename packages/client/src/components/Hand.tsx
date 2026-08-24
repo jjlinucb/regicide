@@ -2,10 +2,20 @@ import { isSuitBlockedByImmunity, type Card, type EnemyState } from '@regicide/s
 import { PlayingCard } from './PlayingCard';
 
 function isBlocked(card: Card, enemy?: EnemyState | null): boolean {
-  // A Mage's arcane bolt, a Reaver's reserve-tear, a Guardian's permanent shield, a Druid's Regrowth, and a
-  // Chanter's chant window aren't suit powers, so enemy suit immunity never blocks them (see engine.ts's
-  // resolveArcaneBolts / resolveCommittedPlay's reaverCards/guardianCards/druidCards/chanterCards handling).
-  if (card.kind !== 'suited' || card.arcane || card.reaver || card.guardian || card.druid || card.chanter) return false;
+  // A Mage's arcane bolt, a Reaver's reserve-tear, a Guardian's permanent shield, a Druid's Regrowth, a
+  // Chanter's chant window, and Gøran's Evergreen aren't suit powers (or always ignore immunity outright), so
+  // enemy suit immunity never blocks them (see engine.ts's resolveArcaneBolts / resolveCommittedPlay's
+  // reaverCards/guardianCards/druidCards/chanterCards/evergreenActive handling).
+  if (
+    card.kind !== 'suited' ||
+    card.arcane ||
+    card.reaver ||
+    card.guardian ||
+    card.druid ||
+    card.chanter ||
+    card.evergreen
+  )
+    return false;
   return Boolean(enemy) && isSuitBlockedByImmunity(card.suit, enemy!);
 }
 

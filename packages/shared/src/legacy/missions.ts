@@ -44,6 +44,8 @@ export interface Mission {
   pilgrimCards?: Card[];
   /** See GameState.ascendingZone. */
   ascendingZone?: boolean;
+  /** See GameState.capturedPilesActive. */
+  capturedPilesActive?: boolean;
   /** See GameAction's START_LEGACY_MISSION.extraReserveCards. */
   extraReserveCards?: Card[];
 }
@@ -395,6 +397,57 @@ export const MISSIONS: Mission[] = [
         recruit('Ketta Skysong', 'CHANTER', '7', 'C'),
         specialRecruit('Bram the Refrainkeeper', 'CHANTER', '9', 'S'),
       ],
+    },
+  },
+  {
+    id: 9,
+    title: 'Hope from Ashes',
+    story:
+      "The party arrives at the Twin Seed Temple, a mighty tree that's stood as a beacon of light in the heart " +
+      "of a dark swamp for longer than the Syndicate has existed — now offering rather less light than usual, " +
+      "on account of being on fire. Myla and her cronies are here to destroy whatever the temple was built to " +
+      "protect, and half the party is already scattered and captured before the first blow lands.",
+    // 4-5-boss escalating lineup: 4 Loreguards (15/30), 5 Lorekeepers (20/40, the 5th dual-immune as a preview
+    // of the boss to come), then Myla herself — 80 health, 20 attack, and immune to both Bard and Paladin at
+    // once, no Jester-breakable weak point to lean on.
+    enemies: [
+      enemy('Loreguard: Ember-Wrought', 'WARRIOR', 30, 15),
+      enemy('Loreguard: Cinder-Tongue', 'BARD', 30, 15),
+      enemy('Loreguard: Ashbound', 'CLERIC', 30, 15),
+      enemy('Loreguard: Soot-Ward', 'PALADIN', 30, 15),
+      enemy('Lorekeeper: Emberclaw', 'WARRIOR', 40, 20),
+      enemy('Lorekeeper: Smoke-Herald', 'BARD', 40, 20),
+      enemy('Lorekeeper: Pyre-Anointed', 'CLERIC', 40, 20),
+      enemy('Lorekeeper: Blaze-Warden', 'PALADIN', 40, 20),
+      enemy('Lorekeeper: Myla\'s Chosen', 'BARD', 40, 20, 'PALADIN'),
+      enemy('Myla', 'BARD', 80, 20, 'PALADIN'),
+    ],
+    // The captured-piles deckbuilding mechanic: 30 party cards are split into 3 face-down piles of 10 (top card
+    // revealed) instead of joining the reserve deck. At the end of every turn (skipped entirely after a kill),
+    // banish a hand card to rescue one pile's face-up card into the discard pile and flip its next card — or
+    // decline, and every pile cycles its face-up card to the bottom and reveals the next one instead. An exact
+    // kill sends a chosen pile's face-up card straight to the top of the reserve deck (see
+    // GameState.capturedPilesActive).
+    capturedPilesActive: true,
+    // A fresh pool of temple acolytes, shuffled directly into the ordinary reserve deck alongside whatever's
+    // left of the party after the 30-card split — unlike Mission 7's Pilgrims, these carry no zone mechanic of
+    // their own, just extra reserve-deck bodies (see GameState.START_LEGACY_MISSION action's extraReserveCards).
+    extraReserveCards: [
+      pilgrim('Acolyte Wren', 'H', '3'),
+      pilgrim('Brother Ossian', 'D', '4'),
+      pilgrim('Ember-Keeper Tam', 'C', '5'),
+      pilgrim('Sister Ilva', 'S', '6'),
+      pilgrim('Young Petra', 'H', '7'),
+      pilgrim('Elder Rasha', 'D', '8'),
+    ],
+    // Reward: the Evergreen Mother relic (a corrupted card's cost becomes another player banishing from their
+    // own hand instead of the reserve deck's top card, or your own hand solo), Gøran joins the party carrying
+    // Evergreen (all four base class powers at once, always ignoring enemy immunity — exactly what breaks
+    // Myla's dual immunity open), and a second Mage sticker for one more lucky party member.
+    reward: {
+      recruits: [specialRecruit('Gøran', 'EVERGREEN', '10', 'H')],
+      relics: ['EVERGREEN_MOTHER'],
+      mageSticker: true,
     },
   },
 ];

@@ -1,5 +1,6 @@
-import type { Card, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit } from './types.js';
+import type { Card, CapturedPile, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit } from './types.js';
 import {
+  buildCapturedPiles,
   buildCastleDeck,
   buildEndlessCastleDeck,
   buildEndlessTavernDeck,
@@ -123,6 +124,22 @@ function advanceToNextPlayer(state: GameState): void {
 }
 
 /**
+ * Mission 9 only: called everywhere a turn would normally end outright (defend succeeds, or the enemy's attack
+ * was already 0) — opens the AWAIT_END_OF_TURN banish-to-rescue/decline choice instead of advancing immediately,
+ * as long as at least one captured pile still has a face-up card to offer. Never called when a kill lets the
+ * same player continue their turn (dealDamageAndCheckDefeat's "continue" path calls neither this nor
+ * advanceToNextPlayer directly), which is exactly how the mission's "no end-of-turn effects after a kill" rule
+ * falls out for free.
+ */
+function endTurnOrAwaitRescue(state: GameState): void {
+  if (state.ruleset === 'legacy' && state.capturedPilesActive && state.capturedPiles.some((p) => p.faceUp)) {
+    state.turnPhase = 'AWAIT_END_OF_TURN';
+    return;
+  }
+  advanceToNextPlayer(state);
+}
+
+/**
  * Mission 3 ("Lessons in Flames") only: end of every turn, the top of the reserve deck flips face-up into a
  * shared mission zone, and the enemy becomes immune to that card's class(es) too — stacking with each further
  * flip. Only called from advanceToNextPlayer, so defeating an enemy (which skips straight back to AWAIT_PLAY
@@ -230,14 +247,46 @@ function hasSpecial(cards: Card[], ability: SpecialAbilityId): boolean {
 }
 
 /**
+ * Pays a corrupted card's cost: normally banishes the top of the reserve deck (see SuitedCard.corrupted). With
+ * Mission 9's 'EVERGREEN_MOTHER' relic in play, the cost changes to another player banishing a card from their
+ * own hand instead — in solo play (no "other player" to ask), the same player banishes from their own remaining
+ * hand instead (the relic's "solo side"). If there's no eligible hand to banish from (every other hand is empty,
+ * or the solo player's own hand is), nothing happens.
+ */
+function applyCorruptedCost(state: GameState, player: PlayerState, card: Extract<Card, { kind: 'suited' }>): void {
+  const label = card.name ?? 'A corrupted card';
+  if (state.relics.includes('EVERGREEN_MOTHER')) {
+    const candidates = state.players.length === 1 ? [player] : state.players.filter((p) => p.id !== player.id);
+    const eligible = candidates.filter((p) => p.hand.length > 0);
+    if (eligible.length === 0) {
+      log(state, `${label} ignores immunity — no hand for the Evergreen Mother to banish from.`);
+      return;
+    }
+    const victim = eligible[Math.floor(nextRandom(state) * eligible.length)];
+    const idx = Math.floor(nextRandom(state) * victim.hand.length);
+    const [lost] = victim.hand.splice(idx, 1);
+    state.banishPile.push(lost);
+    log(state, `${label} ignores immunity — the Evergreen Mother banishes a card from ${victim.name}'s hand as the cost.`);
+    return;
+  }
+  const banished = state.tavernDeck.shift();
+  if (banished) {
+    state.banishPile.push(banished);
+    log(state, `${label} ignores immunity — the reserve deck's top card is banished as the cost.`);
+  }
+}
+
+/**
  * Legacy-only, Mission 3+: resolves each played Mage card's arcane bolt — at that card's own value, one after
- * another, and always before the rest of the play's class powers resolve (see resolveSuitPowers). Returns the
- * total bonus damage to add on top of the play's normal totalValue * multiplier.
+ * another, and always before the rest of the play's class powers resolve (see resolveSuitPowers). Also fires for
+ * a card carrying a bonus Mage sticker (Mission 9's secondClassArcane) — unlike a pure Mage card, that card's own
+ * suit power ALSO resolves normally (see resolveCommittedPlay's nonArcaneCards filter). Returns the total bonus
+ * damage to add on top of the play's normal totalValue * multiplier.
  */
 function resolveArcaneBolts(state: GameState, cards: Card[]): number {
   let bonus = 0;
   for (const c of cards) {
-    if (c.kind !== 'suited' || !c.arcane) continue;
+    if (c.kind !== 'suited' || !(c.arcane || c.secondClassArcane)) continue;
     const base = cardValue(c);
     const surged = c.special === 'ARCANE_SURGE';
     const bolt = surged ? base * 2 : base;
@@ -516,6 +565,14 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
     }
   }
 
+  if (state.ruleset === 'legacy' && state.capturedPilesActive && remaining === 0 && state.capturedPiles.some((p) => p.faceUp)) {
+    // Mission 9: an exact-damage kill's bonus — choose a captured pile's face-up card to send straight to the
+    // top of the reserve deck (see chooseExactKillRescue). Blocks further play until resolved.
+    state.turnPhase = 'AWAIT_RESCUE_CHOICE';
+    log(state, 'An exact hit! Choose a captured pile to rescue straight to the top of the reserve deck.');
+    return true;
+  }
+
   // Defeating player continues their turn against the new enemy (no defend, no turn advance).
   state.turnPhase = 'AWAIT_PLAY';
   state.pendingDamage = 0;
@@ -589,6 +646,8 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.zoneClosed = false;
   state.zonePurge = null;
   state.chanterWindow = null;
+  state.capturedPilesActive = false;
+  state.capturedPiles = [];
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -603,7 +662,19 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
 
   const buildRng = makeRng(action.seed);
   const enemyDeck = action.standardCastle ? buildCastleDeck(buildRng) : action.enemies.map(makeLegacyEnemy);
-  const reserveDeck = buildLegacyReserveDeck([...action.party, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);
+  const capturedPilesActive = action.capturedPilesActive ?? false;
+  // Mission 9: 30 cards are split out of the party into 3 captured piles before anything is dealt — the reserve
+  // deck for the mission is built from whatever's left of the party, plus any mission-only extras (e.g. a fresh
+  // pool of Pilgrim survivor cards), plus jesters.
+  let capturedPiles: CapturedPile[] = [];
+  let reserveDeck: Card[];
+  if (capturedPilesActive) {
+    const split = buildCapturedPiles(action.party, buildRng);
+    capturedPiles = split.piles;
+    reserveDeck = buildLegacyReserveDeck([...split.leftoverParty, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);
+  } else {
+    reserveDeck = buildLegacyReserveDeck([...action.party, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);
+  }
   const maxHandSize = MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5;
 
   const players: PlayerState[] = action.playerIds.map((id, i) => ({
@@ -665,6 +736,8 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.zoneClosed = false;
   state.zonePurge = null;
   state.chanterWindow = null;
+  state.capturedPilesActive = capturedPilesActive;
+  state.capturedPiles = capturedPiles;
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
   flipPilgrimCard(state); // the first player's turn is starting right now, so the Mission 7 flip applies here too
@@ -730,27 +803,28 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   );
   if (state.ruleset === 'legacy') checkPilgrimRescue(state, shape.totalValue);
   const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
-  // Mage, Reaver, Guardian, Druid, and Chanter cards' printed suits don't join the combined suit-power resolution
-  // below — a Mage's class power is the arcane bolt above instead (which already resolved), a Reaver's is the
-  // reserve-deck tear resolved just below, a Guardian's is the permanent shield resolved just after that, a
-  // Druid's is the banish-pile salvage resolved after that, and a Chanter's is the chant resolved last (Mage
-  // always goes first, per legacy/classes.ts).
+  // Mage, Reaver, Guardian, Druid, Chanter, and Evergreen cards' printed suits don't join the combined
+  // suit-power resolution below — a Mage's (or a secondClassArcane card's bonus) class power is the arcane bolt
+  // above instead (which already resolved), a Reaver's is the reserve-deck tear resolved just below, a
+  // Guardian's is the permanent shield resolved just after that, a Druid's is the banish-pile salvage resolved
+  // after that, a Chanter's is the chant resolved further down, and an Evergreen card's is the all-four-powers
+  // resolution forced further down still (Mage always goes first, per legacy/classes.ts). A secondClassArcane
+  // card is deliberately NOT excluded here — it keeps its own suit power on top of the arcane bolt it already
+  // triggered above (see SuitedCard.secondClassArcane).
   const nonArcaneCards = cards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> =>
-      c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.chanter,
+      c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.chanter && !c.evergreen,
   );
   const nonArcaneSuits = Array.from(new Set(nonArcaneCards.flatMap(cardSuits)));
 
   // Corrupted cards: their class power always ignores immunity, at the cost of banishing the top of the
-  // reserve deck the instant they're played (see SuitedCard.corrupted).
+  // reserve deck the instant they're played (see SuitedCard.corrupted) — unless the Evergreen Mother relic is
+  // in play, in which case the cost becomes another player banishing a card from their own hand instead (see
+  // applyCorruptedCost).
   const corruptedCards = nonArcaneCards.filter((c) => c.corrupted);
   const corruptedSuits = Array.from(new Set(corruptedCards.flatMap(cardSuits)));
   for (const c of corruptedCards) {
-    const banished = state.tavernDeck.shift();
-    if (banished) {
-      state.banishPile.push(banished);
-      log(state, `${c.name ?? 'A corrupted card'} ignores immunity — the reserve deck's top card is banished as the cost.`);
-    }
+    applyCorruptedCost(state, player, c);
   }
 
   // Reavers (Mission 5): playing one tears the top card off the reserve deck, adds its raw value straight onto
@@ -833,7 +907,17 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     }
   }
 
-  const clubsMultiplier = resolveSuitPowers(state, cards, nonArcaneSuits, shape.totalValue, Boolean(claimedJester), corruptedSuits);
+  // Gøran's Evergreen (Mission 9): playing his card resolves all four base class powers at once — heal, draw,
+  // double damage, reduce enemy strength — and always ignores enemy immunity, regardless of which suits are
+  // actually in the play or what the enemy is immune to.
+  const evergreenActive = state.ruleset === 'legacy' && cards.some((c) => c.kind === 'suited' && c.evergreen);
+  if (evergreenActive) {
+    log(state, `${(cards.find((c) => c.kind === 'suited' && c.evergreen) as Extract<Card, { kind: 'suited' }> | undefined)?.name ?? 'Evergreen'} surges — all four powers resolve at once, ignoring immunity.`);
+  }
+  const effectiveSuits: Suit[] = evergreenActive ? Array.from(new Set([...nonArcaneSuits, 'H', 'D', 'C', 'S'])) : nonArcaneSuits;
+  const ignoreImmunityForPlay = Boolean(claimedJester) || evergreenActive;
+
+  const clubsMultiplier = resolveSuitPowers(state, cards, effectiveSuits, shape.totalValue, ignoreImmunityForPlay, corruptedSuits);
   const damage = (shape.totalValue + reaverBonus) * clubsMultiplier + arcaneBonus;
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
@@ -856,7 +940,7 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   const enemyAttack = guardianBlocksNextAttack ? 0 : resolvedEnemyAttack(state);
   if (enemyAttack <= 0) {
     log(state, guardianBlocksNextAttack ? 'The shield holds — no damage suffered.' : `The enemy's attack has been reduced to 0 — no damage suffered.`);
-    advanceToNextPlayer(state);
+    endTurnOrAwaitRescue(state);
     return ok(state);
   }
   state.pendingDamage = enemyAttack;
@@ -966,7 +1050,7 @@ function yieldTurn(state: GameState, action: Extract<GameAction, { type: 'YIELD'
 
   const enemyAttack = resolvedEnemyAttack(state);
   if (enemyAttack <= 0) {
-    advanceToNextPlayer(state);
+    endTurnOrAwaitRescue(state);
     return ok(state);
   }
   state.pendingDamage = enemyAttack;
@@ -1115,6 +1199,29 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
   } else {
     log(state, `${player.name} discards ${cards.length} card(s) to cover ${state.pendingDamage} damage.`);
   }
+  endTurnOrAwaitRescue(state);
+  return ok(state);
+}
+
+/** Mission 9, from AWAIT_END_OF_TURN: banishes a hand card to rescue one captured pile's face-up card into the discard pile, then flips that pile's next card and advances the turn. */
+function banishForRescue(state: GameState, action: Extract<GameAction, { type: 'BANISH_FOR_RESCUE' }>): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_END_OF_TURN');
+  if (err) return fail(err);
+
+  const player = currentPlayer(state);
+  const card = player.hand.find((c) => c.id === action.cardId);
+  if (!card) return fail(`Card ${action.cardId} is not in your hand.`);
+  const pile = state.capturedPiles[action.pileIndex];
+  if (!pile || !pile.faceUp) return fail('That captured pile has no face-up card to rescue.');
+
+  player.hand = player.hand.filter((c) => c.id !== card.id);
+  state.banishPile.push(card);
+  state.discardPile.push(pile.faceUp);
+  log(
+    state,
+    `${player.name} banishes ${card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'the Jester'} to rescue ${pile.faceUp.kind === 'suited' ? pile.faceUp.name ?? `the ${pile.faceUp.rank}` : 'the Jester'} from the captured pile.`,
+  );
+  pile.faceUp = pile.faceDown.shift() ?? null;
   advanceToNextPlayer(state);
   return ok(state);
 }
@@ -1296,6 +1403,39 @@ function resolveAzureEmblem(state: GameState, action: Extract<GameAction, { type
   return ok(state);
 }
 
+/** Mission 9, from AWAIT_END_OF_TURN: declines to banish — every captured pile's face-up card cycles face-down to the bottom of its own pile and the next card flips up, then the turn advances. */
+function declineRescue(state: GameState, action: Extract<GameAction, { type: 'DECLINE_RESCUE' }>): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_END_OF_TURN');
+  if (err) return fail(err);
+
+  for (const pile of state.capturedPiles) {
+    if (!pile.faceUp) continue;
+    pile.faceDown.push(pile.faceUp);
+    pile.faceUp = pile.faceDown.shift() ?? null;
+  }
+  log(state, `${currentPlayer(state).name} declines to rescue — each captured pile cycles to its next card.`);
+  advanceToNextPlayer(state);
+  return ok(state);
+}
+
+/** Mission 9, from AWAIT_RESCUE_CHOICE: an exact kill's bonus — sends one captured pile's face-up card straight to the top of the reserve deck, then resumes the same player's turn. */
+function chooseExactKillRescue(state: GameState, action: Extract<GameAction, { type: 'CHOOSE_EXACT_KILL_RESCUE' }>): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_RESCUE_CHOICE');
+  if (err) return fail(err);
+
+  const pile = state.capturedPiles[action.pileIndex];
+  if (!pile || !pile.faceUp) return fail('That captured pile has no face-up card to rescue.');
+
+  const rescued = pile.faceUp;
+  state.tavernDeck.unshift(rescued);
+  pile.faceUp = pile.faceDown.shift() ?? null;
+  log(state, `${rescued.kind === 'suited' ? rescued.name ?? `the ${rescued.rank}` : 'The Jester'} is rescued straight to the top of the reserve deck!`);
+  state.turnPhase = 'AWAIT_PLAY';
+  state.pendingDamage = 0;
+  checkForStuckLoss(state);
+  return ok(state);
+}
+
 export function createLobbyState(): GameState {
   return {
     phase: 'LOBBY',
@@ -1337,6 +1477,8 @@ export function createLobbyState(): GameState {
     zoneClosed: false,
     zonePurge: null,
     chanterWindow: null,
+    capturedPilesActive: false,
+    capturedPiles: [],
   };
 }
 
@@ -1373,6 +1515,12 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return resolveChant(draft, action);
     case 'USE_SOLO_JESTER':
       return useSoloJester(draft, action);
+    case 'BANISH_FOR_RESCUE':
+      return banishForRescue(draft, action);
+    case 'DECLINE_RESCUE':
+      return declineRescue(draft, action);
+    case 'CHOOSE_EXACT_KILL_RESCUE':
+      return chooseExactKillRescue(draft, action);
     case 'START_ENDLESS_ROUND':
       return startEndlessRound(draft);
     default:

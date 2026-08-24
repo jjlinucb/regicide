@@ -38,6 +38,8 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     zoneClosed: state.zoneClosed,
     zonePurge: state.zonePurge,
     chanterWindow: state.chanterWindow,
+    capturedPilesActive: state.capturedPilesActive,
+    capturedPiles: state.capturedPiles.map((p) => ({ faceUp: p.faceUp, faceDownCount: p.faceDown.length })),
     you: { playerId: viewerPlayerId },
   };
 }

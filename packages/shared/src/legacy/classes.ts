@@ -1,6 +1,16 @@
 import type { SpecialAbilityId, Suit } from '../game/types.js';
 
-export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAVER' | 'GUARDIAN' | 'DRUID' | 'CHANTER';
+export type ClassId =
+  | 'WARRIOR'
+  | 'BARD'
+  | 'CLERIC'
+  | 'PALADIN'
+  | 'MAGE'
+  | 'REAVER'
+  | 'GUARDIAN'
+  | 'DRUID'
+  | 'CHANTER'
+  | 'EVERGREEN';
 
 /**
  * Regicide Legacy's four base classes map 1:1 onto classic Regicide's four suits — Warrior=Clubs (double damage),
@@ -8,15 +18,15 @@ export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAV
  * card IS a suited card (see legacy/party.ts); this table is purely the display layer so suit letters never
  * leak into Legacy UI text.
  *
- * Mage (Mission 3), Reaver (Mission 5), Guardian (Mission 6), Druid (Mission 7), and Chanter (Mission 8) are
- * the odd ones out: none has a suit of its own (there's no 5th+ suit in a standard deck). Each kind of card
- * keeps whatever suit it's printed with, purely for immunity bookkeeping, but its class power never joins the
- * combined suit-power resolution — see SuitedCard.arcane/reaver/guardian/druid/chanter and engine.ts's
- * resolveArcaneBolts/resolveCommittedPlay.
+ * Mage (Mission 3), Reaver (Mission 5), Guardian (Mission 6), Druid (Mission 7), Chanter (Mission 8), and
+ * Evergreen (Mission 9) are the odd ones out: none has a suit of its own (there's no 5th+ suit in a standard
+ * deck). Each kind of card keeps whatever suit it's printed with, purely for immunity bookkeeping, but its
+ * class power never joins the combined suit-power resolution — see
+ * SuitedCard.arcane/reaver/guardian/druid/chanter/evergreen and engine.ts's resolveArcaneBolts/resolveCommittedPlay.
  */
 export interface ClassTheme {
   id: ClassId;
-  /** Absent for MAGE, REAVER, GUARDIAN, DRUID, and CHANTER — see class doc above. */
+  /** Absent for MAGE, REAVER, GUARDIAN, DRUID, CHANTER, and EVERGREEN — see class doc above. */
   suit?: Suit;
   name: string;
   tag: string;
@@ -123,6 +133,18 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     specialName: 'Encore',
     specialText: 'Encore: doubles how many cards everyone draws in the chant.',
   },
+  EVERGREEN: {
+    id: 'EVERGREEN',
+    name: 'Evergreen',
+    tag: 'All Four Powers',
+    glyph: '🌳',
+    color: '#2f6b3f',
+    specialAbility: 'EVERGREEN',
+    specialName: 'Evergreen',
+    specialText:
+      'Evergreen: resolves all four base class powers at once — heal, draw, double damage, reduce enemy ' +
+      "strength — and always ignores enemy immunity, no matter which classes the enemy is immune to.",
+  },
 };
 
 export const SUIT_TO_CLASS: Record<Suit, ClassTheme> = {
@@ -147,11 +169,13 @@ export function classForCard(card: {
   guardian?: boolean;
   druid?: boolean;
   chanter?: boolean;
+  evergreen?: boolean;
 }): ClassTheme {
   if (card.arcane) return CLASS_THEME.MAGE;
   if (card.reaver) return CLASS_THEME.REAVER;
   if (card.guardian) return CLASS_THEME.GUARDIAN;
   if (card.druid) return CLASS_THEME.DRUID;
   if (card.chanter) return CLASS_THEME.CHANTER;
+  if (card.evergreen) return CLASS_THEME.EVERGREEN;
   return SUIT_TO_CLASS[card.suit];
 }

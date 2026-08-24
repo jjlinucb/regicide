@@ -3,7 +3,7 @@ import { applyAction, createLobbyState } from '../game/engine.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs } from './missions.js';
-import { applyDualClassStickers, applyReward, buildInitialParty, buildRecruitCard } from './party.js';
+import { applyDualClassStickers, applyMageSticker, applyReward, buildInitialParty, buildRecruitCard } from './party.js';
 
 function suited(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
   return { id: `${suit}${rank}-${Math.random()}`, kind: 'suited', suit, rank };
@@ -59,7 +59,7 @@ describe('legacy: mission setup', () => {
   });
 
   it('every non-standard-castle mission has at least one enemy and converts cleanly to engine specs', () => {
-    expect(MISSIONS.length).toBe(8);
+    expect(MISSIONS.length).toBe(9);
     for (const mission of MISSIONS) {
       if (mission.standardCastle) continue;
       expect(mission.enemies.length).toBeGreaterThan(0);
@@ -1413,5 +1413,249 @@ describe('legacy: mission 8 reward (Chanter faction)', () => {
     const card = buildRecruitCard({ name: 'Test Chanter', class: 'CHANTER', rank: '5', suit: 'D' });
     expect(card.kind === 'suited' && card.chanter).toBe(true);
     expect(card.kind === 'suited' && card.suit).toBe('D');
+  });
+});
+describe('legacy: mission 9 mechanics (captured piles)', () => {
+  function startTempleMission(
+    n: number,
+    enemies: LegacyEnemySpec[],
+    opts: { extraReserveCards?: Card[] } = {},
+  ): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'temple-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      capturedPilesActive: true,
+      extraReserveCards: opts.extraReserveCards,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('splits 30 cards into 3 piles of 10 (face-down + 1 revealed each), leaving the rest for the reserve deck', () => {
+    const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 20, attack: 10 };
+    const state = startTempleMission(1, [boss]);
+
+    expect(state.capturedPiles.length).toBe(3);
+    for (const pile of state.capturedPiles) {
+      expect(pile.faceUp).not.toBeNull();
+      expect(pile.faceDown.length).toBe(9);
+    }
+    const totalCaptured = state.capturedPiles.reduce((sum, p) => sum + p.faceDown.length + (p.faceUp ? 1 : 0), 0);
+    expect(totalCaptured).toBe(30);
+    // 40-card starting party minus 30 captured = 10 leftover, dealt to the hand and/or left in the reserve deck.
+    const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
+    expect(handCount + state.tavernDeck.length).toBe(10);
+  });
+
+  it('shuffles extraReserveCards into the ordinary reserve deck, not the captured piles', () => {
+    const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 20, attack: 10 };
+    const acolyte: Card = { id: 'acolyte-1', kind: 'suited', suit: 'H', rank: '3', name: 'Test Acolyte' };
+    const state = startTempleMission(1, [boss], { extraReserveCards: [acolyte] });
+
+    const inPiles = state.capturedPiles.some(
+      (p) => p.faceUp?.id === 'acolyte-1' || p.faceDown.some((c) => c.id === 'acolyte-1'),
+    );
+    expect(inPiles).toBe(false);
+    const inHandOrDeck =
+      state.players.some((p) => p.hand.some((c) => c.id === 'acolyte-1')) ||
+      state.tavernDeck.some((c) => c.id === 'acolyte-1');
+    expect(inHandOrDeck).toBe(true);
+  });
+
+  it('opens AWAIT_END_OF_TURN instead of advancing once a turn would otherwise end, as long as a pile is still face-up', () => {
+    const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 100, attack: 0 };
+    const state = startTempleMission(1, [boss]);
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    expect(res.state.turnPhase).toBe('AWAIT_END_OF_TURN');
+  });
+
+  it('BANISH_FOR_RESCUE banishes the chosen hand card and moves the pile\'s face-up card to the discard pile, then flips the next one', () => {
+    const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 100, attack: 0 };
+    let state = startTempleMission(1, [boss]);
+    state.turnPhase = 'AWAIT_END_OF_TURN';
+    const rescued: Card = { id: 'rescued-1', kind: 'suited', suit: 'H', rank: '5', name: 'Rescued Hero' };
+    const next: Card = { id: 'next-1', kind: 'suited', suit: 'D', rank: '6', name: 'Next Hero' };
+    state.capturedPiles = [{ faceUp: rescued, faceDown: [next] }, { faceUp: null, faceDown: [] }, { faceUp: null, faceDown: [] }];
+    const banishCard = state.players[0].hand[0];
+
+    const res = ensureOk(
+      applyAction(state, { type: 'BANISH_FOR_RESCUE', playerId: state.players[0].id, cardId: banishCard.id, pileIndex: 0 }),
+    );
+
+    expect(res.state.banishPile.some((c) => c.id === banishCard.id)).toBe(true);
+    expect(res.state.discardPile.some((c) => c.id === 'rescued-1')).toBe(true);
+    expect(res.state.capturedPiles[0].faceUp?.id).toBe('next-1');
+    expect(res.state.capturedPiles[0].faceDown.length).toBe(0);
+    expect(res.state.turnPhase).toBe('AWAIT_PLAY'); // turn advanced
+  });
+
+  it('DECLINE_RESCUE cycles every face-up pile card to the bottom of its own pile and reveals the next one', () => {
+    const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 100, attack: 0 };
+    let state = startTempleMission(1, [boss]);
+    state.turnPhase = 'AWAIT_END_OF_TURN';
+    const oldTop: Card = { id: 'old-top', kind: 'suited', suit: 'H', rank: '5' };
+    const newTop: Card = { id: 'new-top', kind: 'suited', suit: 'D', rank: '6' };
+    state.capturedPiles = [{ faceUp: oldTop, faceDown: [newTop] }, { faceUp: null, faceDown: [] }, { faceUp: null, faceDown: [] }];
+
+    const res = ensureOk(applyAction(state, { type: 'DECLINE_RESCUE', playerId: state.players[0].id }));
+
+    expect(res.state.capturedPiles[0].faceUp?.id).toBe('new-top');
+    expect(res.state.capturedPiles[0].faceDown.map((c) => c.id)).toEqual(['old-top']); // cycled to the bottom, not discarded
+    expect(res.state.banishPile.length).toBe(0);
+    expect(res.state.discardPile.length).toBe(0);
+    expect(res.state.turnPhase).toBe('AWAIT_PLAY'); // turn advanced
+  });
+
+  it('skips AWAIT_END_OF_TURN entirely when a kill lets the same player continue (no end-of-turn effects after defeating an enemy)', () => {
+    const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 5, attack: 0 };
+    const next: LegacyEnemySpec = { name: 'Next', suit: 'D', health: 100, attack: 0 };
+    let state = startTempleMission(1, [boss, next]);
+    state = rig(state, [suited('D', '7')]); // overkill (not exact) — 7 damage on 5 health
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+
+    expect(res.state.turnPhase).toBe('AWAIT_PLAY'); // straight back to play, never AWAIT_END_OF_TURN
+  });
+
+  it('an exact-damage kill opens AWAIT_RESCUE_CHOICE, and choosing a pile sends its face-up card to the top of the reserve deck', () => {
+    const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 5, attack: 0 };
+    const next: LegacyEnemySpec = { name: 'Next', suit: 'D', health: 100, attack: 0 };
+    let state = startTempleMission(1, [boss, next]);
+    const rescued: Card = { id: 'exact-rescue', kind: 'suited', suit: 'H', rank: '9', name: 'Prized Hero' };
+    state.capturedPiles = [{ faceUp: rescued, faceDown: [] }, { faceUp: null, faceDown: [] }, { faceUp: null, faceDown: [] }];
+    state = rig(state, [suited('D', '5')]); // exact kill (5 damage on 5 health)
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    expect(res.state.turnPhase).toBe('AWAIT_RESCUE_CHOICE');
+
+    res = ensureOk(applyAction(res.state, { type: 'CHOOSE_EXACT_KILL_RESCUE', playerId: state.players[0].id, pileIndex: 0 }));
+    expect(res.state.tavernDeck[0]?.id).toBe('exact-rescue');
+    expect(res.state.capturedPiles[0].faceUp).toBeNull();
+    expect(res.state.turnPhase).toBe('AWAIT_PLAY'); // same player continues, no turn advance
+  });
+});
+
+describe('legacy: Evergreen class power (Gøran — all four powers at once, ignores immunity)', () => {
+  function evergreenCard(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
+    return { ...suited(suit, rank), evergreen: true };
+  }
+
+  it('resolves heal, draw, double damage, and reduce-strength all at once, even against an enemy immune to that suit', () => {
+    const boss: LegacyEnemySpec = { name: 'Myla', suit: 'H', health: 100, attack: 20 }; // immune to Hearts
+    let state = startMission(1, [boss]);
+    state.discardPile = [suited('C', '2'), suited('C', '3')]; // something for the heal to shuffle back
+    state = rig(state, [evergreenCard('H', '4')]); // printed suit is Hearts, the enemy's own immunity
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    const s = res.state;
+
+    expect(s.discardPile.length).toBe(0); // Hearts: healed despite the enemy's immunity to Hearts
+    expect(s.currentEnemy?.damageTaken).toBe(8); // Clubs: 4 * 2 (double damage)
+    expect(s.currentEnemy?.spadesShield).toBe(4); // Spades: reduces the enemy's attack
+    // Diamonds: drew cards up to the hand limit (started at maxHandSize - 1 after playing the Evergreen card).
+    expect(s.players[0].hand.length).toBeGreaterThan(0);
+  });
+});
+
+describe('legacy: bonus Mage sticker (secondClassArcane — keeps its own suit power AND fires an arcane bolt)', () => {
+  it('resolves both its printed suit power and an arcane bolt when played', () => {
+    const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 10 };
+    let state = startMission(1, [boss]);
+    const stickered: SuitedCard = { ...suited('C', '4'), secondClassArcane: true }; // Warrior + bonus Mage bolt
+    state = rig(state, [stickered]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+
+    // Clubs doubles the play's value (4*2=8) PLUS the arcane bolt (4) on top = 12.
+    expect(res.state.currentEnemy?.damageTaken).toBe(12);
+  });
+
+  it('applyMageSticker gives one random eligible party member secondClassArcane, skipping Mage/Reaver/Guardian/Druid/Evergreen cards', () => {
+    const party = buildInitialParty();
+    const next = applyMageSticker(party);
+    const stickered = next.filter((c) => c.kind === 'suited' && c.secondClassArcane);
+    expect(stickered.length).toBe(1);
+  });
+});
+
+describe('legacy: Evergreen Mother relic (Mission 9 reward — corrupted-card cost redirect)', () => {
+  function startWithRelic(n: number, enemies: LegacyEnemySpec[]): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'relic-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      relics: ['EVERGREEN_MOTHER'],
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('redirects the cost to another player banishing a card from their own hand instead of the reserve deck', () => {
+    const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 10 };
+    let state = startWithRelic(2, [boss]);
+    const corrupted: SuitedCard = { ...suited('H', '5'), corrupted: true };
+    state = rig(state, [corrupted]);
+    const tavernBefore = state.tavernDeck.length;
+    const otherHandBefore = state.players[1].hand.length;
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+
+    expect(res.state.tavernDeck.length).toBe(tavernBefore); // reserve deck untouched
+    expect(res.state.players[1].hand.length).toBe(otherHandBefore - 1); // the other player lost a card
+    expect(res.state.banishPile.length).toBe(1);
+  });
+
+  it('in solo play, banishes from the same player\'s own remaining hand instead', () => {
+    const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 10 };
+    let state = startWithRelic(1, [boss]);
+    const corrupted: SuitedCard = { ...suited('H', '5'), corrupted: true };
+    state = rig(state, [corrupted, suited('C', '2')]); // one extra card left in hand after playing the corrupted one
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+
+    expect(res.state.players[0].hand.length).toBe(0); // the leftover card was banished
+    expect(res.state.banishPile.some((c) => c.kind === 'suited' && c.rank === '2')).toBe(true);
+  });
+
+  it('does nothing when there is no eligible hand to banish from', () => {
+    const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 10 };
+    let state = startWithRelic(1, [boss]);
+    const corrupted: SuitedCard = { ...suited('H', '5'), corrupted: true };
+    state = rig(state, [corrupted]); // nothing left in hand after playing it
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+
+    expect(res.state.banishPile.length).toBe(0);
+  });
+});
+
+describe('legacy: mission 9 reward (Evergreen Mother relic, Gøran, Mage sticker)', () => {
+  it('grants the Evergreen Mother relic, Gøran with the Evergreen special ability, and a bonus Mage sticker', () => {
+    const mission9 = getMission(9)!;
+    expect(mission9.reward.relics).toEqual(['EVERGREEN_MOTHER']);
+    expect(mission9.reward.mageSticker).toBe(true);
+    const goran = mission9.reward.recruits.find((r) => r.name === 'Gøran');
+    expect(goran?.class).toBe('EVERGREEN');
+    expect(goran?.special).toBe(true);
+
+    const party = applyReward(buildInitialParty(), mission9.reward);
+    const goranCard = party.find((c) => c.kind === 'suited' && c.evergreen);
+    expect(goranCard).toBeDefined();
+    if (goranCard?.kind === 'suited') expect(goranCard.special).toBe('EVERGREEN');
+    expect(party.filter((c) => c.kind === 'suited' && c.secondClassArcane).length).toBe(1);
   });
 });
