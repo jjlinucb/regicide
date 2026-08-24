@@ -246,9 +246,16 @@ export const MISSIONS: Mission[] = [
     // cleared for the rest of the mission), then Myla strikes for the zone's full value — exact kills spare
     // the zone's single highest-value card from that one strike (see GameState.zoneVengeanceOnKill).
     zoneVengeanceOnKill: true,
-    // Reward: two survivors pulled from the garden's earlier victims, freed once the statues stop moving.
+    // Reward: the Guardian faction — 4 permanent new recruits, statues themselves once, freed as the garden's
+    // stone cracks open around them. Playing one permanently reduces the enemy's attack by its own value —
+    // the same shield a Paladin builds with Spades, off a suit-less card that stacks independently.
     reward: {
-      recruits: [recruit('Ferro', 'PALADIN', '8', 'S'), recruit('Sable', 'MAGE', '9')],
+      recruits: [
+        recruit('Ferro', 'GUARDIAN', '3', 'S'),
+        recruit('Kesh', 'GUARDIAN', '5', 'H'),
+        recruit('Ambrey', 'GUARDIAN', '7', 'D'),
+        specialRecruit('Dorna', 'GUARDIAN', '9', 'C'),
+      ],
     },
   },
 ];

@@ -7,9 +7,10 @@ export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'A' | 
  * (instead of doubles) Clubs damage, INSPIRE draws 2 extra on Diamonds, REVIVE heals 2 extra on
  * Hearts, BULWARK reduces the enemy's attack to 0 for the fight instead of by the play's value,
  * ARCANE_SURGE doubles a Mage card's own arcane bolt, PLUNDER tears 2 reserve cards instead of 1 for a Reaver
- * (both still banished; the higher value is kept).
+ * (both still banished; the higher value is kept), AEGIS reduces the enemy's attack to 0 for the fight instead
+ * of by the play's value, same as BULWARK but for a Guardian card.
  */
-export type SpecialAbilityId = 'CLEAVE' | 'INSPIRE' | 'REVIVE' | 'BULWARK' | 'ARCANE_SURGE' | 'PLUNDER';
+export type SpecialAbilityId = 'CLEAVE' | 'INSPIRE' | 'REVIVE' | 'BULWARK' | 'ARCANE_SURGE' | 'PLUNDER' | 'AEGIS';
 
 export interface SuitedCard {
   id: string;
@@ -44,6 +45,13 @@ export interface SuitedCard {
    * it, and doubles the whole attack's final damage (see engine.ts's resolveCommittedPlay).
    */
   reaver?: boolean;
+  /**
+   * Legacy-only: marks a Guardian card (Mission 6's new faction). Like a Mage or Reaver, it still carries a
+   * suit for immunity bookkeeping, but its class power isn't the combined suit-power resolution — instead,
+   * playing it permanently reduces the enemy's attack by its own card value for the rest of the fight, the
+   * same shield Paladins build with Spades (see engine.ts's resolveCommittedPlay).
+   */
+  guardian?: boolean;
   /**
    * Classic Regicide Endless Mode only: how many steps past King this card has been upgraded, from being the
    * card of an enemy defeated during an endless round (see engine.ts's upgradeDefeatedRank). A Jack or Queen

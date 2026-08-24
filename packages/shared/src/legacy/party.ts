@@ -73,7 +73,7 @@ export interface RecruitSpec {
   rank: NonRoyalRank;
   /** True for a standout reward: grants the recruit's class's signature ability permanently, alongside their name. */
   special?: boolean;
-  /** Required for MAGE and REAVER recruits only — neither has a suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */
+  /** Required for MAGE, REAVER, and GUARDIAN recruits only — none has a suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */
   suit?: Suit;
 }
 
@@ -94,6 +94,7 @@ export function buildRecruitCard(spec: RecruitSpec): Card {
     name: spec.name,
     ...(spec.class === 'MAGE' ? { arcane: true } : {}),
     ...(spec.class === 'REAVER' ? { reaver: true } : {}),
+    ...(spec.class === 'GUARDIAN' ? { guardian: true } : {}),
     ...(spec.special ? { special: CLASS_THEME[spec.class].specialAbility } : {}),
   };
 }
@@ -112,7 +113,9 @@ export interface MissionReward {
  * single card triggers both class powers whenever it's played (see rules.ts's cardSuits).
  */
 export function applyDualClassStickers(party: Card[], count: number): Card[] {
-  const eligibleIds = party.filter((c) => c.kind === 'suited' && !c.arcane && !c.reaver && !c.secondSuit).map((c) => c.id);
+  const eligibleIds = party
+    .filter((c) => c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.secondSuit)
+    .map((c) => c.id);
   const chosenIds = new Set(shuffle(eligibleIds, Math.random).slice(0, count));
   return party.map((c) => {
     if (c.kind !== 'suited' || !chosenIds.has(c.id)) return c;

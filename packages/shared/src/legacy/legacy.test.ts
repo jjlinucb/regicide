@@ -835,3 +835,67 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     expect(state.missionZone.length).toBe(2); // Myla + the sacrificed 5, permanently
   });
 });
+
+describe('legacy: mission 6 reward (Guardian faction)', () => {
+  it('rewards 4 Guardian recruits, one carrying the Aegis special ability', () => {
+    const mission6 = getMission(6)!;
+    const party = applyReward(buildInitialParty(), mission6.reward);
+    const guardians = party.filter((c) => c.kind === 'suited' && c.guardian);
+    expect(guardians.length).toBe(4);
+    expect(guardians.filter((c) => c.kind === 'suited' && c.special === 'AEGIS').length).toBe(1);
+  });
+
+  it('a Guardian recruit takes its explicit suit (Guardian has none of its own) and is flagged guardian', () => {
+    const card = buildRecruitCard({ name: 'Test Guardian', class: 'GUARDIAN', rank: '5', suit: 'D' });
+    expect(card.kind === 'suited' && card.guardian).toBe(true);
+    expect(card.kind === 'suited' && card.suit).toBe('D');
+  });
+});
+
+describe('legacy: Guardian class power (permanent attack shield)', () => {
+  function guardianCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
+    return { ...suited(suit, rank), guardian: true, ...(special ? { special: 'AEGIS' } : {}) };
+  }
+
+  it("permanently reduces the enemy's attack by the card's own value, ignoring its printed suit's power", () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 100, attack: 20 };
+    let state = startMission(1, [boss]);
+    state = rig(state, [guardianCard('D', '6')]); // Diamonds (Bard/draw) power never fires for a Guardian card
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.currentEnemy?.spadesShield).toBe(6);
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    expect(state.pendingDamage).toBe(14); // 20 base attack - 6 shield
+  });
+
+  it('stacks across multiple plays, permanently, for the rest of the fight', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 100, attack: 20 };
+    let state = startMission(1, [boss]);
+    // Full shield on the first play (attack -> 0) keeps the same player in AWAIT_PLAY for a second play,
+    // avoiding an intervening AWAIT_DEFEND that a partial first shield would otherwise trigger.
+    state = rig(state, [guardianCard('C', 'K')]);
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.currentEnemy?.spadesShield).toBe(20);
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+
+    state = rig(state, [guardianCard('H', '3')]);
+    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.currentEnemy?.spadesShield).toBe(23);
+  });
+
+  it('Aegis reduces the attack to 0 outright, same as Bulwark', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 100, attack: 20 };
+    let state = startMission(1, [boss]);
+    state = rig(state, [guardianCard('D', '3', true)]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.currentEnemy?.spadesShield).toBe(20);
+    expect(state.turnPhase).toBe('AWAIT_PLAY'); // no damage suffered, same player continues
+  });
+});

@@ -619,10 +619,13 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${shape.totalValue}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
   );
   const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
-  // Mage and Reaver cards' printed suits don't join the combined suit-power resolution below — a Mage's class
-  // power is the arcane bolt above instead (which already resolved), and a Reaver's is the reserve-deck tear
-  // resolved just below (Mage always goes first, per legacy/classes.ts).
-  const nonArcaneCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane && !c.reaver);
+  // Mage, Reaver, and Guardian cards' printed suits don't join the combined suit-power resolution below — a
+  // Mage's class power is the arcane bolt above instead (which already resolved), a Reaver's is the
+  // reserve-deck tear resolved just below, and a Guardian's is the permanent shield resolved just after that
+  // (Mage always goes first, per legacy/classes.ts).
+  const nonArcaneCards = cards.filter(
+    (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian,
+  );
   const nonArcaneSuits = Array.from(new Set(nonArcaneCards.flatMap(cardSuits)));
 
   // Corrupted cards: their class power always ignores immunity, at the cost of banishing the top of the
@@ -660,6 +663,21 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
       log(state, `${reaverCards[0].name ?? 'A Reaver'} tears ${revealedLabel} from the reserve deck — banished, +${reaverBonus} damage, attack doubled!`);
     } else {
       log(state, 'The reserve deck is empty — no card to tear for the Reaver bonus.');
+    }
+  }
+
+  // Guardians (Mission 6): playing one permanently reduces the enemy's attack for the rest of the fight — the
+  // same shield a Paladin builds with Spades, but off a suit-less card. Aegis zeroes it outright, same as Bulwark.
+  const guardianCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian));
+  if (state.ruleset === 'legacy' && guardianCards.length > 0) {
+    const enemy = state.currentEnemy!;
+    if (hasSpecial(guardianCards, 'AEGIS')) {
+      enemy.spadesShield = enemy.baseAttack;
+      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises Aegis — the enemy's attack is reduced to 0.`);
+    } else {
+      const shieldValue = guardianCards.reduce((sum, c) => sum + cardValue(c), 0);
+      enemy.spadesShield += shieldValue;
+      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises a permanent shield, reducing the enemy's attack by ${shieldValue}.`);
     }
   }
 
