@@ -27,9 +27,14 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     jesterClaim: state.jesterClaim,
     endlessLoop: state.endlessLoop,
     comboAssist: state.comboAssist,
+    azureEmblemWindow: state.azureEmblemWindow,
     discardTopBuffsAttack: state.discardTopBuffsAttack,
     missionZone: state.missionZone,
     zoneVengeanceOnKill: state.zoneVengeanceOnKill,
+    ascendingZone: state.ascendingZone,
+    zoneClosed: state.zoneClosed,
+    zonePurge: state.zonePurge,
+    chanterWindow: state.chanterWindow,
     you: { playerId: viewerPlayerId },
   };
 }

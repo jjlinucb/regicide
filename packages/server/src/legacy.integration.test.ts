@@ -145,6 +145,23 @@ describe('legacy campaign integration', () => {
     client.close();
   });
 
+  it('jumps straight to mission 8 despite the mission 7 gap (RoomManager no longer bounds on MISSIONS.length)', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Goran' });
+
+    const result = rooms.startLegacyMission(created.code, created.playerId, 8);
+    if ('error' in result) throw new Error(result.error);
+
+    expect(result.room.legacy?.currentMission).toBe(8);
+    expect(result.room.gameState.ruleset).toBe('legacy');
+    expect(result.room.gameState.phase).toBe('IN_PROGRESS');
+    // Mission 8's ascending zone and its preset Pilgrim Puppy anchor made it through RoomManager into the engine.
+    expect(result.room.gameState.ascendingZone).toBe(true);
+    expect(result.room.gameState.missionZone.length).toBe(1);
+    client.close();
+  });
+
   it('rejects jumping to a mission that isn\'t built yet', async () => {
     const client = ioClient(`http://localhost:${port}`);
     await waitFor(client, 'connect');

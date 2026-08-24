@@ -1,6 +1,6 @@
 import type { SpecialAbilityId, Suit } from '../game/types.js';
 
-export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAVER' | 'GUARDIAN';
+export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAVER' | 'GUARDIAN' | 'CHANTER';
 
 /**
  * Regicide Legacy's four base classes map 1:1 onto classic Regicide's four suits — Warrior=Clubs (double damage),
@@ -8,14 +8,15 @@ export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAV
  * card IS a suited card (see legacy/party.ts); this table is purely the display layer so suit letters never
  * leak into Legacy UI text.
  *
- * Mage (introduced Mission 3) and Reaver (introduced Mission 5) are the odd ones out: neither has a suit of its
- * own (there's no 5th or 6th suit in a standard deck). Both kinds of card keep whatever suit they're printed
- * with, purely for immunity bookkeeping, but their class power never joins the combined suit-power resolution —
- * see SuitedCard.arcane/reaver and engine.ts's resolveArcaneBolts/resolveCommittedPlay.
+ * Mage (Mission 3), Reaver (Mission 5), Guardian (Mission 6), and Chanter (Mission 8) are the odd ones out:
+ * none has a suit of its own (there's no 5th+ suit in a standard deck). Each kind of card keeps whatever suit
+ * it's printed with, purely for immunity bookkeeping, but its class power never joins the combined suit-power
+ * resolution — see SuitedCard.arcane/reaver/guardian/chanter and engine.ts's
+ * resolveArcaneBolts/resolveCommittedPlay.
  */
 export interface ClassTheme {
   id: ClassId;
-  /** Absent only for MAGE — see class doc above. */
+  /** Absent for MAGE, REAVER, GUARDIAN, and CHANTER — see class doc above. */
   suit?: Suit;
   name: string;
   tag: string;
@@ -102,6 +103,16 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     specialName: 'Aegis',
     specialText: 'Aegis: the shield holds permanently, reducing the enemy\'s attack to 0 for the rest of the fight.',
   },
+  CHANTER: {
+    id: 'CHANTER',
+    name: 'Chanter',
+    tag: 'Team Draw',
+    glyph: '🎼',
+    color: '#3a8c8c',
+    specialAbility: 'ENCORE',
+    specialName: 'Encore',
+    specialText: 'Encore: doubles how many cards everyone draws in the chant.',
+  },
 };
 
 export const SUIT_TO_CLASS: Record<Suit, ClassTheme> = {
@@ -119,9 +130,10 @@ export function classForSuit(suit: Suit): ClassTheme {
  * A Legacy party card's real class theme. Almost always its suit's class — except a Mage or Reaver card, whose
  * suit is only along for immunity bookkeeping (see SuitedCard.arcane/reaver), so those must be checked first.
  */
-export function classForCard(card: { suit: Suit; arcane?: boolean; reaver?: boolean; guardian?: boolean }): ClassTheme {
+export function classForCard(card: { suit: Suit; arcane?: boolean; reaver?: boolean; guardian?: boolean; chanter?: boolean }): ClassTheme {
   if (card.arcane) return CLASS_THEME.MAGE;
   if (card.reaver) return CLASS_THEME.REAVER;
   if (card.guardian) return CLASS_THEME.GUARDIAN;
+  if (card.chanter) return CLASS_THEME.CHANTER;
   return SUIT_TO_CLASS[card.suit];
 }

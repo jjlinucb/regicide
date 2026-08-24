@@ -10,6 +10,7 @@ import {
   MAX_HAND_SIZE_BY_PLAYER_COUNT,
 } from './deck.js';
 import {
+  ascendingZoneAttackBuff,
   cardSuits,
   cardValue,
   currentEnemyAttack,
@@ -149,6 +150,18 @@ function drawOneCard(state: GameState, player: PlayerState): boolean {
   return true;
 }
 
+/** Mission 8's chant only: draws up to `count` cards for `player`, ignoring the hand limit (see beginChant). */
+function forceDrawCards(state: GameState, player: PlayerState, count: number): number {
+  let drawn = 0;
+  for (let i = 0; i < count; i++) {
+    const card = state.tavernDeck.shift();
+    if (!card) break;
+    player.hand.push(card);
+    drawn += 1;
+  }
+  return drawn;
+}
+
 function resolveDiamonds(state: GameState, attackValue: number, bonus = 0): void {
   let drawn = 0;
   let idx = state.currentPlayerIndex;
@@ -277,13 +290,47 @@ function upgradeDefeatedRank(rank: 'J' | 'Q' | 'K', loop: number): { rank: 'J' |
   return { rank: 'K', tier: idx - (RANK_ORDER.length - 1) };
 }
 
-/** The current enemy's attack, live — folds in Mission 4's discard-pile buff when active (see GameState.discardTopBuffsAttack). */
+/**
+ * The current enemy's attack, live — folds in Mission 4's discard-pile buff (see GameState.discardTopBuffsAttack)
+ * and/or Mission 8's ascending-zone buff (see GameState.ascendingZone) when active.
+ */
 function resolvedEnemyAttack(state: GameState): number {
   const enemy = state.currentEnemy!;
-  if (state.ruleset === 'legacy' && state.discardTopBuffsAttack) {
-    return currentEnemyAttackWithDiscardBuff(enemy, discardPileTopValue(state.discardPile));
+  if (state.ruleset !== 'legacy') return currentEnemyAttack(enemy);
+  let buff = 0;
+  if (state.discardTopBuffsAttack) buff += discardPileTopValue(state.discardPile);
+  if (state.ascendingZone) buff += ascendingZoneAttackBuff(state.missionZone);
+  return buff !== 0 ? currentEnemyAttackWithDiscardBuff(enemy, buff) : currentEnemyAttack(enemy);
+}
+
+/**
+ * Shared tail for any non-attacking Legacy action that still lets the enemy strike back (Mission 8's
+ * PLACE_IN_ZONE and RESOLVE_ZONE_PURGE) — mirrors resolveCommittedPlay's own tail, but these two actions can
+ * never carry a Guardian shield block (that's scoped to the attack it was played alongside).
+ */
+function finishNonAttackTurn(state: GameState): EngineResult {
+  const enemyAttack = resolvedEnemyAttack(state);
+  if (enemyAttack <= 0) {
+    log(state, `The enemy's attack has been reduced to 0 — no damage suffered.`);
+    advanceToNextPlayer(state);
+    return ok(state);
   }
-  return currentEnemyAttack(enemy);
+  state.pendingDamage = enemyAttack;
+  state.turnPhase = 'AWAIT_DEFEND';
+  return ok(state);
+}
+
+/**
+ * Like finishNonAttackTurn, but for the tail of a deferred attack (RESOLVE_CHANT / RESOLVE_AZURE_EMBLEM) that
+ * may still be carrying a Guardian shield block from the attack it was played alongside.
+ */
+function finishDeferredAttackTurn(state: GameState, blockNextAttack: boolean): EngineResult {
+  if (blockNextAttack) {
+    log(state, 'The shield holds — no damage suffered.');
+    advanceToNextPlayer(state);
+    return ok(state);
+  }
+  return finishNonAttackTurn(state);
 }
 
 /** Returns true if the enemy was defeated by this hit (win or new enemy revealed either way). */
@@ -483,6 +530,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.exactKillOnly = false;
   state.relics = [];
   state.comboAssist = null;
+  state.azureEmblemWindow = null;
   state.endOfTurnZoneFlip = false;
   state.missionZone = [];
   state.zoneImmuneSuits = [];
@@ -492,6 +540,10 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.exactKillToReserveDeck = false;
   state.exactKillSplashDamage = false;
   state.zoneVengeanceOnKill = false;
+  state.ascendingZone = false;
+  state.zoneClosed = false;
+  state.zonePurge = null;
+  state.chanterWindow = null;
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -506,7 +558,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
 
   const buildRng = makeRng(action.seed);
   const enemyDeck = action.standardCastle ? buildCastleDeck(buildRng) : action.enemies.map(makeLegacyEnemy);
-  const reserveDeck = buildLegacyReserveDeck(action.party, action.jesterCount, buildRng);
+  const reserveDeck = buildLegacyReserveDeck([...action.party, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);
   const maxHandSize = MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5;
 
   const players: PlayerState[] = action.playerIds.map((id, i) => ({
@@ -545,17 +597,24 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.exactKillOnly = action.exactKillOnly ?? false;
   state.relics = action.relics ?? [];
   state.comboAssist = null;
+  state.azureEmblemWindow = null;
   state.endOfTurnZoneFlip = action.endOfTurnZoneFlip ?? false;
   state.missionZone = action.presetMissionZone ?? [];
-  state.zoneImmuneSuits = Array.from(
-    new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))),
-  );
+  // Mission 8's ascending zone never grants suit immunity — its cards only buff the enemy's attack while a
+  // gap-bridging card sits there (see rules.ts's ascendingZoneAttackBuff) — unlike Missions 3/5/6's zone modes.
+  state.zoneImmuneSuits = action.ascendingZone
+    ? []
+    : Array.from(new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))));
   state.banishPile = [];
   state.jesterClaimNextPlayerOnly = action.jesterClaimNextPlayerOnly ?? false;
   state.discardTopBuffsAttack = action.discardTopBuffsAttack ?? false;
   state.exactKillToReserveDeck = action.exactKillToReserveDeck ?? false;
   state.exactKillSplashDamage = action.exactKillSplashDamage ?? false;
   state.zoneVengeanceOnKill = action.zoneVengeanceOnKill ?? false;
+  state.ascendingZone = action.ascendingZone ?? false;
+  state.zoneClosed = false;
+  state.zonePurge = null;
+  state.chanterWindow = null;
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
   return ok(state);
@@ -624,7 +683,8 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   // reserve-deck tear resolved just below, and a Guardian's is the permanent shield resolved just after that
   // (Mage always goes first, per legacy/classes.ts).
   const nonArcaneCards = cards.filter(
-    (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian,
+    (c): c is Extract<Card, { kind: 'suited' }> =>
+      c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.chanter,
   );
   const nonArcaneSuits = Array.from(new Set(nonArcaneCards.flatMap(cardSuits)));
 
@@ -641,13 +701,12 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   }
 
   // Reavers (Mission 5): playing one tears the top card off the reserve deck, adds its raw value straight onto
-  // the attack, and permanently banishes it — but doubles the whole attack's final damage as the tradeoff. A
-  // Warrior (Clubs) card in the same play stacks its own doubling on top, for quadruple damage overall.
+  // the attack as flat bonus damage, and permanently banishes it. A Reaver never doubles damage on its own —
+  // that bonus still gets folded into a Warrior (Clubs) card's own doubling if one's played alongside it, for
+  // a much bigger hit, but Reaver alone doesn't multiply anything.
   const reaverCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.reaver));
   let reaverBonus = 0;
-  let reaverMultiplier = 1;
   if (state.ruleset === 'legacy' && reaverCards.length > 0) {
-    reaverMultiplier = 2;
     const tearCount = hasSpecial(reaverCards, 'PLUNDER') ? 2 : 1;
     const revealed: Card[] = [];
     for (let i = 0; i < tearCount; i++) {
@@ -660,7 +719,7 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
       const revealedLabel = revealed
         .map((c) => (c.kind === 'suited' ? c.name ?? `a ${c.rank}` : 'a Jester'))
         .join(' and ');
-      log(state, `${reaverCards[0].name ?? 'A Reaver'} tears ${revealedLabel} from the reserve deck — banished, +${reaverBonus} damage, attack doubled!`);
+      log(state, `${reaverCards[0].name ?? 'A Reaver'} tears ${revealedLabel} from the reserve deck — banished, +${reaverBonus} damage.`);
     } else {
       log(state, 'The reserve deck is empty — no card to tear for the Reaver bonus.');
     }
@@ -683,15 +742,40 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     }
   }
 
+  // Chanters (Mission 8): playing one opens a chant worth its own card value — every player at the table draws
+  // that many cards at once, even past their hand limit, then whoever ended up over the limit trims back down
+  // one at a time (see beginChant). Encore doubles that card's contribution.
+  const chanterCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.chanter));
+  let chantCount = 0;
+  if (state.ruleset === 'legacy' && chanterCards.length > 0) {
+    for (const c of chanterCards) {
+      const base = cardValue(c);
+      const doubled = c.special === 'ENCORE';
+      const amount = doubled ? base * 2 : base;
+      chantCount += amount;
+      log(state, `${c.name ?? 'A Chanter'} leads the chant — every player draws ${amount} card(s) at once${doubled ? ' (Encore)' : ''}.`);
+    }
+  }
+
   const clubsMultiplier = resolveSuitPowers(state, cards, nonArcaneSuits, shape.totalValue, Boolean(claimedJester), corruptedSuits);
-  const damageMultiplier = clubsMultiplier * reaverMultiplier;
-  const damage = (shape.totalValue + reaverBonus) * damageMultiplier + arcaneBonus;
+  const damage = (shape.totalValue + reaverBonus) * clubsMultiplier + arcaneBonus;
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
   const defeated = dealDamageAndCheckDefeat(state, damage);
 
   if (state.phase !== 'IN_PROGRESS') return ok(state);
   if (defeated) return ok(state); // enemy was defeated, same player continues against the next one
+
+  if (chantCount > 0) {
+    return beginChant(state, chantCount, guardianBlocksNextAttack);
+  }
+
+  // Azure Emblem (Mission 6 relic): whenever a Mage joins the attack, every other player gets one chance to
+  // silently stock the reserve deck. Skipped if a Chanter also fired in the same play (see chantCount above) —
+  // the two mission-specific windows never need to stack in practice, since each faction's cards are unique.
+  if (state.ruleset === 'legacy' && state.relics.includes('AZURE_EMBLEM') && cards.some((c) => c.kind === 'suited' && c.arcane)) {
+    return beginAzureEmblem(state, player.id, guardianBlocksNextAttack);
+  }
 
   const enemyAttack = guardianBlocksNextAttack ? 0 : resolvedEnemyAttack(state);
   if (enemyAttack <= 0) {
@@ -959,6 +1043,183 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
   return ok(state);
 }
 
+/**
+ * Mission 8 only: the ascending mission zone's 10-card purge. The zone's cards already spilled into the
+ * discard pile by the caller; this just closes the zone for good and opens the Ultimate Banishment window for
+ * `player` to resolve via RESOLVE_ZONE_PURGE.
+ */
+function beginZonePurge(state: GameState, player: PlayerState): EngineResult {
+  state.zoneClosed = true;
+  state.zonePurge = { playerId: player.id };
+  state.turnPhase = 'AWAIT_ZONE_PURGE';
+  log(state, `The chain reaches 10 — the mission zone purges and closes for good! ${player.name} may banish any of the ${state.discardPile.length} spilled card(s) forever.`);
+  return ok(state);
+}
+
+/** Legacy-only (Mission 8): places a card from hand into the ascending mission zone (see GameState.ascendingZone). */
+function placeInZone(state: GameState, action: Extract<GameAction, { type: 'PLACE_IN_ZONE' }>): EngineResult {
+  if (!state.ascendingZone) return fail('There is no ascending mission zone in this mission.');
+  if (state.zoneClosed) return fail('The mission zone has closed — no more cards can be placed there.');
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_PLAY');
+  if (err) return fail(err);
+
+  const player = currentPlayer(state);
+  const card = player.hand.find((c) => c.id === action.cardId);
+  if (!card) return fail('That card is not in your hand.');
+  if (card.kind !== 'suited') return fail('Only a suited card can be placed in the mission zone.');
+
+  const top = state.missionZone[state.missionZone.length - 1];
+  const required = top ? cardValue(top) + 1 : 1;
+  const value = cardValue(card);
+  if (value !== required) {
+    return fail(`The mission zone needs a card worth exactly ${required} next — that card is worth ${value}.`);
+  }
+
+  player.hand = player.hand.filter((c) => c.id !== card.id);
+  state.missionZone.push(card);
+  state.lastActionWasYield[state.currentPlayerIndex] = false;
+
+  if (card.pilgrim) {
+    log(state, `${player.name} guides ${card.name ?? 'a survivor'} into place — the chain now stands at ${required}.`);
+  } else {
+    log(state, `${player.name} presses ${card.name ?? `a ${card.rank}`} into the gap at ${required} — the enemy grows bolder while it sits there.`);
+  }
+
+  if (required === 10) {
+    state.discardPile.push(...state.missionZone);
+    state.missionZone = [];
+    state.zoneImmuneSuits = [];
+    return beginZonePurge(state, player);
+  }
+
+  return finishNonAttackTurn(state);
+}
+
+/** Legacy-only (Mission 8): resolves the open Ultimate Banishment window after the zone's 10-card purge (see GameState.zonePurge). */
+function resolveZonePurge(state: GameState, action: Extract<GameAction, { type: 'RESOLVE_ZONE_PURGE' }>): EngineResult {
+  if (state.turnPhase !== 'AWAIT_ZONE_PURGE' || !state.zonePurge) return fail('There is no open purge to resolve.');
+  if (action.playerId !== state.zonePurge.playerId) return fail('Only the player who triggered the purge may resolve it.');
+
+  const banishIds = new Set(action.banishCardIds);
+  const toBanish = state.discardPile.filter((c) => banishIds.has(c.id));
+  const remaining = state.discardPile.filter((c) => !banishIds.has(c.id));
+  state.banishPile.push(...toBanish);
+  const shuffled = shuffleWithState(remaining, state);
+  state.tavernDeck.push(...shuffled); // bottom of the reserve deck
+  state.discardPile = [];
+  state.zonePurge = null;
+  state.turnPhase = 'AWAIT_PLAY';
+  log(
+    state,
+    toBanish.length > 0
+      ? `${toBanish.length} card(s) banished forever; the remaining ${shuffled.length} shuffle into the bottom of the reserve deck.`
+      : `The spilled ${shuffled.length} card(s) shuffle into the bottom of the reserve deck.`,
+  );
+  return finishNonAttackTurn(state);
+}
+
+/**
+ * Legacy-only (Mission 8): opens (or immediately clears) a chant — every player at the table draws `count`
+ * cards at once, even past their hand limit, then whoever's now over their limit trims back down one player at
+ * a time via RESOLVE_CHANT. `blockNextAttack` mirrors a Guardian shield raised in the same play; it's carried
+ * through to whenever the chant's tail (the deferred enemy-attack resolution) finally runs.
+ */
+function beginChant(state: GameState, count: number, blockNextAttack: boolean): EngineResult {
+  const totalDrawn = state.players.reduce((sum, p) => sum + forceDrawCards(state, p, count), 0);
+  if (totalDrawn > 0) log(state, `The chant draws ${totalDrawn} card(s) across the table.`);
+
+  const pendingPlayerIds = state.players.filter((p) => p.hand.length > state.maxHandSize).map((p) => p.id);
+  if (pendingPlayerIds.length === 0) {
+    return finishDeferredAttackTurn(state, blockNextAttack);
+  }
+
+  state.chanterWindow = { pendingPlayerIds, blockNextAttack };
+  state.turnPhase = 'AWAIT_CHANT_TRIM';
+  log(state, `${pendingPlayerIds.length} player(s) are over their hand limit and must trim back down.`);
+  return ok(state);
+}
+
+/** Legacy-only (Mission 8): the front-of-queue player in an open chant window trims their hand back to the limit (see GameState.chanterWindow). */
+function resolveChant(state: GameState, action: Extract<GameAction, { type: 'RESOLVE_CHANT' }>): EngineResult {
+  if (state.turnPhase !== 'AWAIT_CHANT_TRIM' || !state.chanterWindow) return fail('There is no open chant to resolve.');
+  const [trimmerId, ...rest] = state.chanterWindow.pendingPlayerIds;
+  if (action.playerId !== trimmerId) return fail("It's not your turn to trim your hand for the chant.");
+
+  const player = findPlayer(state, trimmerId);
+  if (!player) return fail('Unknown player.');
+  const overflow = player.hand.length - state.maxHandSize;
+  const ids = Array.from(new Set(action.discardCardIds));
+  if (ids.length !== overflow) {
+    return fail(`You need to discard exactly ${overflow} card(s) to reach your hand limit — selected ${ids.length}.`);
+  }
+
+  const cards: Card[] = [];
+  for (const id of ids) {
+    const card = player.hand.find((c) => c.id === id);
+    if (!card) return fail(`Card ${id} is not in your hand.`);
+    cards.push(card);
+  }
+  player.hand = player.hand.filter((c) => !ids.includes(c.id));
+  state.discardPile.push(...cards);
+  log(state, `${player.name} trims ${cards.length} card(s) back down to their hand limit.`);
+
+  const { blockNextAttack } = state.chanterWindow;
+  if (rest.length === 0) {
+    state.chanterWindow = null;
+    state.turnPhase = 'AWAIT_PLAY';
+    return finishDeferredAttackTurn(state, blockNextAttack);
+  }
+
+  state.chanterWindow = { pendingPlayerIds: rest, blockNextAttack };
+  return ok(state);
+}
+
+/**
+ * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic: opens (or immediately clears) the Azure Emblem
+ * window after a play that included a Mage card — every other player, one at a time, may silently place a
+ * single card from hand atop the reserve deck via RESOLVE_AZURE_EMBLEM. `blockNextAttack` mirrors a Guardian
+ * shield raised in the same play.
+ */
+function beginAzureEmblem(state: GameState, attackerId: string, blockNextAttack: boolean): EngineResult {
+  const pendingPlayerIds = state.players.filter((p) => p.id !== attackerId).map((p) => p.id);
+  if (pendingPlayerIds.length === 0) {
+    return finishDeferredAttackTurn(state, blockNextAttack);
+  }
+
+  state.azureEmblemWindow = { pendingPlayerIds, blockNextAttack };
+  state.turnPhase = 'AWAIT_AZURE_EMBLEM';
+  log(state, 'Azure Emblem: any other player may silently place a card atop the reserve deck.');
+  return ok(state);
+}
+
+/** Legacy-only (Mission 6): the front-of-queue player in an open Azure Emblem window responds (see GameState.azureEmblemWindow). */
+function resolveAzureEmblem(state: GameState, action: Extract<GameAction, { type: 'RESOLVE_AZURE_EMBLEM' }>): EngineResult {
+  if (state.turnPhase !== 'AWAIT_AZURE_EMBLEM' || !state.azureEmblemWindow) return fail('There is no open Azure Emblem window to resolve.');
+  const [nextId, ...rest] = state.azureEmblemWindow.pendingPlayerIds;
+  if (action.playerId !== nextId) return fail("It's not your turn to respond to the Azure Emblem.");
+
+  const player = findPlayer(state, nextId);
+  if (!player) return fail('Unknown player.');
+
+  if (action.cardId) {
+    const card = player.hand.find((c) => c.id === action.cardId);
+    if (!card) return fail('That card is not in your hand.');
+    player.hand = player.hand.filter((c) => c.id !== card.id);
+    state.tavernDeck.unshift(card);
+    log(state, `${player.name} silently places a card atop the reserve deck (Azure Emblem).`);
+  }
+
+  const { blockNextAttack } = state.azureEmblemWindow;
+  if (rest.length === 0) {
+    state.azureEmblemWindow = null;
+    state.turnPhase = 'AWAIT_PLAY';
+    return finishDeferredAttackTurn(state, blockNextAttack);
+  }
+
+  state.azureEmblemWindow = { pendingPlayerIds: rest, blockNextAttack };
+  return ok(state);
+}
+
 export function createLobbyState(): GameState {
   return {
     phase: 'LOBBY',
@@ -983,6 +1244,7 @@ export function createLobbyState(): GameState {
     exactKillOnly: false,
     relics: [],
     comboAssist: null,
+    azureEmblemWindow: null,
     endOfTurnZoneFlip: false,
     missionZone: [],
     zoneImmuneSuits: [],
@@ -992,6 +1254,10 @@ export function createLobbyState(): GameState {
     exactKillToReserveDeck: false,
     exactKillSplashDamage: false,
     zoneVengeanceOnKill: false,
+    ascendingZone: false,
+    zoneClosed: false,
+    zonePurge: null,
+    chanterWindow: null,
   };
 }
 
@@ -1016,8 +1282,16 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return assistCombo(draft, action);
     case 'RESOLVE_COMBO':
       return resolveComboAssist(draft, action);
+    case 'RESOLVE_AZURE_EMBLEM':
+      return resolveAzureEmblem(draft, action);
     case 'DEFEND':
       return defend(draft, action);
+    case 'PLACE_IN_ZONE':
+      return placeInZone(draft, action);
+    case 'RESOLVE_ZONE_PURGE':
+      return resolveZonePurge(draft, action);
+    case 'RESOLVE_CHANT':
+      return resolveChant(draft, action);
     case 'USE_SOLO_JESTER':
       return useSoloJester(draft, action);
     case 'START_ENDLESS_ROUND':

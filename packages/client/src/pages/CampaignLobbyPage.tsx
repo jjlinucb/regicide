@@ -33,6 +33,9 @@ export function CampaignLobbyPage({
   onLeave: () => void;
 }) {
   const isHost = roomState.players.find((p) => p.id === myPlayerId)?.isHost ?? false;
+  // MISSIONS.length is not the highest built mission id — the list currently has a gap (Mission 7 isn't in yet),
+  // so "all missions complete" must compare against the actual max id, not the array's count.
+  const maxMissionId = Math.max(...MISSIONS.map((m) => m.id));
   const currentMission = MISSIONS.find((m) => m.id === legacyState.currentMission);
   const [selectedMissionId, setSelectedMissionId] = useState(legacyState.currentMission);
   const selectedMission = MISSIONS.find((m) => m.id === selectedMissionId) ?? currentMission;
@@ -77,7 +80,7 @@ export function CampaignLobbyPage({
               </button>
             );
           })}
-          {legacyState.currentMission > MISSIONS.length && (
+          {legacyState.currentMission > maxMissionId && (
             <p style={{ fontSize: '0.8rem', color: 'var(--ink-dim)', margin: 0 }}>
               🎉 All {MISSIONS.length} built missions are complete — more are on the way. Pick any of them below to replay.
             </p>

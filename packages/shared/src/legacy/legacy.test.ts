@@ -59,7 +59,7 @@ describe('legacy: mission setup', () => {
   });
 
   it('every non-standard-castle mission has at least one enemy and converts cleanly to engine specs', () => {
-    expect(MISSIONS.length).toBe(6);
+    expect(MISSIONS.length).toBe(7);
     for (const mission of MISSIONS) {
       if (mission.standardCastle) continue;
       expect(mission.enemies.length).toBeGreaterThan(0);
@@ -687,7 +687,7 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone,
     return res.state;
   }
 
-  it('tears the top reserve card for bonus damage, banishes it, and doubles the attack', () => {
+  it('tears the top reserve card for flat bonus damage and banishes it, without doubling anything on its own', () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
     let state = startCrimsonMission(1, [boss]);
     state = structuredClone(state);
@@ -698,13 +698,13 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone,
     const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
-    // (4 + 6) * 2 = 20 damage; the revealed 6 is gone from the reserve deck and banished, not drawable again.
-    expect(state.currentEnemy?.damageTaken).toBe(20);
+    // 4 + 6 = 10 damage, no multiplier; the revealed 6 is gone from the reserve deck and banished, not drawable again.
+    expect(state.currentEnemy?.damageTaken).toBe(10);
     expect(state.tavernDeck.length).toBe(reserveBefore - 1);
     expect(state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')).toBe(true);
   });
 
-  it('stacks with a Warrior (Clubs) card in the same play for quadruple damage', () => {
+  it('stacks with a Warrior (Clubs) card in the same play for double damage — Reaver itself never multiplies', () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'H', health: 200, attack: 1 };
     let state = startCrimsonMission(1, [boss]);
     state = structuredClone(state);
@@ -720,8 +720,8 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone,
     );
     state = res.state;
 
-    // (5 + 5 + 6) * (2 clubs * 2 reaver) = 64.
-    expect(state.currentEnemy?.damageTaken).toBe(64);
+    // (5 + 5 + 6) * 2 (Clubs only) = 32.
+    expect(state.currentEnemy?.damageTaken).toBe(32);
   });
 
   it("Plunder tears 2 reserve cards instead of 1 and keeps the higher value", () => {
@@ -734,8 +734,8 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone,
     const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
-    // (3 + 9) * 2 = 24 — the higher of the two torn cards (9) is kept, both banished.
-    expect(state.currentEnemy?.damageTaken).toBe(24);
+    // 3 + 9 = 12, no multiplier — the higher of the two torn cards (9) is kept, both banished.
+    expect(state.currentEnemy?.damageTaken).toBe(12);
     expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '4')).toBe(true);
     expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '9')).toBe(true);
   });
@@ -858,7 +858,7 @@ describe('legacy: mission 5 reward (Reaver faction, Myla joins the party, Dual-c
   });
 });
 
-describe('legacy: mission 6 reward (Guardian faction)', () => {
+describe('legacy: mission 6 reward (Guardian faction + Azure Emblem relic)', () => {
   it('rewards 4 Guardian recruits, one carrying the Aegis special ability', () => {
     const mission6 = getMission(6)!;
     const party = applyReward(buildInitialParty(), mission6.reward);
@@ -871,6 +871,98 @@ describe('legacy: mission 6 reward (Guardian faction)', () => {
     const card = buildRecruitCard({ name: 'Test Guardian', class: 'GUARDIAN', rank: '5', suit: 'D' });
     expect(card.kind === 'suited' && card.guardian).toBe(true);
     expect(card.kind === 'suited' && card.suit).toBe('D');
+  });
+
+  it('also grants the Azure Emblem relic', () => {
+    const mission6 = getMission(6)!;
+    expect(mission6.reward.relics).toEqual(['AZURE_EMBLEM']);
+  });
+});
+
+describe('legacy: Azure Emblem relic (mission 6) — Mage-attack assist window', () => {
+  function mageCard(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
+    return { ...suited(suit, rank), arcane: true };
+  }
+
+  function startEmblemMission(n: number, enemies: LegacyEnemySpec[]): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'emblem-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      relics: ['AZURE_EMBLEM'],
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('opens a window for every other player once a Mage card joins the attack, deferring the enemy retaliation', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startEmblemMission(3, [boss]);
+    state = structuredClone(state);
+    const player0Id = state.players[0].id;
+    state.players[0].hand = [mageCard('H', '4')];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.turnPhase).toBe('AWAIT_AZURE_EMBLEM');
+    expect(state.azureEmblemWindow).toEqual({ pendingPlayerIds: [state.players[1].id, state.players[2].id], blockNextAttack: false });
+    expect(state.currentEnemy?.damageTaken).toBe(8); // 4 from the normal play + 4 from the arcane bolt, as usual
+  });
+
+  it('lets each player in the queue silently place a card atop the reserve deck, or decline, in order', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startEmblemMission(3, [boss]);
+    state = structuredClone(state);
+    const player0Id = state.players[0].id;
+    state.players[0].hand = [mageCard('H', '4')];
+    const stashedCard = suited('D', '9');
+    state.players[1].hand = [stashedCard];
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+    const player1Id = state.players[1].id;
+    const player2Id = state.players[2].id;
+
+    // Player 1 stocks a card; player 2 declines.
+    let res = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player1Id, cardId: stashedCard.id }));
+    state = res.state;
+    expect(state.tavernDeck[0]).toEqual(stashedCard);
+    expect(state.players[1].hand.length).toBe(0);
+    expect(state.azureEmblemWindow?.pendingPlayerIds).toEqual([player2Id]);
+
+    res = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player2Id }));
+    state = res.state;
+
+    expect(state.azureEmblemWindow).toBeNull();
+    expect(state.turnPhase).toBe('AWAIT_DEFEND'); // deferred attack now resolves for the Mage's player
+    expect(state.pendingDamage).toBe(10);
+  });
+
+  it('rejects a response from anyone but the front of the queue, and is inert without the relic', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startEmblemMission(2, [boss]);
+    state = structuredClone(state);
+    const player0Id = state.players[0].id;
+    state.players[0].hand = [mageCard('H', '4')];
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+    const bad = applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id });
+    expect(bad.ok).toBe(false); // player 0 isn't in the queue — they're the attacker
+
+    // Without the relic, the same Mage play never opens the window at all.
+    let plain = startMission(2, [boss]);
+    plain = structuredClone(plain);
+    plain.players[0].hand = [mageCard('H', '4')];
+    const plainRes = ensureOk(
+      applyAction(plain, { type: 'PLAY_CARDS', playerId: plain.players[0].id, cardIds: [plain.players[0].hand[0].id] }),
+    );
+    expect(plainRes.state.turnPhase).not.toBe('AWAIT_AZURE_EMBLEM');
   });
 });
 
@@ -916,5 +1008,272 @@ describe('legacy: Guardian class power (absolute shield, one attack at a time)',
 
     expect(state.currentEnemy?.spadesShield).toBe(20);
     expect(state.turnPhase).toBe('AWAIT_PLAY'); // no damage suffered, same player continues
+  });
+});
+
+describe('legacy: mission 8 setup (Winds of Chaos)', () => {
+  it('is a 12-enemy 2-wave gauntlet (6 Trolls, 6 Wyverns), ascendingZone enabled, with 9 extra Pilgrim reserve cards and a preset Puppy anchor', () => {
+    const mission8 = getMission(8)!;
+    expect(mission8.enemies.length).toBe(12);
+    expect(mission8.ascendingZone).toBe(true);
+    expect(mission8.extraReserveCards?.length).toBe(9);
+    expect(mission8.extraReserveCards?.every((c) => c.kind === 'suited' && c.pilgrim)).toBe(true);
+    expect(mission8.presetMissionZone?.length).toBe(1);
+    expect(mission8.presetMissionZone?.[0]).toMatchObject({ rank: 'A', pilgrim: true });
+  });
+
+  it('shuffles the extra Pilgrim cards into the reserve deck alongside the party at mission start', () => {
+    const mission8 = getMission(8)!;
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'edge-setup-test',
+      party: buildInitialParty(),
+      enemies: missionEnemiesToSpecs(mission8.enemies),
+      jesterCount: 0,
+      ascendingZone: mission8.ascendingZone,
+      presetMissionZone: mission8.presetMissionZone,
+      extraReserveCards: mission8.extraReserveCards,
+    });
+    const state = ensureOk(res).state;
+    expect(state.ascendingZone).toBe(true);
+    expect(state.missionZone.length).toBe(1);
+    const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
+    // 40 party + 9 Pilgrims = 49 total in circulation (hands + reserve deck).
+    expect(handCount + state.tavernDeck.length).toBe(49);
+  });
+});
+
+describe('legacy: mission 8 mechanics (ascending mission zone chain)', () => {
+  function startEdgeMission(
+    n: number,
+    enemies: LegacyEnemySpec[],
+    opts: { presetMissionZone?: Card[] } = {},
+  ): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'edge-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      ascendingZone: true,
+      ...opts,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  const puppy: Card = { id: 'puppy', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true };
+
+  it('grants no suit immunity from the preset Pilgrim Puppy (unlike Missions 3/5/6 zone modes)', () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'H', health: 20, attack: 10 };
+    const state = startEdgeMission(1, [boss], { presetMissionZone: [puppy] });
+    expect(state.missionZone).toEqual([puppy]);
+    expect(state.zoneImmuneSuits).toEqual([]);
+  });
+
+  it('places a card worth exactly one more than the zone top; a Pilgrim card never buffs the enemy', () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 20, attack: 10 };
+    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy] });
+    const two: Card = { id: 'p2', kind: 'suited', suit: 'D', rank: '2', name: 'Old Yarrow', pilgrim: true };
+    state = rig(state, [two]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: two.id }));
+    state = res.state;
+
+    expect(state.missionZone.map((c) => c.id)).toEqual(['puppy', 'p2']);
+    // No attack buff from a Pilgrim card: base 10 attack unmodified.
+    expect(state.pendingDamage).toBe(10);
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+  });
+
+  it("rejects a card that doesn't match the zone's required next value", () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 20, attack: 10 };
+    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy] });
+    state = rig(state, [suited('D', '5')]);
+    const res = applyAction(state, {
+      type: 'PLACE_IN_ZONE',
+      playerId: state.players[0].id,
+      cardId: state.players[0].hand[0].id,
+    });
+    expect(res.ok).toBe(false);
+  });
+
+  it("a non-Pilgrim card bridging a gap buffs the current enemy's attack for as long as it sits there", () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 20, attack: 10 };
+    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy] });
+    const bridge = suited('D', '2'); // an ordinary party card, not a Pilgrim
+    state = rig(state, [bridge]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: bridge.id }));
+    state = res.state;
+
+    // 10 base attack + 2 (the bridging card's own value, still sitting in the zone) = 12.
+    expect(state.pendingDamage).toBe(12);
+  });
+
+  it('completing the chain at 10 purges the zone to the discard pile, opens the Ultimate Banishment, and closes the zone', () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 100, attack: 1 };
+    const nine: Card = { id: 'nine', kind: 'suited', suit: 'H', rank: '9', pilgrim: true };
+    const ten: Card = { id: 'ten', kind: 'suited', suit: 'H', rank: '10', name: 'Goran', pilgrim: true };
+    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy, nine] });
+    state = rig(state, [ten]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: ten.id }));
+    state = res.state;
+
+    expect(state.missionZone.length).toBe(0);
+    expect(state.zoneClosed).toBe(true);
+    expect(state.turnPhase).toBe('AWAIT_ZONE_PURGE');
+    expect(state.zonePurge?.playerId).toBe(state.players[0].id);
+    expect(state.discardPile.map((c) => c.id).sort()).toEqual(['nine', 'puppy', 'ten']);
+  });
+
+  it('rejects further placements once the zone has closed', () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 100, attack: 1 };
+    const nine: Card = { id: 'nine', kind: 'suited', suit: 'H', rank: '9', pilgrim: true };
+    const ten: Card = { id: 'ten', kind: 'suited', suit: 'H', rank: '10', pilgrim: true };
+    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy, nine] });
+    state = rig(state, [ten]);
+    state = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: ten.id })).state;
+
+    state = rig(state, [suited('D', '2')]);
+    const res = applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: state.players[0].hand[0].id });
+    expect(res.ok).toBe(false);
+  });
+
+  it('RESOLVE_ZONE_PURGE banishes the chosen cards forever and shuffles the rest into the bottom of the reserve deck', () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 100, attack: 1 };
+    const nine: Card = { id: 'nine', kind: 'suited', suit: 'H', rank: '9', pilgrim: true };
+    const ten: Card = { id: 'ten', kind: 'suited', suit: 'H', rank: '10', pilgrim: true };
+    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy, nine] });
+    state = rig(state, [ten]);
+    state = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: ten.id })).state;
+    const reserveBefore = state.tavernDeck.length;
+
+    const res = ensureOk(
+      applyAction(state, { type: 'RESOLVE_ZONE_PURGE', playerId: state.players[0].id, banishCardIds: ['nine'] }),
+    );
+    state = res.state;
+
+    expect(state.banishPile.map((c) => c.id)).toEqual(['nine']);
+    expect(state.discardPile.length).toBe(0);
+    expect(state.tavernDeck.length).toBe(reserveBefore + 2); // puppy + ten shuffled to the bottom
+    expect(state.zonePurge).toBeNull();
+    expect(state.zoneClosed).toBe(true); // still closed — the purge only fires once
+  });
+});
+
+describe('legacy: Chanter class power (chant — every player draws at once, then trims back down)', () => {
+  function chanterCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
+    return { ...suited(suit, rank), chanter: true, ...(special ? { special: 'ENCORE' as const } : {}) };
+  }
+
+  it("draws its own value in cards for every player at once, skipping the trim window entirely when nobody goes over their hand limit", () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startMission(1, [boss]);
+    state = rig(state, [chanterCard('D', '2')]); // hand limit 8, well under after drawing 2
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.chanterWindow).toBeNull();
+    expect(state.players[0].hand.length).toBe(2); // played card gone, 2 drawn back
+    expect(state.currentEnemy?.damageTaken).toBe(2); // plain damage — Diamonds' draw power never fired
+    expect(state.turnPhase).toBe('AWAIT_DEFEND'); // straight to the deferred attack tail
+    expect(state.pendingDamage).toBe(10);
+  });
+
+  it('draws for every player at the table at once, even past hand limit, and queues only the ones now over it to trim', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startMission(2, [boss]); // hand limit 7 for 2 players
+    state = structuredClone(state);
+    state.players[0].hand = [chanterCard('D', '3')];
+    state.players[1].hand = Array.from({ length: 6 }, () => suited('H', '2'));
+    const player0Id = state.players[0].id;
+    const player1Id = state.players[1].id;
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    // Player 0's hand: card played (0 left), draws 3 -> 3, under the 7 limit, no trim needed.
+    // Player 1's hand: 6 + 3 drawn = 9, over the 7 limit by 2 -> queued to trim.
+    expect(state.players[0].hand.length).toBe(3);
+    expect(state.players[1].hand.length).toBe(9);
+    expect(state.turnPhase).toBe('AWAIT_CHANT_TRIM');
+    expect(state.chanterWindow).toEqual({ pendingPlayerIds: [player1Id], blockNextAttack: false });
+  });
+
+  it("rejects a trim attempt from anyone but the front of the queue, and rejects the wrong discard count", () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startMission(2, [boss]);
+    state = structuredClone(state);
+    state.players[0].hand = [chanterCard('D', '3')];
+    state.players[1].hand = Array.from({ length: 6 }, () => suited('H', '2'));
+    const player0Id = state.players[0].id;
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+    // Player 0 is not in the trim queue (player 1 is) — their attempt should be rejected.
+    const wrongPlayer = applyAction(state, { type: 'RESOLVE_CHANT', playerId: player0Id, discardCardIds: [] });
+    expect(wrongPlayer.ok).toBe(false);
+
+    const player1Id = state.players[1].id;
+    const tooFew = applyAction(state, { type: 'RESOLVE_CHANT', playerId: player1Id, discardCardIds: [state.players[1].hand[0].id] });
+    expect(tooFew.ok).toBe(false); // needs exactly 2 (9 cards, limit 7), tried 1
+  });
+
+  it('trims the queued player back to their hand limit, then resolves the deferred attack once the queue empties', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startMission(2, [boss]);
+    state = structuredClone(state);
+    state.players[0].hand = [chanterCard('D', '3')];
+    state.players[1].hand = Array.from({ length: 6 }, () => suited('H', '2'));
+    const player0Id = state.players[0].id;
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+    const player1 = state.players[1];
+    const toDiscard = player1.hand.slice(0, 2).map((c) => c.id);
+
+    const res = ensureOk(applyAction(state, { type: 'RESOLVE_CHANT', playerId: player1.id, discardCardIds: toDiscard }));
+    state = res.state;
+
+    expect(state.chanterWindow).toBeNull();
+    expect(state.players[1].hand.length).toBe(7); // trimmed back to the limit
+    expect(state.discardPile.length).toBe(2);
+    // Turn is still player 0's (the chanting player) — the deferred enemy attack now resolves for them.
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    expect(state.pendingDamage).toBe(10);
+  });
+
+  it("Encore doubles how many cards everyone draws", () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startMission(1, [boss]);
+    state = rig(state, [chanterCard('D', '3', true)]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.players[0].hand.length).toBe(6); // 0 (played) + 6 drawn (Encore doubles 3 -> 6)
+  });
+});
+
+describe('legacy: mission 8 reward (Chanter faction)', () => {
+  it('rewards 4 Chanter recruits, one carrying the Encore special ability', () => {
+    const mission8 = getMission(8)!;
+    const party = applyReward(buildInitialParty(), mission8.reward);
+    const chanters = party.filter((c) => c.kind === 'suited' && c.chanter);
+    expect(chanters.length).toBe(4);
+    expect(chanters.filter((c) => c.kind === 'suited' && c.special === 'ENCORE').length).toBe(1);
+  });
+
+  it('a Chanter recruit takes its explicit suit (Chanter has none of its own) and is flagged chanter', () => {
+    const card = buildRecruitCard({ name: 'Test Chanter', class: 'CHANTER', rank: '5', suit: 'D' });
+    expect(card.kind === 'suited' && card.chanter).toBe(true);
+    expect(card.kind === 'suited' && card.suit).toBe('D');
   });
 });
