@@ -100,6 +100,20 @@ describe('legacy: mission setup', () => {
     const specs = missionEnemiesToSpecs(mission2.enemies);
     expect(specs.length).toBe(6);
     expect(specs.every((s) => s.secondSuit)).toBe(true);
+    expect(specs.every((s) => s.health === 20 && s.attack === 10)).toBe(true);
+  });
+
+  it('mission 2 uses the modified Jester rule (next player only)', () => {
+    const mission2 = getMission(2)!;
+    expect(mission2.jesterClaimNextPlayerOnly).toBe(true);
+  });
+
+  it('mission 3 sidelines a party member, flips the mission zone every turn, and rewards 10 Mage recruits', () => {
+    const mission3 = getMission(3)!;
+    expect(mission3.sidelineCount).toBe(1);
+    expect(mission3.endOfTurnZoneFlip).toBe(true);
+    expect(mission3.reward.recruits.length).toBe(10);
+    expect(mission3.reward.recruits.every((r) => r.class === 'MAGE')).toBe(true);
   });
 });
 
@@ -456,5 +470,105 @@ describe('legacy: Kinfolk Flute relic (mission 1) — combo-assist window', () =
 
     const selfAssist = applyAction(state, { type: 'ASSIST_COMBO', playerId: attackerId, cardId: suited('H', '3').id });
     expect(selfAssist.ok).toBe(false);
+  });
+});
+
+describe('legacy: mission 2 modified Jester rule (next player only)', () => {
+  it('rejects a claim from anyone but the next player in turn order, and allows the next player', () => {
+    const enemy: LegacyEnemySpec = { name: 'Hydra Head', suit: 'H', secondSuit: 'D', health: 100, attack: 1 };
+    const ids = ['p0', 'p1', 'p2'];
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: ['P0', 'P1', 'P2'],
+      seed: 'jester-next-test',
+      party: buildInitialParty(),
+      enemies: [enemy],
+      jesterCount: 3,
+      jesterClaimNextPlayerOnly: true,
+    });
+    let state = ensureOk(res).state;
+    const j = jester();
+    state = rig(state, [j]);
+
+    const playRes = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId: state.players[0].id, cardId: j.id }));
+    state = playRes.state;
+
+    const badClaim = applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[2].id });
+    expect(badClaim.ok).toBe(false);
+
+    const goodClaim = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[1].id }));
+    expect(goodClaim.state.jesterClaim?.claimedBy).toBe(state.players[1].id);
+  });
+});
+
+describe('legacy: mission 3 mechanics (end-of-turn mission zone)', () => {
+  function startZoneMission(n: number, enemies: LegacyEnemySpec[]): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'zone-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      endOfTurnZoneFlip: true,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('flips the top reserve card into the mission zone at end of turn, adding its class to the enemy\'s immunity', () => {
+    const boss: LegacyEnemySpec = { name: 'Archive Boss', suit: 'S', health: 100, attack: 1 };
+    let state = startZoneMission(1, [boss]);
+    state = structuredClone(state);
+    state.tavernDeck = [suited('H', '5'), ...state.tavernDeck];
+    state = rig(state, [suited('D', '2')]);
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = res.state;
+    // Solo game: yielding with a live enemy attack goes to AWAIT_DEFEND — cover it to actually trigger
+    // advanceToNextPlayer's end-of-turn flip.
+    const res2 = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
+    state = res2.state;
+
+    expect(state.missionZone.length).toBe(1);
+    expect(state.zoneImmuneSuits).toContain('H');
+  });
+
+  it('banishes the mission zone (saving one card to discard on an exact kill) when the enemy is defeated, and skips that turn\'s flip', () => {
+    const boss: LegacyEnemySpec = { name: 'Archive Boss', suit: 'S', health: 10, attack: 1 };
+    let state = startZoneMission(1, [boss]);
+    state = structuredClone(state);
+    state.missionZone = [suited('H', '3'), suited('D', '4')];
+    state.zoneImmuneSuits = ['H', 'D'];
+    state = rig(state, [suited('S', '10')], { damageTaken: 0 }); // Spades doesn't double — exact kill: 10 vs 10 health
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.missionZone.length).toBe(0);
+    expect(state.zoneImmuneSuits.length).toBe(0);
+    expect(state.banishPile.length).toBe(1); // one card banished, one saved
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '4')).toBe(true);
+  });
+
+  it('a corrupted card ignores mission-zone immunity for its own class, at the cost of banishing the top reserve card', () => {
+    const boss: LegacyEnemySpec = { name: 'Archive Boss', suit: 'S', health: 100, attack: 1 };
+    let state = startZoneMission(1, [boss]);
+    state = structuredClone(state);
+    state.zoneImmuneSuits = ['H']; // Hearts is currently blocked by the mission zone
+    state.tavernDeck = [suited('C', '9'), ...state.tavernDeck]; // will be banished as the corrupted-play cost
+    const corruptedHeart: SuitedCard = { ...suited('H', '5'), corrupted: true };
+    state = rig(state, [corruptedHeart]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [corruptedHeart.id] }));
+    state = res.state;
+
+    // Hearts power resolved despite the zone immunity — no "blocked" log entry for it.
+    expect(state.log.some((e) => e.message.includes('blocked'))).toBe(false);
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '9')).toBe(true);
   });
 });

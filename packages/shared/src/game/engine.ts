@@ -107,7 +107,29 @@ function advanceToNextPlayer(state: GameState): void {
   state.pendingDamage = 0;
   state.turnPhase = 'AWAIT_PLAY';
   state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
+  flipMissionZoneCard(state);
   checkForStuckLoss(state);
+}
+
+/**
+ * Mission 3 ("Lessons in Flames") only: end of every turn, the top of the reserve deck flips face-up into a
+ * shared mission zone, and the enemy becomes immune to that card's class(es) too — stacking with each further
+ * flip. Only called from advanceToNextPlayer, so defeating an enemy (which skips straight back to AWAIT_PLAY
+ * without advancing) naturally skips this turn's flip, per the mission's rule.
+ */
+function flipMissionZoneCard(state: GameState): void {
+  if (!state.endOfTurnZoneFlip || !state.currentEnemy) return;
+  const card = state.tavernDeck.shift();
+  if (!card) return;
+  state.missionZone.push(card);
+  if (card.kind === 'suited') {
+    for (const s of cardSuits(card)) {
+      if (!state.zoneImmuneSuits.includes(s)) state.zoneImmuneSuits.push(s);
+    }
+    log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the enemy is now also immune to ${cardSuits(card).map((s) => classForSuit(s).name).join(' & ')}.`);
+  } else {
+    log(state, 'The mission zone flips a Jester.');
+  }
 }
 
 function drawOneCard(state: GameState, player: PlayerState): boolean {
@@ -179,9 +201,20 @@ function resolveArcaneBolts(state: GameState, cards: Card[]): number {
  * true for an attack combined with a claimed Jester, which ignores immunity for that attack only (unlike classic
  * Regicide's Jester, this does NOT permanently set enemy.immunityBroken).
  */
-function resolveSuitPowers(state: GameState, cards: Card[], suits: ('H' | 'D' | 'C' | 'S')[], totalValue: number, ignoreImmunity = false): number {
+function resolveSuitPowers(
+  state: GameState,
+  cards: Card[],
+  suits: ('H' | 'D' | 'C' | 'S')[],
+  totalValue: number,
+  ignoreImmunity = false,
+  corruptedSuits: Suit[] = [],
+): number {
   const enemy = state.currentEnemy!;
-  const blocked = (s: 'H' | 'D' | 'C' | 'S') => !ignoreImmunity && isSuitBlockedByImmunity(s, enemy);
+  const blocked = (s: 'H' | 'D' | 'C' | 'S') =>
+    !ignoreImmunity &&
+    !enemy.immunityBroken &&
+    !corruptedSuits.includes(s) &&
+    (isSuitBlockedByImmunity(s, enemy) || state.zoneImmuneSuits.includes(s));
   const immuneNoun = state.ruleset === 'legacy' ? 'class' : 'suit';
 
   if (suits.includes('H')) {
@@ -265,6 +298,21 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
     // Legacy enemies always go to the discard pile — no exact-damage/return-to-deck effect (that's mission-specific
     // in the physical game, and doesn't apply cleanly since Legacy enemies don't carry a J/Q/K-style card value).
     log(state, state.exactKillOnly ? `${enemyLabel(enemy)} felled by an exact hit — banished for good!` : `${enemyLabel(enemy)} defeated!`);
+    if (state.endOfTurnZoneFlip && state.missionZone.length > 0) {
+      const exact = remaining === 0;
+      if (exact) {
+        // Exact kill: save the most recently flipped zone card to the discard pile, banish the rest.
+        const saved = state.missionZone.pop()!;
+        state.discardPile.push(saved);
+        state.banishPile.push(...state.missionZone);
+        log(state, `An exact hit saves ${saved.kind === 'suited' ? saved.name ?? `the ${saved.rank}` : 'the Jester'} from the mission zone — the rest is banished.`);
+      } else {
+        state.banishPile.push(...state.missionZone);
+        log(state, 'The mission zone is banished.');
+      }
+      state.missionZone = [];
+      state.zoneImmuneSuits = [];
+    }
   } else {
     const exact = remaining === 0;
     const upgrade = upgradeDefeatedRank(enemy.rank, state.endlessLoop);
@@ -356,6 +404,11 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.exactKillOnly = false;
   state.relics = [];
   state.comboAssist = null;
+  state.endOfTurnZoneFlip = false;
+  state.missionZone = [];
+  state.zoneImmuneSuits = [];
+  state.banishPile = [];
+  state.jesterClaimNextPlayerOnly = false;
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -409,6 +462,11 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.exactKillOnly = action.exactKillOnly ?? false;
   state.relics = action.relics ?? [];
   state.comboAssist = null;
+  state.endOfTurnZoneFlip = action.endOfTurnZoneFlip ?? false;
+  state.missionZone = [];
+  state.zoneImmuneSuits = [];
+  state.banishPile = [];
+  state.jesterClaimNextPlayerOnly = action.jesterClaimNextPlayerOnly ?? false;
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
   return ok(state);
@@ -474,14 +532,22 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
   // Mage cards' suits don't join the combined suit-power resolution below — their class power is the arcane
   // bolt above instead, which already resolved (Mage always goes first, per legacy/classes.ts).
-  const nonArcaneSuits = Array.from(
-    new Set(
-      cards
-        .filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane)
-        .flatMap(cardSuits),
-    ),
-  );
-  const damageMultiplier = resolveSuitPowers(state, cards, nonArcaneSuits, shape.totalValue, Boolean(claimedJester));
+  const nonArcaneCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane);
+  const nonArcaneSuits = Array.from(new Set(nonArcaneCards.flatMap(cardSuits)));
+
+  // Corrupted cards: their class power always ignores immunity, at the cost of banishing the top of the
+  // reserve deck the instant they're played (see SuitedCard.corrupted).
+  const corruptedCards = nonArcaneCards.filter((c) => c.corrupted);
+  const corruptedSuits = Array.from(new Set(corruptedCards.flatMap(cardSuits)));
+  for (const c of corruptedCards) {
+    const banished = state.tavernDeck.shift();
+    if (banished) {
+      state.banishPile.push(banished);
+      log(state, `${c.name ?? 'A corrupted card'} ignores immunity — the reserve deck's top card is banished as the cost.`);
+    }
+  }
+
+  const damageMultiplier = resolveSuitPowers(state, cards, nonArcaneSuits, shape.totalValue, Boolean(claimedJester), corruptedSuits);
   const damage = shape.totalValue * damageMultiplier + arcaneBonus;
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
@@ -670,6 +736,15 @@ function claimJester(state: GameState, action: Extract<GameAction, { type: 'CLAI
   const player = findPlayer(state, action.playerId);
   if (!player) return fail('Unknown player.');
 
+  // Modified Jester rule (Mission 2's hydras only): the oppressive dual immunities restrict the claim to
+  // whoever's turn comes next, instead of being open to the whole table.
+  if (state.jesterClaimNextPlayerOnly) {
+    const nextPlayer = state.players[(state.currentPlayerIndex + 1) % state.players.length];
+    if (player.id !== nextPlayer.id) {
+      return fail('Only the next player in turn order may claim this Jester.');
+    }
+  }
+
   state.jesterClaim.claimedBy = player.id;
   state.currentPlayerIndex = state.players.findIndex((p) => p.id === player.id);
   state.turnPhase = 'AWAIT_PLAY';
@@ -771,6 +846,11 @@ export function createLobbyState(): GameState {
     exactKillOnly: false,
     relics: [],
     comboAssist: null,
+    endOfTurnZoneFlip: false,
+    missionZone: [],
+    zoneImmuneSuits: [],
+    banishPile: [],
+    jesterClaimNextPlayerOnly: false,
   };
 }
 

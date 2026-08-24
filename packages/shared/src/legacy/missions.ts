@@ -22,6 +22,12 @@ export interface Mission {
   standardCastle?: boolean;
   /** When true, only an exact-damage hit defeats an enemy — overkilling recycles it, wounds healed, to the back of the line. */
   exactKillOnly?: boolean;
+  /** See GameState.endOfTurnZoneFlip. */
+  endOfTurnZoneFlip?: boolean;
+  /** When set, this many random current party members sit out this mission (excluded from the reserve deck; unaffected in the campaign roster). */
+  sidelineCount?: number;
+  /** See GameState.jesterClaimNextPlayerOnly. */
+  jesterClaimNextPlayerOnly?: boolean;
 }
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
@@ -74,34 +80,50 @@ export const MISSIONS: Mission[] = [
       "The road out of the capital drops into the Grey Fen, where a brood of six hydra-kin has laired for a " +
       "generation. Each head answers to two disciplines at once, shrugging off anything but a killing blow " +
       "measured to the hair — anything less, and the beast just knits itself back together for another round.",
+    // All six heads share the same stat line (20 health / 10 attack) — the challenge is entirely the dual
+    // immunity + exact-kill combination, not a difficulty ramp across the brood.
     enemies: [
-      enemy('Coilfang Broodling', 'CLERIC', 16, 8, 'BARD'),
-      enemy('Ashmaw Broodling', 'CLERIC', 18, 9, 'WARRIOR'),
+      enemy('Coilfang Broodling', 'CLERIC', 20, 10, 'BARD'),
+      enemy('Ashmaw Broodling', 'CLERIC', 20, 10, 'WARRIOR'),
       enemy('Duskscale Broodling', 'CLERIC', 20, 10, 'PALADIN'),
-      enemy('Bramble-Throat Broodling', 'BARD', 22, 11, 'WARRIOR'),
-      enemy('Grey Fen Broodling', 'BARD', 24, 12, 'PALADIN'),
-      enemy('The Nine-Coiled Matriarch', 'WARRIOR', 30, 15, 'PALADIN'),
+      enemy('Bramble-Throat Broodling', 'BARD', 20, 10, 'WARRIOR'),
+      enemy('Grey Fen Broodling', 'BARD', 20, 10, 'PALADIN'),
+      enemy('The Nine-Coiled Matriarch', 'WARRIOR', 20, 10, 'PALADIN'),
     ],
     exactKillOnly: true,
+    // Modified Jester rule for this mission only: the oppressive dual immunities mean only the very next
+    // player in turn order may claim a played Jester and ignore them — not any player at the table.
+    jesterClaimNextPlayerOnly: true,
     // Reward: Dual-class Stickers — 4 random existing party members each gain a second class icon, so that
     // single card triggers both class powers whenever it's played.
     reward: { recruits: [], dualClassStickers: 4 },
   },
   {
     id: 3,
-    title: 'The Ashen Archive',
+    title: 'Lessons in Flames',
     story:
       "Every road out of the Fen leads the party to the same place: a scholars' tower half-collapsed into " +
-      'ash, where the corruption didn\'t creep in from outside — it was summoned on purpose. The wardens who ' +
-      'raised the tower\'s wards against it have been trapped behind their own seals for a generation, and ' +
-      'freeing them is the only way through.',
+      'ash, where the corruption didn\'t creep in from outside — it was summoned on purpose, by the academy\'s ' +
+      'own staff. One of the Syndicate\'s own is pulled aside before the fight even starts, leaving the rest to ' +
+      'work the blaze as it spreads and catches on everything it touches.',
     enemies: [enemy('The Ash-Bound Warden', 'PALADIN', 28, 13), enemy('Cinderleaf, First Scholar', 'CLERIC', 32, 15)],
+    // One random party member sits this mission out, and every end of turn the reserve deck feeds the fire
+    // another class of immunity (see GameState.endOfTurnZoneFlip / missionZone).
+    sidelineCount: 1,
+    endOfTurnZoneFlip: true,
+    // Reward: the Mage class itself — 10 new party members, all Mages.
     reward: {
       recruits: [
-        recruit('Wren Ashglass', 'MAGE', '4', 'H'),
-        recruit('Corvath the Kindled', 'MAGE', '5', 'D'),
-        recruit('Selwyn Duskbind', 'MAGE', '6', 'C'),
-        recruit('Ophira Emberquill', 'MAGE', '7', 'S'),
+        recruit('Wren Ashglass', 'MAGE', '2', 'H'),
+        recruit('Corvath the Kindled', 'MAGE', '3', 'D'),
+        recruit('Selwyn Duskbind', 'MAGE', '4', 'C'),
+        recruit('Ophira Emberquill', 'MAGE', '5', 'S'),
+        recruit('Talon Grayveil', 'MAGE', '6', 'H'),
+        recruit('Marn Cindervoice', 'MAGE', '7', 'D'),
+        recruit('Ysabet Hollowflame', 'MAGE', '8', 'C'),
+        recruit('Ruven Ashcaller', 'MAGE', '9', 'S'),
+        recruit('Delphine Nightember', 'MAGE', '10', 'H'),
+        recruit('Corin Pale-Ash', 'MAGE', 'A', 'D'),
       ],
     },
   },
