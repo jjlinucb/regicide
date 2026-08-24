@@ -173,6 +173,15 @@ export function GamePage({
             )}
           </div>
         )}
+        {state.zoneVengeanceOnKill && state.missionZone.length > 0 && (
+          <div className="legacy-jester-claim-banner">
+            <span>
+              👻 Mission Zone ({state.missionZone.length} card{state.missionZone.length === 1 ? '' : 's'}, never cleared):{' '}
+              {state.missionZone.map((c) => (c.kind === 'suited' ? c.name ?? `${c.rank} of ${c.suit}` : 'Jester')).join(', ')} — Myla strikes for{' '}
+              {state.missionZone.reduce((sum, c) => sum + cardValue(c), 0)} on the next kill (less her strongest card on an exact hit).
+            </span>
+          </div>
+        )}
         {state.currentEnemy && (
           <EnemyDisplay
             enemy={state.currentEnemy}

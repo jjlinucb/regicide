@@ -345,6 +345,22 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       state.missionZone = [];
       state.zoneImmuneSuits = [];
     }
+    if (state.zoneVengeanceOnKill) {
+      // Mission 6: whatever's left on the enemy's table after this kill doesn't just fall to the discard pile —
+      // its lowest-value card is sacrificed permanently into the (never-cleared) mission zone alongside Myla.
+      if (enemy.tableCards.length > 0) {
+        let lowestIdx = 0;
+        for (let i = 1; i < enemy.tableCards.length; i++) {
+          if (cardValue(enemy.tableCards[i]) < cardValue(enemy.tableCards[lowestIdx])) lowestIdx = i;
+        }
+        const [sacrificed] = enemy.tableCards.splice(lowestIdx, 1);
+        state.missionZone.push(sacrificed);
+        state.zoneImmuneSuits = Array.from(
+          new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))),
+        );
+        log(state, `${sacrificed.kind === 'suited' ? sacrificed.name ?? `the ${sacrificed.rank}` : 'the Jester'} is drawn permanently into the mission zone.`);
+      }
+    }
   } else {
     const exact = remaining === 0;
     const upgrade = upgradeDefeatedRank(enemy.rank, state.endlessLoop);
@@ -389,6 +405,26 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
     log(state, `${enemyLabel(enemy)}'s death throes burst outward — ${splash} splash damage crashes into ${enemyLabel(state.currentEnemy)}!`);
     dealDamageAndCheckDefeat(state, splash);
     return true;
+  }
+
+  if (state.ruleset === 'legacy' && state.zoneVengeanceOnKill && state.missionZone.length > 0) {
+    // Mission 6: Myla, permanently seated in the mission zone, strikes right after it grows — team damage equal
+    // to the live sum of every card resting there (her own base value of 7 included). An exact-damage kill
+    // excludes the single highest-value zone card from this one strike's total. Routed through the existing
+    // AWAIT_DEFEND/defend() flow, so an uncovered hit ends the mission exactly like any other undefended attack.
+    const exact = remaining === 0;
+    const values = state.missionZone.map(cardValue);
+    let total = values.reduce((a, b) => a + b, 0);
+    if (exact) {
+      total -= Math.max(...values);
+      log(state, `An exact hit spares the mission zone's strongest card from Myla's wrath this time.`);
+    }
+    if (total > 0) {
+      log(state, `Myla lashes out for ${total} damage from the ${state.missionZone.length} card(s) haunting the mission zone!`);
+      state.pendingDamage = total;
+      state.turnPhase = 'AWAIT_DEFEND';
+      return true;
+    }
   }
 
   // Defeating player continues their turn against the new enemy (no defend, no turn advance).
@@ -455,6 +491,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.discardTopBuffsAttack = false;
   state.exactKillToReserveDeck = false;
   state.exactKillSplashDamage = false;
+  state.zoneVengeanceOnKill = false;
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -518,6 +555,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.discardTopBuffsAttack = action.discardTopBuffsAttack ?? false;
   state.exactKillToReserveDeck = action.exactKillToReserveDeck ?? false;
   state.exactKillSplashDamage = action.exactKillSplashDamage ?? false;
+  state.zoneVengeanceOnKill = action.zoneVengeanceOnKill ?? false;
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
   return ok(state);
@@ -933,6 +971,7 @@ export function createLobbyState(): GameState {
     discardTopBuffsAttack: false,
     exactKillToReserveDeck: false,
     exactKillSplashDamage: false,
+    zoneVengeanceOnKill: false,
   };
 }
 
