@@ -1,14 +1,25 @@
-import type { EnemyState } from '@regicide/shared';
-import { SUIT_TO_CLASS } from '@regicide/shared';
+import type { Card, EnemyState } from '@regicide/shared';
+import { discardPileTopValue, SUIT_TO_CLASS } from '@regicide/shared';
 import { PlayingCard } from './PlayingCard';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
 const RANK_NAME: Record<string, string> = { J: 'Jack', Q: 'Queen', K: 'King' };
 
-export function EnemyDisplay({ enemy }: { enemy: EnemyState }) {
+export function EnemyDisplay({
+  enemy,
+  discardPile,
+  discardTopBuffsAttack,
+}: {
+  enemy: EnemyState;
+  /** Only needed when discardTopBuffsAttack is set (Mission 4). */
+  discardPile?: Card[];
+  discardTopBuffsAttack?: boolean;
+}) {
   const healthRemaining = Math.max(0, enemy.maxHealth - enemy.damageTaken);
   const healthPct = Math.round((healthRemaining / enemy.maxHealth) * 100);
-  const currentAttack = Math.max(0, enemy.baseAttack - enemy.spadesShield);
+  const discardBuff = discardTopBuffsAttack ? discardPileTopValue(discardPile ?? []) : 0;
+  const currentAttack = enemy.baseAttack - enemy.spadesShield + discardBuff;
+  const displayAttack = Math.max(0, currentAttack);
   // Only Legacy enemies carry a `name` — use its presence as the display-mode signal (same trick as PlayingCard).
   const isLegacy = Boolean(enemy.name);
   const classInfo = SUIT_TO_CLASS[enemy.suit];
@@ -61,7 +72,12 @@ export function EnemyDisplay({ enemy }: { enemy: EnemyState }) {
       </div>
       <div className="enemy-stats">
         <span>Health: {healthRemaining} / {enemy.maxHealth}</span>
-        <span>Attack: {currentAttack}{enemy.spadesShield > 0 ? ` (base ${enemy.baseAttack})` : ''}</span>
+        <span>
+          Attack: {displayAttack}
+          {currentAttack < 0 ? ' (negative!)' : ''}
+          {enemy.spadesShield > 0 || discardBuff !== 0 ? ` (base ${enemy.baseAttack})` : ''}
+          {discardBuff !== 0 ? ` 🗑️ ${discardBuff > 0 ? '+' : ''}${discardBuff} from top of discard` : ''}
+        </span>
       </div>
     </div>
   );

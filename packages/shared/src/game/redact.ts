@@ -27,6 +27,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     jesterClaim: state.jesterClaim,
     endlessLoop: state.endlessLoop,
     comboAssist: state.comboAssist,
+    discardTopBuffsAttack: state.discardTopBuffsAttack,
     you: { playerId: viewerPlayerId },
   };
 }

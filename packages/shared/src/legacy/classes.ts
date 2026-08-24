@@ -1,6 +1,6 @@
 import type { SpecialAbilityId, Suit } from '../game/types.js';
 
-export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE';
+export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAVER';
 
 /**
  * Regicide Legacy's four base classes map 1:1 onto classic Regicide's four suits — Warrior=Clubs (double damage),
@@ -8,9 +8,10 @@ export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE';
  * card IS a suited card (see legacy/party.ts); this table is purely the display layer so suit letters never
  * leak into Legacy UI text.
  *
- * Mage (introduced Mission 3) is the odd one out: it has no suit of its own (there's no 5th suit in a standard
- * deck). A Mage card keeps whatever suit it was printed with, purely for immunity bookkeeping, but its class
- * power never joins the combined suit-power resolution — see SuitedCard.arcane and engine.ts's resolveArcaneBolts.
+ * Mage (introduced Mission 3) and Reaver (introduced Mission 5) are the odd ones out: neither has a suit of its
+ * own (there's no 5th or 6th suit in a standard deck). Both kinds of card keep whatever suit they're printed
+ * with, purely for immunity bookkeeping, but their class power never joins the combined suit-power resolution —
+ * see SuitedCard.arcane/reaver and engine.ts's resolveArcaneBolts/resolveCommittedPlay.
  */
 export interface ClassTheme {
   id: ClassId;
@@ -81,6 +82,16 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     specialName: 'Arcane Surge',
     specialText: 'Arcane Surge: this Mage\'s arcane bolt hits for double its own card value.',
   },
+  REAVER: {
+    id: 'REAVER',
+    name: 'Reaver',
+    tag: 'Reserve Tear',
+    glyph: '🍄',
+    color: '#5c6b2f',
+    specialAbility: 'PLUNDER',
+    specialName: 'Plunder',
+    specialText: 'Plunder: tears 2 reserve cards instead of 1 (both banished) and keeps the higher value.',
+  },
 };
 
 export const SUIT_TO_CLASS: Record<Suit, ClassTheme> = {
@@ -95,9 +106,11 @@ export function classForSuit(suit: Suit): ClassTheme {
 }
 
 /**
- * A Legacy party card's real class theme. Almost always its suit's class — except a Mage card, whose suit is
- * only along for immunity bookkeeping (see SuitedCard.arcane), so it must be checked first.
+ * A Legacy party card's real class theme. Almost always its suit's class — except a Mage or Reaver card, whose
+ * suit is only along for immunity bookkeeping (see SuitedCard.arcane/reaver), so those must be checked first.
  */
-export function classForCard(card: { suit: Suit; arcane?: boolean }): ClassTheme {
-  return card.arcane ? CLASS_THEME.MAGE : SUIT_TO_CLASS[card.suit];
+export function classForCard(card: { suit: Suit; arcane?: boolean; reaver?: boolean }): ClassTheme {
+  if (card.arcane) return CLASS_THEME.MAGE;
+  if (card.reaver) return CLASS_THEME.REAVER;
+  return SUIT_TO_CLASS[card.suit];
 }

@@ -102,6 +102,17 @@ export function currentEnemyAttack(enemy: EnemyState): number {
   return Math.max(0, enemy.baseAttack - enemy.spadesShield);
 }
 
+/** Legacy-only (Mission 4): the enemy's attack with the discard pile's top-card buff folded in before the floor of 0 is applied, so spade shielding and the buff can offset each other. */
+export function currentEnemyAttackWithDiscardBuff(enemy: EnemyState, discardBuff: number): number {
+  return Math.max(0, enemy.baseAttack - enemy.spadesShield + discardBuff);
+}
+
+/** Legacy-only (Mission 4): the value of the card currently on top of the discard pile (the most recently discarded card), or 0 if the pile is empty. */
+export function discardPileTopValue(discardPile: Card[]): number {
+  if (discardPile.length === 0) return 0;
+  return cardValue(discardPile[discardPile.length - 1]);
+}
+
 export function currentEnemyHealthRemaining(enemy: EnemyState): number {
   return enemy.maxHealth - enemy.damageTaken;
 }
