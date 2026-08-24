@@ -85,8 +85,12 @@ export const MISSIONS: Mission[] = [
     enemies: [],
     standardCastle: true,
     // Reward: the Kinfolk Flute relic — once a player commits cards to an attack, any other player may
-    // silently slip in a matching card from hand to help complete the combo, no discussion allowed.
-    reward: { recruits: [], relics: ['KINFOLK_FLUTE'] },
+    // silently slip in a matching card from hand to help complete the combo, no discussion allowed — plus a
+    // pair of basic recruits pulled from the liberated stronghold to bolster the party's opening roster.
+    reward: {
+      recruits: [recruit('Coren Ashvale', 'WARRIOR', '2'), recruit('Dessa Windrow', 'BARD', '2')],
+      relics: ['KINFOLK_FLUTE'],
+    },
   },
   {
     id: 2,
@@ -126,19 +130,14 @@ export const MISSIONS: Mission[] = [
     // another class of immunity (see GameState.endOfTurnZoneFlip / missionZone).
     sidelineCount: 1,
     endOfTurnZoneFlip: true,
-    // Reward: the Mage class itself — 10 new party members, all Mages.
+    // Reward: the Mage class itself — 4 new party members, the "Lucky 4" ranks (3/5/7/9), like the other
+    // faction rewards this campaign grants (see Mission 6's Guardian reward).
     reward: {
       recruits: [
-        recruit('Wren Ashglass', 'MAGE', '2', 'H'),
         recruit('Corvath the Kindled', 'MAGE', '3', 'D'),
-        recruit('Selwyn Duskbind', 'MAGE', '4', 'C'),
         recruit('Ophira Emberquill', 'MAGE', '5', 'S'),
-        recruit('Talon Grayveil', 'MAGE', '6', 'H'),
         recruit('Marn Cindervoice', 'MAGE', '7', 'D'),
-        recruit('Ysabet Hollowflame', 'MAGE', '8', 'C'),
         recruit('Ruven Ashcaller', 'MAGE', '9', 'S'),
-        recruit('Delphine Nightember', 'MAGE', '10', 'H'),
-        recruit('Corin Pale-Ash', 'MAGE', 'A', 'D'),
       ],
     },
   },

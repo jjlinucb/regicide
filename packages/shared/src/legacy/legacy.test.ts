@@ -73,10 +73,11 @@ describe('legacy: mission setup', () => {
     expect(getMission(999)).toBeUndefined();
   });
 
-  it('mission 1 is the standard 12-enemy Castle deck and rewards the Kinfolk Flute relic', () => {
+  it('mission 1 is the standard 12-enemy Castle deck and rewards the Kinfolk Flute relic plus 2 basic recruits', () => {
     const mission1 = getMission(1)!;
     expect(mission1.standardCastle).toBe(true);
     expect(mission1.reward.relics).toEqual(['KINFOLK_FLUTE']);
+    expect(mission1.reward.recruits.length).toBe(2);
     const ids = ['p0'];
     const res = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',
@@ -108,12 +109,13 @@ describe('legacy: mission setup', () => {
     expect(mission2.jesterClaimNextPlayerOnly).toBe(true);
   });
 
-  it('mission 3 sidelines a party member, flips the mission zone every turn, and rewards 10 Mage recruits', () => {
+  it('mission 3 sidelines a party member, flips the mission zone every turn, and rewards 4 Mage recruits', () => {
     const mission3 = getMission(3)!;
     expect(mission3.sidelineCount).toBe(1);
     expect(mission3.endOfTurnZoneFlip).toBe(true);
-    expect(mission3.reward.recruits.length).toBe(10);
+    expect(mission3.reward.recruits.length).toBe(4);
     expect(mission3.reward.recruits.every((r) => r.class === 'MAGE')).toBe(true);
+    expect(mission3.reward.recruits.map((r) => r.rank).sort()).toEqual(['3', '5', '7', '9']);
   });
 });
 
@@ -384,11 +386,12 @@ describe('legacy: mission playthrough', () => {
 });
 
 describe('legacy: Dual-class Stickers reward (mission 2)', () => {
-  it('gives exactly `count` eligible cards a second, different class icon, leaving everything else untouched', () => {
+  it('gives exactly `count` eligible cards a second, different class icon — one per "Lucky 4" rank (3/5/7/9)', () => {
     const party = buildInitialParty();
     const stickered = applyDualClassStickers(party, 4);
     const withSecondSuit = stickered.filter((c) => c.kind === 'suited' && c.secondSuit);
     expect(withSecondSuit.length).toBe(4);
+    expect(withSecondSuit.map((c) => c.kind === 'suited' && c.rank).sort()).toEqual(['3', '5', '7', '9']);
     for (const c of withSecondSuit) {
       if (c.kind === 'suited') expect(c.secondSuit).not.toBe(c.suit);
     }
@@ -396,9 +399,9 @@ describe('legacy: Dual-class Stickers reward (mission 2)', () => {
     expect(party.every((c) => c.kind === 'suited' && !c.secondSuit)).toBe(true);
   });
 
-  it('skips Mage (arcane) cards and cards that already have a second class', () => {
+  it('skips Mage (arcane) cards and cards that already have a second class, even at an eligible rank', () => {
     const party = buildInitialParty().slice(0, 2);
-    const arcaneCard: Card = { ...suited('H', '4'), arcane: true };
+    const arcaneCard: Card = { ...suited('H', '5'), arcane: true };
     const alreadyStickered: Card = { ...suited('D', '5'), secondSuit: 'C' };
     const stickered = applyDualClassStickers([arcaneCard, alreadyStickered], 2);
     expect(stickered).toEqual([arcaneCard, alreadyStickered]); // neither was eligible
