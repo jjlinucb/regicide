@@ -6,9 +6,10 @@ export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'A' | 
  * (see legacy/classes.ts). Boosts the normal suit effect when the card is played: CLEAVE triples
  * (instead of doubles) Clubs damage, INSPIRE draws 2 extra on Diamonds, REVIVE heals 2 extra on
  * Hearts, BULWARK reduces the enemy's attack to 0 for the fight instead of by the play's value,
- * ARCANE_SURGE doubles a Mage card's own arcane bolt.
+ * ARCANE_SURGE doubles a Mage card's own arcane bolt, PLUNDER tears 2 reserve cards instead of 1 for a Reaver
+ * (both still banished; the higher value is kept).
  */
-export type SpecialAbilityId = 'CLEAVE' | 'INSPIRE' | 'REVIVE' | 'BULWARK' | 'ARCANE_SURGE';
+export type SpecialAbilityId = 'CLEAVE' | 'INSPIRE' | 'REVIVE' | 'BULWARK' | 'ARCANE_SURGE' | 'PLUNDER';
 
 export interface SuitedCard {
   id: string;
@@ -36,6 +37,13 @@ export interface SuitedCard {
    * engine.ts's resolveCommittedPlay) — permanently shrinking the party's deck for the rest of the mission.
    */
   corrupted?: boolean;
+  /**
+   * Legacy-only: marks a Reaver card (Mission 5's new faction). Like a Mage, it still carries a suit for
+   * immunity bookkeeping, but its class power isn't the combined suit-power resolution — instead, playing it
+   * tears the top card off the reserve deck, adds that card's raw value to the attack, permanently banishes
+   * it, and doubles the whole attack's final damage (see engine.ts's resolveCommittedPlay).
+   */
+  reaver?: boolean;
   /**
    * Classic Regicide Endless Mode only: how many steps past King this card has been upgraded, from being the
    * card of an enemy defeated during an endless round (see engine.ts's upgradeDefeatedRank). A Jack or Queen
@@ -160,6 +168,25 @@ export interface GameState {
   banishPile: Card[];
   /** Legacy-only (Mission 2's hydras): when true, an open Jester claim window may only be claimed by the next player in turn order, not any player. */
   jesterClaimNextPlayerOnly: boolean;
+  /**
+   * Legacy-only (Mission 4): when true, the current enemy's attack is buffed by the value of whatever card
+   * currently sits on top of the discard pile, recomputed live at the moment attack is dealt (see
+   * rules.ts's discardPileTopValue). Can drive the buffed total below the enemy's own floor of 0 if spade
+   * shielding has already knocked its base attack down — tracked as a negative total rather than clamped.
+   */
+  discardTopBuffsAttack: boolean;
+  /**
+   * Legacy-only (Mission 4): when true, an exact-damage kill seals a card representing the fallen specimen
+   * onto the top of the reserve deck instead of the discard pile (see engine.ts's dealDamageAndCheckDefeat).
+   * The cards played against it still go to the discard pile as normal either way.
+   */
+  exactKillToReserveDeck: boolean;
+  /**
+   * Legacy-only (Mission 5): when true, an exact-damage kill bursts outward — the defeated enemy's own base
+   * attack is dealt as splash damage straight into whatever's newly revealed at the top of the enemy deck
+   * (which can itself chain into a further kill; see engine.ts's dealDamageAndCheckDefeat).
+   */
+  exactKillSplashDamage: boolean;
 }
 
 export interface GameEvent {
@@ -189,6 +216,18 @@ export type GameAction =
       endOfTurnZoneFlip?: boolean;
       /** See GameState.jesterClaimNextPlayerOnly. */
       jesterClaimNextPlayerOnly?: boolean;
+      /** See GameState.discardTopBuffsAttack. */
+      discardTopBuffsAttack?: boolean;
+      /** See GameState.exactKillToReserveDeck. */
+      exactKillToReserveDeck?: boolean;
+      /** See GameState.exactKillSplashDamage. */
+      exactKillSplashDamage?: boolean;
+      /**
+       * Legacy-only (Mission 5): seeds GameState.missionZone/zoneImmuneSuits with a fixed set of cards at
+       * mission start — unlike Mission 3's endOfTurnZoneFlip, this zone is static for the whole mission (never
+       * flipped into, never banished on defeat) since endOfTurnZoneFlip is left unset.
+       */
+      presetMissionZone?: Card[];
     }
   | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
   | { type: 'YIELD'; playerId: string }
@@ -240,6 +279,8 @@ export interface ClientGameState {
   endlessLoop: number;
   /** See GameState.comboAssist. */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
+  /** See GameState.discardTopBuffsAttack. */
+  discardTopBuffsAttack: boolean;
   you: {
     playerId: string;
   };

@@ -173,7 +173,13 @@ export function GamePage({
             )}
           </div>
         )}
-        {state.currentEnemy && <EnemyDisplay enemy={state.currentEnemy} />}
+        {state.currentEnemy && (
+          <EnemyDisplay
+            enemy={state.currentEnemy}
+            discardPile={state.discardPile}
+            discardTopBuffsAttack={state.discardTopBuffsAttack}
+          />
+        )}
         <DeckPiles state={state} />
         <PlayerList state={state} myPlayerId={myPlayerId} />
         <ActionLog state={state} />

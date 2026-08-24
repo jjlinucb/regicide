@@ -9,7 +9,16 @@ import {
   makeRng,
   MAX_HAND_SIZE_BY_PLAYER_COUNT,
 } from './deck.js';
-import { cardSuits, cardValue, currentEnemyAttack, isSuitBlockedByImmunity, MAX_SOLO_JESTERS, validatePlayShape } from './rules.js';
+import {
+  cardSuits,
+  cardValue,
+  currentEnemyAttack,
+  currentEnemyAttackWithDiscardBuff,
+  discardPileTopValue,
+  isSuitBlockedByImmunity,
+  MAX_SOLO_JESTERS,
+  validatePlayShape,
+} from './rules.js';
 import { classForSuit } from '../legacy/classes.js';
 
 const SUIT_NAME: Record<Suit, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
@@ -268,6 +277,15 @@ function upgradeDefeatedRank(rank: 'J' | 'Q' | 'K', loop: number): { rank: 'J' |
   return { rank: 'K', tier: idx - (RANK_ORDER.length - 1) };
 }
 
+/** The current enemy's attack, live — folds in Mission 4's discard-pile buff when active (see GameState.discardTopBuffsAttack). */
+function resolvedEnemyAttack(state: GameState): number {
+  const enemy = state.currentEnemy!;
+  if (state.ruleset === 'legacy' && state.discardTopBuffsAttack) {
+    return currentEnemyAttackWithDiscardBuff(enemy, discardPileTopValue(state.discardPile));
+  }
+  return currentEnemyAttack(enemy);
+}
+
 /** Returns true if the enemy was defeated by this hit (win or new enemy revealed either way). */
 function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
   const enemy = state.currentEnemy!;
@@ -298,6 +316,20 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
     // Legacy enemies always go to the discard pile — no exact-damage/return-to-deck effect (that's mission-specific
     // in the physical game, and doesn't apply cleanly since Legacy enemies don't carry a J/Q/K-style card value).
     log(state, state.exactKillOnly ? `${enemyLabel(enemy)} felled by an exact hit — banished for good!` : `${enemyLabel(enemy)} defeated!`);
+    if (state.exactKillToReserveDeck && remaining === 0) {
+      // Mission 4: an exact hit seals a card representing the specimen onto the top of the reserve deck instead
+      // of letting it fall into the discard pile — its value mirrors the enemy's attack tier (10/15/20).
+      const specimenRank = enemy.baseAttack <= 10 ? 'J' : enemy.baseAttack <= 15 ? 'Q' : 'K';
+      const specimenCard: Card = {
+        id: `specimen-${enemy.suit}-${Date.now()}-${Math.floor(nextRandom(state) * 1e6)}`,
+        kind: 'suited',
+        suit: enemy.suit,
+        rank: specimenRank,
+        name: enemy.name ? `${enemy.name}'s Remains` : undefined,
+      };
+      state.tavernDeck.unshift(specimenCard);
+      log(state, `An exact hit seals a specimen card atop the reserve deck.`);
+    }
     if (state.endOfTurnZoneFlip && state.missionZone.length > 0) {
       const exact = remaining === 0;
       if (exact) {
@@ -348,6 +380,17 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
   }
   state.currentEnemy = state.castleDeck.shift()!;
   log(state, `A new enemy is revealed: ${enemyLabel(state.currentEnemy)}.`);
+
+  if (state.ruleset === 'legacy' && state.exactKillSplashDamage && remaining === 0) {
+    // Mission 5: an exact hit bursts outward, dealing the defeated enemy's own base attack as splash damage
+    // straight into whatever's now revealed — reusing this same function lets the splash chain into a further
+    // kill (and its own effects) if it's strong enough.
+    const splash = enemy.baseAttack;
+    log(state, `${enemyLabel(enemy)}'s death throes burst outward — ${splash} splash damage crashes into ${enemyLabel(state.currentEnemy)}!`);
+    dealDamageAndCheckDefeat(state, splash);
+    return true;
+  }
+
   // Defeating player continues their turn against the new enemy (no defend, no turn advance).
   state.turnPhase = 'AWAIT_PLAY';
   state.pendingDamage = 0;
@@ -409,6 +452,9 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.zoneImmuneSuits = [];
   state.banishPile = [];
   state.jesterClaimNextPlayerOnly = false;
+  state.discardTopBuffsAttack = false;
+  state.exactKillToReserveDeck = false;
+  state.exactKillSplashDamage = false;
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -463,10 +509,15 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.relics = action.relics ?? [];
   state.comboAssist = null;
   state.endOfTurnZoneFlip = action.endOfTurnZoneFlip ?? false;
-  state.missionZone = [];
-  state.zoneImmuneSuits = [];
+  state.missionZone = action.presetMissionZone ?? [];
+  state.zoneImmuneSuits = Array.from(
+    new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))),
+  );
   state.banishPile = [];
   state.jesterClaimNextPlayerOnly = action.jesterClaimNextPlayerOnly ?? false;
+  state.discardTopBuffsAttack = action.discardTopBuffsAttack ?? false;
+  state.exactKillToReserveDeck = action.exactKillToReserveDeck ?? false;
+  state.exactKillSplashDamage = action.exactKillSplashDamage ?? false;
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
   return ok(state);
@@ -530,9 +581,10 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${shape.totalValue}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
   );
   const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
-  // Mage cards' suits don't join the combined suit-power resolution below — their class power is the arcane
-  // bolt above instead, which already resolved (Mage always goes first, per legacy/classes.ts).
-  const nonArcaneCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane);
+  // Mage and Reaver cards' printed suits don't join the combined suit-power resolution below — a Mage's class
+  // power is the arcane bolt above instead (which already resolved), and a Reaver's is the reserve-deck tear
+  // resolved just below (Mage always goes first, per legacy/classes.ts).
+  const nonArcaneCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane && !c.reaver);
   const nonArcaneSuits = Array.from(new Set(nonArcaneCards.flatMap(cardSuits)));
 
   // Corrupted cards: their class power always ignores immunity, at the cost of banishing the top of the
@@ -547,8 +599,35 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     }
   }
 
-  const damageMultiplier = resolveSuitPowers(state, cards, nonArcaneSuits, shape.totalValue, Boolean(claimedJester), corruptedSuits);
-  const damage = shape.totalValue * damageMultiplier + arcaneBonus;
+  // Reavers (Mission 5): playing one tears the top card off the reserve deck, adds its raw value straight onto
+  // the attack, and permanently banishes it — but doubles the whole attack's final damage as the tradeoff. A
+  // Warrior (Clubs) card in the same play stacks its own doubling on top, for quadruple damage overall.
+  const reaverCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.reaver));
+  let reaverBonus = 0;
+  let reaverMultiplier = 1;
+  if (state.ruleset === 'legacy' && reaverCards.length > 0) {
+    reaverMultiplier = 2;
+    const tearCount = hasSpecial(reaverCards, 'PLUNDER') ? 2 : 1;
+    const revealed: Card[] = [];
+    for (let i = 0; i < tearCount; i++) {
+      const card = state.tavernDeck.shift();
+      if (card) revealed.push(card);
+    }
+    if (revealed.length > 0) {
+      reaverBonus = Math.max(...revealed.map(cardValue));
+      state.banishPile.push(...revealed);
+      const revealedLabel = revealed
+        .map((c) => (c.kind === 'suited' ? c.name ?? `a ${c.rank}` : 'a Jester'))
+        .join(' and ');
+      log(state, `${reaverCards[0].name ?? 'A Reaver'} tears ${revealedLabel} from the reserve deck — banished, +${reaverBonus} damage, attack doubled!`);
+    } else {
+      log(state, 'The reserve deck is empty — no card to tear for the Reaver bonus.');
+    }
+  }
+
+  const clubsMultiplier = resolveSuitPowers(state, cards, nonArcaneSuits, shape.totalValue, Boolean(claimedJester), corruptedSuits);
+  const damageMultiplier = clubsMultiplier * reaverMultiplier;
+  const damage = (shape.totalValue + reaverBonus) * damageMultiplier + arcaneBonus;
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
   const defeated = dealDamageAndCheckDefeat(state, damage);
@@ -556,7 +635,7 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   if (state.phase !== 'IN_PROGRESS') return ok(state);
   if (defeated) return ok(state); // enemy was defeated, same player continues against the next one
 
-  const enemyAttack = currentEnemyAttack(state.currentEnemy!);
+  const enemyAttack = resolvedEnemyAttack(state);
   if (enemyAttack <= 0) {
     log(state, `The enemy's attack has been reduced to 0 — no damage suffered.`);
     advanceToNextPlayer(state);
@@ -667,7 +746,7 @@ function yieldTurn(state: GameState, action: Extract<GameAction, { type: 'YIELD'
   log(state, `${player.name} yields.`);
   state.lastActionWasYield[state.currentPlayerIndex] = true;
 
-  const enemyAttack = currentEnemyAttack(state.currentEnemy!);
+  const enemyAttack = resolvedEnemyAttack(state);
   if (enemyAttack <= 0) {
     advanceToNextPlayer(state);
     return ok(state);
@@ -851,6 +930,9 @@ export function createLobbyState(): GameState {
     zoneImmuneSuits: [],
     banishPile: [],
     jesterClaimNextPlayerOnly: false,
+    discardTopBuffsAttack: false,
+    exactKillToReserveDeck: false,
+    exactKillSplashDamage: false,
   };
 }
 

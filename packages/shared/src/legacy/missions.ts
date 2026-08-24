@@ -1,4 +1,4 @@
-import type { LegacyEnemySpec, Suit } from '../game/types.js';
+import type { Card, LegacyEnemySpec, Rank, Suit } from '../game/types.js';
 import type { ClassId } from './classes.js';
 import { CLASS_THEME } from './classes.js';
 import type { MissionReward, RecruitSpec } from './party.js';
@@ -28,6 +28,14 @@ export interface Mission {
   sidelineCount?: number;
   /** See GameState.jesterClaimNextPlayerOnly. */
   jesterClaimNextPlayerOnly?: boolean;
+  /** See GameState.discardTopBuffsAttack. */
+  discardTopBuffsAttack?: boolean;
+  /** See GameState.exactKillToReserveDeck. */
+  exactKillToReserveDeck?: boolean;
+  /** See GameState.exactKillSplashDamage. */
+  exactKillSplashDamage?: boolean;
+  /** See GameState.START_LEGACY_MISSION action's presetMissionZone. */
+  presetMissionZone?: Card[];
 }
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
@@ -41,6 +49,11 @@ function recruit(name: string, cls: ClassId, rank: RecruitSpec['rank'], suit?: S
 /** A standout reward: same as recruit(), but also grants the class's signature ability permanently. */
 function specialRecruit(name: string, cls: ClassId, rank: RecruitSpec['rank'], suit?: Suit): RecruitSpec {
   return { name, class: cls, rank, special: true, suit };
+}
+
+/** A one-off companion card placed straight into a mission's static presetMissionZone (never part of the reserve deck or party). */
+function zoneCompanion(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `zone-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name };
 }
 
 /** Converts a mission's enemy specs into the engine's LegacyEnemySpec shape (suit-keyed). Mage enemies aren't used yet — the class only exists as a party reward so far. */
@@ -129,16 +142,77 @@ export const MISSIONS: Mission[] = [
   },
   {
     id: 4,
-    title: 'Siege at Blackwater',
+    title: 'Fusion of Darkness',
     story:
-      'Word of the Archive\'s fall reaches Blackwater keep before the party does — and so does the corruption, ' +
-      'racing to bury the evidence. The Syndicate arrives to find the defenders exhausted, the gates buckling, ' +
-      'and the newly freed Mages getting their first real test of fire.',
-    enemies: [enemy('Rennick Coalfist', 'WARRIOR', 24, 12), enemy('Dusk Fletcher', 'BARD', 26, 13), enemy('Old Marrow', 'PALADIN', 30, 15)],
+      "The Archive's fall points the Syndicate to a last address: a Biology Laboratory sealed since before the " +
+      'corruption had a name. Whatever the staff were breeding down there got loose long ago, and every cage ' +
+      'the party passes on the way in is already empty — mutated, fused, and waiting past the next door.',
+    // Standard 4-4-4 escalating lineup (one of each class per tier), like the Castle deck's own J/Q/K structure,
+    // but every enemy here is an "Experiment" first and a class-immunity second.
+    enemies: [
+      enemy('Specimen 10-C: The Clawmass', 'WARRIOR', 20, 10),
+      enemy('Specimen 10-D: The Featherwrong', 'BARD', 20, 10),
+      enemy('Specimen 10-H: The Bloodbloom', 'CLERIC', 20, 10),
+      enemy('Specimen 10-S: The Chitinguard', 'PALADIN', 20, 10),
+      enemy('Specimen 15-C: The Marrowhound', 'WARRIOR', 30, 15),
+      enemy('Specimen 15-D: The Static Choir', 'BARD', 30, 15),
+      enemy('Specimen 15-H: The Weeping Graft', 'CLERIC', 30, 15),
+      enemy('Specimen 15-S: The Ironmoss Bear', 'PALADIN', 30, 15),
+      enemy('Specimen 20-C: The Fusion Prime', 'WARRIOR', 40, 20),
+      enemy('Specimen 20-D: The Discord Wing', 'BARD', 40, 20),
+      enemy('Specimen 20-H: The Hollow Mercy', 'CLERIC', 40, 20),
+      enemy('Specimen 20-S: The Cage-Breaker', 'PALADIN', 40, 20),
+    ],
+    // The mission's key mechanic: whatever card currently sits on top of the discard pile adds its value
+    // straight onto the active experiment's attack, recalculated live all the way through the turn — a Cleric
+    // heal reshuffling the pile mid-turn can change the number before it's even resolved.
+    discardTopBuffsAttack: true,
+    // An exact kill seals the specimen's card atop the reserve deck instead of the discard pile; any other
+    // kill sends the played cards to the discard pile as normal, in the order the attacker chose to play them
+    // — letting the party bury their high cards and leave a low one on top to blunt the next buff.
+    exactKillToReserveDeck: true,
     reward: {
       recruits: [
         specialRecruit('Thessaly Brightbolt', 'MAGE', '8', 'H'),
         recruit('Brother Talyn', 'CLERIC', '9'),
+      ],
+    },
+  },
+  {
+    id: 5,
+    title: 'High and Mighty',
+    story:
+      'The Crimson Grove swallows the road south of Blackwater whole — every root and bough overtaken by the ' +
+      "same bloom that broke loose from the lab. What's waiting in the canopy calls itself free now, and it's " +
+      "not interested in negotiating: only in how much of the party's own deck it can make disappear.",
+    // 4-4 escalating lineup (one of each of the 4 base classes per tier) — one tier lighter than Mission 4's,
+    // since this mission's real difficulty is the Reaver deck-milling tradeoff, not raw enemy stats.
+    enemies: [
+      enemy('Sporeling Choker', 'WARRIOR', 20, 10),
+      enemy('Sporeling Piper', 'BARD', 20, 10),
+      enemy('Sporeling Wailer', 'CLERIC', 20, 10),
+      enemy('Sporeling Bulwark', 'PALADIN', 20, 10),
+      enemy('Elder Sporeling Choker', 'WARRIOR', 30, 15),
+      enemy('Elder Sporeling Piper', 'BARD', 30, 15),
+      enemy('Elder Sporeling Wailer', 'CLERIC', 30, 15),
+      enemy('Elder Sporeling Bulwark', 'PALADIN', 30, 15),
+    ],
+    // Myla (value 7) sits permanently in the mission zone for the whole fight — every enemy here is immune to
+    // her class the same way Mission 3's zone grants immunity, but nothing flips in or out after this (no
+    // endOfTurnZoneFlip), so it's a single fixed immunity rather than a growing one.
+    presetMissionZone: [zoneCompanion('Myla', 'H', '7')],
+    // An exact kill on a Sporeling bursts outward: the enemy's own base attack is dealt as splash damage
+    // straight into whatever's newly revealed — occasionally strong enough to chain into a second kill.
+    exactKillSplashDamage: true,
+    // Reward: the Reaver faction — 4 permanent new recruits. Playing one tears the top card off the reserve
+    // deck for bonus damage (banished either way) and doubles the whole attack, stacking to quadruple with a
+    // Warrior card in the same play.
+    reward: {
+      recruits: [
+        recruit('Oaken', 'REAVER', '3', 'D'),
+        recruit('Haror', 'REAVER', '5', 'C'),
+        recruit('Vena', 'REAVER', '7', 'S'),
+        recruit('Kina', 'REAVER', '10', 'H'),
       ],
     },
   },

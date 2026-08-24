@@ -323,6 +323,10 @@ export class RoomManager {
       exactKillOnly: mission.exactKillOnly,
       endOfTurnZoneFlip: mission.endOfTurnZoneFlip,
       jesterClaimNextPlayerOnly: mission.jesterClaimNextPlayerOnly,
+      discardTopBuffsAttack: mission.discardTopBuffsAttack,
+      exactKillToReserveDeck: mission.exactKillToReserveDeck,
+      exactKillSplashDamage: mission.exactKillSplashDamage,
+      presetMissionZone: mission.presetMissionZone,
       relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };

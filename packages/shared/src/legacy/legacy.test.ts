@@ -59,7 +59,7 @@ describe('legacy: mission setup', () => {
   });
 
   it('every non-standard-castle mission has at least one enemy and converts cleanly to engine specs', () => {
-    expect(MISSIONS.length).toBe(4);
+    expect(MISSIONS.length).toBe(5);
     for (const mission of MISSIONS) {
       if (mission.standardCastle) continue;
       expect(mission.enemies.length).toBeGreaterThan(0);
@@ -570,5 +570,193 @@ describe('legacy: mission 3 mechanics (end-of-turn mission zone)', () => {
     // Hearts power resolved despite the zone immunity — no "blocked" log entry for it.
     expect(state.log.some((e) => e.message.includes('blocked'))).toBe(false);
     expect(state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '9')).toBe(true);
+  });
+});
+
+describe('legacy: mission 4 mechanics (discard-pile attack buff + exact-kill to reserve deck)', () => {
+  function startFusionMission(n: number, enemies: LegacyEnemySpec[]): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'fusion-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      discardTopBuffsAttack: true,
+      exactKillToReserveDeck: true,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it("adds the discard pile's top card value onto the enemy's attack when covering damage", () => {
+    const boss: LegacyEnemySpec = { name: 'Experiment', suit: 'S', health: 100, attack: 15 };
+    let state = startFusionMission(1, [boss]);
+    state = structuredClone(state);
+    state.discardPile = [suited('D', '9')]; // top of discard = 9
+    state = rig(state, [suited('D', '2')]); // a harmless play against Spades-immune enemy isn't needed; just trigger AWAIT_DEFEND
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    // 15 base + 9 from the discard pile's top card = 24 pending damage.
+    expect(state.pendingDamage).toBe(24);
+  });
+
+  it('recomputes the buff live off whatever card the Hearts reshuffle leaves on top', () => {
+    const boss: LegacyEnemySpec = { name: 'Experiment', suit: 'C', health: 100, attack: 10 };
+    let state = startFusionMission(1, [boss]);
+    state = structuredClone(state);
+    // 6 cards in the pile, a Hearts-5 heal only pulls 5 — one is guaranteed to remain on top regardless of shuffle.
+    state.discardPile = [suited('S', '2'), suited('S', '3'), suited('S', '4'), suited('S', '6'), suited('S', '7'), suited('S', '8')];
+    state = rig(state, [suited('H', '5')]); // Hearts heal reshuffles the discard pile
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.discardPile.length).toBe(1); // 6 - 5 healed
+    // Whatever's left on top after the Hearts shuffle-and-heal is what buffs the attack — not the pre-shuffle top.
+    const expectedTop = state.discardPile[state.discardPile.length - 1];
+    const expectedBuff = expectedTop.kind === 'suited' ? Number(expectedTop.rank) : 0;
+    expect(state.pendingDamage).toBe(10 + expectedBuff);
+  });
+
+  it('seals a specimen card atop the reserve deck on an exact kill instead of sending it to the discard pile', () => {
+    const boss: LegacyEnemySpec = { name: 'Experiment', suit: 'C', health: 10, attack: 1 };
+    let state = startFusionMission(1, [boss]);
+    state = structuredClone(state);
+    state = rig(state, [suited('S', '10')]); // exact 10 damage vs 10 health, Spades doesn't double
+
+    const beforeReserveTop = state.tavernDeck[0];
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.tavernDeck[0]).not.toBe(beforeReserveTop);
+    expect(state.tavernDeck[0].kind).toBe('suited');
+    if (state.tavernDeck[0].kind === 'suited') {
+      expect(state.tavernDeck[0].suit).toBe('C');
+    }
+    // The played card itself still lands in the discard pile as normal.
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '10')).toBe(true);
+  });
+
+  it('sends the played cards to the discard pile as normal on a non-exact (overkill) kill', () => {
+    const boss: LegacyEnemySpec = { name: 'Experiment', suit: 'H', health: 10, attack: 1 };
+    let state = startFusionMission(1, [boss]);
+    // Clubs doubles damage and the enemy isn't immune to Clubs: 9 * 2 = 18 > 10 health, an overkill (not exact).
+    state = rig(state, [suited('C', '9')]);
+    const beforeReserveTop = state.tavernDeck[0];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    const after = res.state;
+
+    expect(after.tavernDeck[0]).toStrictEqual(beforeReserveTop); // reserve deck untouched
+    expect(after.discardPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '9')).toBe(true);
+  });
+});
+
+describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone, exact-kill splash)', () => {
+  function reaverCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
+    return { ...suited(suit, rank), reaver: true, ...(special ? { special: 'PLUNDER' } : {}) };
+  }
+
+  function startCrimsonMission(
+    n: number,
+    enemies: LegacyEnemySpec[],
+    opts: { presetMissionZone?: Card[]; exactKillSplashDamage?: boolean } = {},
+  ): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'crimson-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      ...opts,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('tears the top reserve card for bonus damage, banishes it, and doubles the attack', () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
+    let state = startCrimsonMission(1, [boss]);
+    state = structuredClone(state);
+    state.tavernDeck = [suited('C', '6'), ...state.tavernDeck];
+    const reserveBefore = state.tavernDeck.length;
+    state = rig(state, [reaverCard('D', '4')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    // (4 + 6) * 2 = 20 damage; the revealed 6 is gone from the reserve deck and banished, not drawable again.
+    expect(state.currentEnemy?.damageTaken).toBe(20);
+    expect(state.tavernDeck.length).toBe(reserveBefore - 1);
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')).toBe(true);
+  });
+
+  it('stacks with a Warrior (Clubs) card in the same play for quadruple damage', () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'H', health: 200, attack: 1 };
+    let state = startCrimsonMission(1, [boss]);
+    state = structuredClone(state);
+    state.tavernDeck = [suited('S', '6'), ...state.tavernDeck];
+    state = rig(state, [suited('C', '5'), reaverCard('D', '5')]); // same-rank combo: Clubs 5 + Reaver 5
+
+    const res = ensureOk(
+      applyAction(state, {
+        type: 'PLAY_CARDS',
+        playerId: state.players[0].id,
+        cardIds: state.players[0].hand.map((c) => c.id),
+      }),
+    );
+    state = res.state;
+
+    // (5 + 5 + 6) * (2 clubs * 2 reaver) = 64.
+    expect(state.currentEnemy?.damageTaken).toBe(64);
+  });
+
+  it("Plunder tears 2 reserve cards instead of 1 and keeps the higher value", () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
+    let state = startCrimsonMission(1, [boss]);
+    state = structuredClone(state);
+    state.tavernDeck = [suited('C', '4'), suited('D', '9'), ...state.tavernDeck];
+    state = rig(state, [reaverCard('H', '3', true)]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    // (3 + 9) * 2 = 24 — the higher of the two torn cards (9) is kept, both banished.
+    expect(state.currentEnemy?.damageTaken).toBe(24);
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '4')).toBe(true);
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '9')).toBe(true);
+  });
+
+  it('seeds the mission zone with a fixed, static set of cards at mission start', () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 20, attack: 5 };
+    const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
+    const state = startCrimsonMission(1, [boss], { presetMissionZone: [myla] });
+
+    expect(state.missionZone.length).toBe(1);
+    expect(state.zoneImmuneSuits).toEqual(['H']);
+    expect(state.endOfTurnZoneFlip).toBe(false); // static — never flips or clears on its own
+  });
+
+  it('deals an exact kill\'s base attack as splash damage into the newly revealed enemy', () => {
+    const first: LegacyEnemySpec = { name: 'First Sporeling', suit: 'C', health: 10, attack: 7 };
+    const second: LegacyEnemySpec = { name: 'Second Sporeling', suit: 'D', health: 20, attack: 3 };
+    let state = startCrimsonMission(1, [first, second], { exactKillSplashDamage: true });
+    state = rig(state, [suited('S', '10')]); // exact 10 damage, Spades doesn't double
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.currentEnemy?.name).toBe('Second Sporeling');
+    expect(state.currentEnemy?.damageTaken).toBe(7); // First Sporeling's base attack (7), splashed in
   });
 });
