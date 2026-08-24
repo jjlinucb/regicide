@@ -1,6 +1,6 @@
 import type { SpecialAbilityId, Suit } from '../game/types.js';
 
-export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAVER' | 'GUARDIAN' | 'DRUID';
+export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAVER' | 'GUARDIAN' | 'DRUID' | 'EVERGREEN';
 
 /**
  * Regicide Legacy's four base classes map 1:1 onto classic Regicide's four suits — Warrior=Clubs (double damage),
@@ -112,6 +112,18 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     specialName: 'Wellspring',
     specialText: 'Wellspring: Regrowth salvages 2 cards from the banish pile instead of 1.',
   },
+  EVERGREEN: {
+    id: 'EVERGREEN',
+    name: 'Evergreen',
+    tag: 'All Four Powers',
+    glyph: '🌳',
+    color: '#2f6b3f',
+    specialAbility: 'EVERGREEN',
+    specialName: 'Evergreen',
+    specialText:
+      'Evergreen: resolves all four base class powers at once — heal, draw, double damage, reduce enemy ' +
+      "strength — and always ignores enemy immunity, no matter which classes the enemy is immune to.",
+  },
 };
 
 export const SUIT_TO_CLASS: Record<Suit, ClassTheme> = {
@@ -129,10 +141,18 @@ export function classForSuit(suit: Suit): ClassTheme {
  * A Legacy party card's real class theme. Almost always its suit's class — except a Mage or Reaver card, whose
  * suit is only along for immunity bookkeeping (see SuitedCard.arcane/reaver), so those must be checked first.
  */
-export function classForCard(card: { suit: Suit; arcane?: boolean; reaver?: boolean; guardian?: boolean; druid?: boolean }): ClassTheme {
+export function classForCard(card: {
+  suit: Suit;
+  arcane?: boolean;
+  reaver?: boolean;
+  guardian?: boolean;
+  druid?: boolean;
+  evergreen?: boolean;
+}): ClassTheme {
   if (card.arcane) return CLASS_THEME.MAGE;
   if (card.reaver) return CLASS_THEME.REAVER;
   if (card.guardian) return CLASS_THEME.GUARDIAN;
   if (card.druid) return CLASS_THEME.DRUID;
+  if (card.evergreen) return CLASS_THEME.EVERGREEN;
   return SUIT_TO_CLASS[card.suit];
 }

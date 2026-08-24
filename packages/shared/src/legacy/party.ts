@@ -73,7 +73,7 @@ export interface RecruitSpec {
   rank: NonRoyalRank;
   /** True for a standout reward: grants the recruit's class's signature ability permanently, alongside their name. */
   special?: boolean;
-  /** Required for MAGE, REAVER, GUARDIAN, and DRUID recruits only — none has a suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */
+  /** Required for MAGE, REAVER, GUARDIAN, DRUID, and EVERGREEN recruits only — none has a suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */
   suit?: Suit;
 }
 
@@ -96,6 +96,7 @@ export function buildRecruitCard(spec: RecruitSpec): Card {
     ...(spec.class === 'REAVER' ? { reaver: true } : {}),
     ...(spec.class === 'GUARDIAN' ? { guardian: true } : {}),
     ...(spec.class === 'DRUID' ? { druid: true } : {}),
+    ...(spec.class === 'EVERGREEN' ? { evergreen: true } : {}),
     ...(spec.special ? { special: CLASS_THEME[spec.class].specialAbility } : {}),
   };
 }
@@ -106,6 +107,8 @@ export interface MissionReward {
   relics?: string[];
   /** Dual-class Stickers reward: gives this many random, eligible existing party members a second class icon. */
   dualClassStickers?: number;
+  /** Mission 9's "second Mage sticker" reward: gives one random eligible existing party member a bonus Mage sticker (see applyMageSticker). */
+  mageSticker?: boolean;
 }
 
 /** The "Lucky 4" ranks Dual-class Stickers target — one sticker per rank, matching the physical game's 4-sticker sheets. */
@@ -137,9 +140,28 @@ export function applyDualClassStickers(party: Card[], count: number): Card[] {
   });
 }
 
-/** Adds a mission's reward — recruits and any Dual-class Stickers — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
+/**
+ * Mission 9's "second Mage sticker" reward: picks one random eligible existing party member (suited, not
+ * already Mage/Reaver/Guardian/Druid/Evergreen or already stickered) and gives it a bonus Mage sticker — unlike
+ * a pure Mage recruit's `arcane` flag, the card keeps resolving its own suit power AND fires an arcane bolt (see
+ * SuitedCard.secondClassArcane, engine.ts's resolveArcaneBolts). Unlike Dual-class Stickers' "Lucky 4" ranks,
+ * the physical game picks uniformly across the whole party (by revealing shuffled cards until an eligible one
+ * turns up) — we don't track the "race" it also filters by, so this just draws uniformly from every eligible
+ * rank instead.
+ */
+export function applyMageSticker(party: Card[]): Card[] {
+  const eligible = party.filter(
+    (c) => c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.evergreen && !c.secondClassArcane,
+  );
+  if (eligible.length === 0) return party;
+  const pick = eligible[Math.floor(Math.random() * eligible.length)];
+  return party.map((c) => (c.id === pick.id ? { ...c, secondClassArcane: true } : c));
+}
+
+/** Adds a mission's reward — recruits, any Dual-class Stickers, and any Mage sticker — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
 export function applyReward(party: Card[], reward: MissionReward): Card[] {
   let next = [...party, ...reward.recruits.map(buildRecruitCard)];
   if (reward.dualClassStickers) next = applyDualClassStickers(next, reward.dualClassStickers);
+  if (reward.mageSticker) next = applyMageSticker(next);
   return next;
 }

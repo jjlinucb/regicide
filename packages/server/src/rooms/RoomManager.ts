@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { applyAction, createLobbyState } from '@regicide/shared';
 import type { Card, GameAction, GameState, LegacySavePayload } from '@regicide/shared';
-import { applyReward, buildInitialParty, getMission, JESTERS_BY_PLAYER_COUNT, MISSIONS, missionEnemiesToSpecs } from '@regicide/shared';
+import { applyReward, buildInitialParty, getMission, JESTERS_BY_PLAYER_COUNT, missionEnemiesToSpecs } from '@regicide/shared';
 import { generateRoomCode } from './roomCode.js';
 import { generateUniqueCampaignCode, type CampaignRecord, type CampaignStore } from '../db/campaigns.js';
 
@@ -208,7 +208,9 @@ export class RoomManager {
     if (!Array.isArray(save.party) || save.party.length === 0) return { error: 'Save file has no party — it looks corrupted.' };
     if (!Array.isArray(save.missionsCompleted)) return { error: 'Save file is missing its mission history.' };
     if (typeof save.currentMission !== 'number' || save.currentMission < 1) return { error: 'Save file has an invalid current mission.' };
-    if (save.currentMission <= MISSIONS.length && !getMission(save.currentMission)) return { error: 'Save file references an unknown mission.' };
+    // Deliberately not validated against getMission: a currentMission that isn't built yet is a normal state for
+    // a campaign ahead of the currently-shipped mission list (missions can land out of id order across parallel
+    // sessions, e.g. 9 merging before 8), not evidence of a corrupted save.
 
     const campaignCode = await generateUniqueCampaignCode(this.campaignStore);
     const legacy: LegacyRoomData = {
@@ -285,9 +287,10 @@ export class RoomManager {
     if (!room || !room.legacy) return { error: 'Campaign not found.' };
     if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can start the mission.' };
     if (room.playerOrder.length < 1) return { error: 'Need at least 1 player.' };
-    if (missionId < 1 || missionId > MISSIONS.length) return { error: `Mission ${missionId} isn't built yet.` };
-
-    const mission = getMission(missionId)!;
+    // Checked against getMission directly (not MISSIONS.length) since ids aren't guaranteed contiguous — a
+    // mission built out of order in a parallel session (e.g. 9 landing before 8) leaves a gap in the array.
+    const mission = getMission(missionId);
+    if (!mission) return { error: `Mission ${missionId} isn't built yet.` };
 
     // Jumping ahead of the campaign's current mission (any mission in the list is unlocked for direct play):
     // grant every skipped mission's reward first, as if it had been won normally, so the party arrives at
@@ -330,6 +333,8 @@ export class RoomManager {
       zoneVengeanceOnKill: mission.zoneVengeanceOnKill,
       pilgrimMechanic: mission.pilgrimMechanic,
       pilgrimCards: mission.pilgrimCards,
+      capturedPilesActive: mission.capturedPilesActive,
+      extraReserveCards: mission.extraReserveCards,
       relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };

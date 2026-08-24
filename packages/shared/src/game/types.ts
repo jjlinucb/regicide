@@ -9,7 +9,8 @@ export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'A' | 
  * ARCANE_SURGE doubles a Mage card's own arcane bolt, PLUNDER tears 2 reserve cards instead of 1 for a Reaver
  * (both still banished; the higher value is kept), AEGIS makes a Guardian's shield hold permanently — reducing
  * the enemy's attack to 0 for the rest of the fight instead of blocking just its next attack, WELLSPRING salvages
- * 2 cards from the banish pile instead of 1 for a Druid's Regrowth.
+ * 2 cards from the banish pile instead of 1 for a Druid's Regrowth, EVERGREEN is Gøran's own signature (see
+ * SuitedCard.evergreen) carried here only for type-shape consistency with the other classes.
  */
 export type SpecialAbilityId =
   | 'CLEAVE'
@@ -19,7 +20,8 @@ export type SpecialAbilityId =
   | 'ARCANE_SURGE'
   | 'PLUNDER'
   | 'AEGIS'
-  | 'WELLSPRING';
+  | 'WELLSPRING'
+  | 'EVERGREEN';
 
 export interface SuitedCard {
   id: string;
@@ -68,6 +70,20 @@ export interface SuitedCard {
    * bottom of the reserve deck (see engine.ts's resolveCommittedPlay's druidCards handling).
    */
   druid?: boolean;
+  /**
+   * Legacy-only: marks Gøran's card (Mission 9's reward). Its class power isn't the combined suit-power
+   * resolution restricted to its own printed suit — instead, playing it resolves all four base class powers at
+   * once (heal, draw, double damage, reduce enemy strength) and always ignores enemy immunity, no matter which
+   * suits are actually in the play (see engine.ts's resolveCommittedPlay's evergreenCards handling).
+   */
+  evergreen?: boolean;
+  /**
+   * Legacy-only: marks a card that's picked up a bonus Mage sticker (Mission 9's "second Mage sticker" reward)
+   * on top of an existing class. Unlike a pure Mage recruit's `arcane` flag (which replaces suit-power
+   * resolution entirely), this card keeps resolving its normal suit power AND fires an arcane bolt at its own
+   * value (see engine.ts's resolveArcaneBolts).
+   */
+  secondClassArcane?: boolean;
   /**
    * Classic Regicide Endless Mode only: how many steps past King this card has been upgraded, from being the
    * card of an enemy defeated during an endless round (see engine.ts's upgradeDefeatedRank). A Jack or Queen
@@ -125,8 +141,28 @@ export interface LegacyEnemySpec {
 
 export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
 
-/** What the current player must do next. AWAIT_JESTER_CLAIM and AWAIT_COMBO_ASSIST are Legacy-only. */
-export type TurnPhase = 'AWAIT_PLAY' | 'AWAIT_DEFEND' | 'AWAIT_JESTER_CLAIM' | 'AWAIT_COMBO_ASSIST';
+/**
+ * What the current player must do next. AWAIT_JESTER_CLAIM and AWAIT_COMBO_ASSIST are Legacy-only.
+ * AWAIT_END_OF_TURN and AWAIT_RESCUE_CHOICE are Mission 9's captured-piles mechanic only (see
+ * GameState.capturedPilesActive).
+ */
+export type TurnPhase =
+  | 'AWAIT_PLAY'
+  | 'AWAIT_DEFEND'
+  | 'AWAIT_JESTER_CLAIM'
+  | 'AWAIT_COMBO_ASSIST'
+  | 'AWAIT_END_OF_TURN'
+  | 'AWAIT_RESCUE_CHOICE';
+
+/**
+ * Legacy-only (Mission 9): one of the 3 captured piles seeding GameState.capturedPiles. `faceDown[0]` is the
+ * next card to flip when `faceUp` is claimed or cycled away — see engine.ts's buildCapturedPiles/banishForRescue/
+ * declineRescue.
+ */
+export interface CapturedPile {
+  faceDown: Card[];
+  faceUp: Card | null;
+}
 
 /** Which rules variant this game is running — gates every Legacy-only mechanic below. */
 export type Ruleset = 'regicide' | 'legacy';
@@ -236,6 +272,15 @@ export interface GameState {
    * every Pilgrim still waiting here — never cleared except by exact-value rescues.
    */
   pilgrimZone: Card[];
+  /**
+   * Legacy-only (Mission 9): when true, gates the whole captured-piles deckbuilding mechanic — the 3
+   * `capturedPiles`, the AWAIT_END_OF_TURN banish-to-rescue/decline choice at the end of every turn (skipped
+   * entirely right after defeating an enemy), and the AWAIT_RESCUE_CHOICE bonus on an exact-damage kill (see
+   * engine.ts's endTurnOrAwaitRescue / banishForRescue / declineRescue / chooseExactKillRescue).
+   */
+  capturedPilesActive: boolean;
+  /** Legacy-only (Mission 9): the 3 captured piles seeded at mission start (see deck.ts's buildCapturedPiles). */
+  capturedPiles: CapturedPile[];
 }
 
 export interface GameEvent {
@@ -283,6 +328,14 @@ export type GameAction =
       pilgrimMechanic?: boolean;
       /** Unshuffled Pilgrim cards to seed GameState.pilgrimDeck with (shuffled at mission start). */
       pilgrimCards?: Card[];
+      /** See GameState.capturedPilesActive. */
+      capturedPilesActive?: boolean;
+      /**
+       * Legacy-only (Mission 9): extra cards shuffled directly into this mission's ordinary reserve deck
+       * alongside whatever's left of the party after capturedPilesActive's 30-card split (e.g. a fresh pool of
+       * Pilgrim survivor cards) — unlike pilgrimCards above, these carry no special zone mechanic of their own.
+       */
+      extraReserveCards?: Card[];
     }
   | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
   | { type: 'YIELD'; playerId: string }
@@ -297,6 +350,15 @@ export type GameAction =
   | { type: 'RESOLVE_COMBO'; playerId: string }
   | { type: 'DEFEND'; playerId: string; cardIds: string[] }
   | { type: 'USE_SOLO_JESTER'; playerId: string }
+  /**
+   * Legacy-only (Mission 9), from AWAIT_END_OF_TURN: banishes `cardId` from hand to rescue `pileIndex`'s
+   * face-up captured card into the discard pile, then advances the turn.
+   */
+  | { type: 'BANISH_FOR_RESCUE'; playerId: string; cardId: string; pileIndex: number }
+  /** Legacy-only (Mission 9), from AWAIT_END_OF_TURN: declines to banish — every captured pile cycles to its next card, then the turn advances. */
+  | { type: 'DECLINE_RESCUE'; playerId: string }
+  /** Legacy-only (Mission 9), from AWAIT_RESCUE_CHOICE: an exact kill's bonus — sends `pileIndex`'s face-up captured card straight to the top of the reserve deck. */
+  | { type: 'CHOOSE_EXACT_KILL_RESCUE'; playerId: string; pileIndex: number }
   /** Classic Regicide only, from WON: continues into another round with Kings shuffled into the Tavern deck and enemies scaled up. */
   | { type: 'START_ENDLESS_ROUND' };
 
@@ -346,7 +408,17 @@ export interface ClientGameState {
   pilgrimZone: Card[];
   /** See GameState.pilgrimDeck — count only, it's face-down. */
   pilgrimDeckCount: number;
+  /** See GameState.capturedPilesActive. */
+  capturedPilesActive: boolean;
+  /** See GameState.capturedPiles — each pile's face-down cards are redacted to a count, its face-up card is public. */
+  capturedPiles: ClientCapturedPile[];
   you: {
     playerId: string;
   };
+}
+
+/** Redacted view of a captured pile: the face-up card is public, the face-down stack is only a count. */
+export interface ClientCapturedPile {
+  faceUp: Card | null;
+  faceDownCount: number;
 }
