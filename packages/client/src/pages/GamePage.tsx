@@ -15,6 +15,7 @@ import { Hand } from '../components/Hand';
 import { ConfirmPlayBar } from '../components/ConfirmPlayBar';
 import { JesterPicker } from '../components/JesterPicker';
 import { VictoryCrest } from '../components/VictoryCrest';
+import { CapturedPiles } from '../components/CapturedPiles';
 
 const MEDAL_INFO: Record<'gold' | 'silver' | 'bronze', { emoji: string; label: string }> = {
   gold: { emoji: '🥇', label: 'Gold Victory' },
@@ -69,6 +70,8 @@ export function GamePage({
   const isComboAssistWindow = state.turnPhase === 'AWAIT_COMBO_ASSIST' && Boolean(state.comboAssist);
   const isComboAttacker = state.comboAssist?.attackerId === myPlayerId;
   const canAssistCombo = isComboAssistWindow && !isComboAttacker;
+  const isAwaitEndOfTurn = state.turnPhase === 'AWAIT_END_OF_TURN';
+  const isAwaitRescueChoice = state.turnPhase === 'AWAIT_RESCUE_CHOICE';
 
   if (state.phase === 'WON' || state.phase === 'LOST') {
     return (
@@ -129,9 +132,13 @@ export function GamePage({
               ? 'Your attack is open for the Kinfolk Flute — resolve it when ready.'
               : 'An attack is open for the Kinfolk Flute — silently add a matching card, or leave it alone.'
             : isMyTurn
-              ? state.turnPhase === 'AWAIT_DEFEND'
-                ? `Defend! Discard ${state.pendingDamage} damage worth of cards.`
-                : 'Your turn — play a card, a combo, or yield.'
+              ? isAwaitEndOfTurn
+                ? 'End of turn: banish a hand card to rescue a captured pile, or decline and cycle them all.'
+                : isAwaitRescueChoice
+                  ? 'Exact hit! Choose a captured pile to rescue to the top of the reserve deck.'
+                  : state.turnPhase === 'AWAIT_DEFEND'
+                    ? `Defend! Discard ${state.pendingDamage} damage worth of cards.`
+                    : 'Your turn — play a card, a combo, or yield.'
               : `Waiting for ${state.players[state.currentPlayerIndex]?.name}...`}
           {isHost && (
             <button
@@ -200,6 +207,7 @@ export function GamePage({
           />
         )}
         <DeckPiles state={state} />
+        {state.capturedPilesActive && <CapturedPiles piles={state.capturedPiles} />}
         <PlayerList state={state} myPlayerId={myPlayerId} />
         <ActionLog state={state} />
       </div>
@@ -230,7 +238,7 @@ export function GamePage({
           cards={myHand}
           selectedIds={selectedIds}
           onToggle={toggleCard}
-          interactive={canAssistCombo || (isMyTurn && !isComboAssistWindow && state.turnPhase !== 'AWAIT_JESTER_CLAIM')}
+          interactive={canAssistCombo || (isMyTurn && !isComboAssistWindow && state.turnPhase !== 'AWAIT_JESTER_CLAIM' && !isAwaitRescueChoice)}
           enemy={state.currentEnemy}
         />
       </div>
@@ -288,7 +296,50 @@ export function GamePage({
         />
       )}
 
-      {isMyTurn && !isComboAssistWindow && state.turnPhase !== 'AWAIT_JESTER_CLAIM' && !(isLoneJester && state.turnPhase === 'AWAIT_PLAY') && (
+      {isMyTurn && isAwaitEndOfTurn && (
+        <div className="jester-picker">
+          <span>
+            {selectedCards.length === 1
+              ? 'Choose a captured pile below to rescue with the selected card, or decline to cycle them all instead.'
+              : 'Select one card from your hand to banish, then choose a captured pile to rescue — or decline to cycle them all.'}
+          </span>
+          <CapturedPiles
+            piles={state.capturedPiles}
+            chooseLabel="Banish & rescue"
+            onChoosePile={
+              selectedCards.length === 1
+                ? (pileIndex) => {
+                    sendAction({ type: 'BANISH_FOR_RESCUE', playerId: myPlayerId, cardId: selectedCards[0].id, pileIndex });
+                    setSelectedIds(new Set());
+                  }
+                : undefined
+            }
+          />
+          <div className="jester-picker-choices">
+            <button className="btn-secondary btn" onClick={() => sendAction({ type: 'DECLINE_RESCUE', playerId: myPlayerId })}>
+              Decline — cycle all piles
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isMyTurn && isAwaitRescueChoice && (
+        <div className="jester-picker">
+          <span>Exact hit! Choose a captured pile to send straight to the top of the reserve deck.</span>
+          <CapturedPiles
+            piles={state.capturedPiles}
+            chooseLabel="Rescue to top of deck"
+            onChoosePile={(pileIndex) => sendAction({ type: 'CHOOSE_EXACT_KILL_RESCUE', playerId: myPlayerId, pileIndex })}
+          />
+        </div>
+      )}
+
+      {isMyTurn &&
+        !isComboAssistWindow &&
+        state.turnPhase !== 'AWAIT_JESTER_CLAIM' &&
+        !isAwaitEndOfTurn &&
+        !isAwaitRescueChoice &&
+        !(isLoneJester && state.turnPhase === 'AWAIT_PLAY') && (
         <ConfirmPlayBar
           turnPhase={state.turnPhase}
           pendingDamage={state.pendingDamage}

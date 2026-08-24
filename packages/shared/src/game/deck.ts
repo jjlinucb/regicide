@@ -1,4 +1,4 @@
-import type { Card, EnemyState, LegacyEnemySpec, Suit, SuitedCard } from './types.js';
+import type { Card, CapturedPile, EnemyState, LegacyEnemySpec, Suit, SuitedCard } from './types.js';
 
 const SUITS: Suit[] = ['H', 'D', 'C', 'S'];
 const NUMBER_RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10'] as const;
@@ -154,4 +154,22 @@ export function buildTavernDeck(playerCount: number, rng: () => number): Card[] 
 /** Legacy-only: shuffles a campaign's party together with a given number of jesters into a mission's reserve deck. */
 export function buildLegacyReserveDeck(party: Card[], jesterCount: number, rng: () => number): Card[] {
   return shuffle([...party, ...makeJesters(jesterCount)], rng);
+}
+
+/**
+ * Legacy-only (Mission 9): shuffles the party and splits the first 30 cards into 3 face-down piles of 10, each
+ * with its top card immediately flipped face-up. Returns the piles plus whatever's left of the party (not
+ * captured) — the caller shuffles that remainder (plus jesters, plus any mission-only extras) into the actual
+ * reserve deck via buildLegacyReserveDeck.
+ */
+export function buildCapturedPiles(party: Card[], rng: () => number): { piles: CapturedPile[]; leftoverParty: Card[] } {
+  const shuffled = shuffle(party, rng);
+  const captured = shuffled.slice(0, 30);
+  const leftoverParty = shuffled.slice(30);
+  const piles: CapturedPile[] = [0, 1, 2].map((i) => {
+    const pileCards = captured.slice(i * 10, i * 10 + 10);
+    const faceUp = pileCards.shift() ?? null;
+    return { faceDown: pileCards, faceUp };
+  });
+  return { piles, leftoverParty };
 }
