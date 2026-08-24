@@ -8,9 +8,18 @@ export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'A' | 
  * Hearts, BULWARK reduces the enemy's attack to 0 for the fight instead of by the play's value,
  * ARCANE_SURGE doubles a Mage card's own arcane bolt, PLUNDER tears 2 reserve cards instead of 1 for a Reaver
  * (both still banished; the higher value is kept), AEGIS makes a Guardian's shield hold permanently — reducing
- * the enemy's attack to 0 for the rest of the fight instead of blocking just its next attack.
+ * the enemy's attack to 0 for the rest of the fight instead of blocking just its next attack, WELLSPRING salvages
+ * 2 cards from the banish pile instead of 1 for a Druid's Regrowth.
  */
-export type SpecialAbilityId = 'CLEAVE' | 'INSPIRE' | 'REVIVE' | 'BULWARK' | 'ARCANE_SURGE' | 'PLUNDER' | 'AEGIS';
+export type SpecialAbilityId =
+  | 'CLEAVE'
+  | 'INSPIRE'
+  | 'REVIVE'
+  | 'BULWARK'
+  | 'ARCANE_SURGE'
+  | 'PLUNDER'
+  | 'AEGIS'
+  | 'WELLSPRING';
 
 export interface SuitedCard {
   id: string;
@@ -52,6 +61,13 @@ export interface SuitedCard {
    * it's used (see engine.ts's resolveCommittedPlay's guardianBlocksNextAttack).
    */
   guardian?: boolean;
+  /**
+   * Legacy-only: marks a Druid card (Mission 7's new faction). Like a Mage, Reaver, or Guardian, it still
+   * carries a suit for immunity bookkeeping, but its class power isn't the combined suit-power resolution —
+   * instead, playing it activates Regrowth: salvage cards back out of the banish pile and return them to the
+   * bottom of the reserve deck (see engine.ts's resolveCommittedPlay's druidCards handling).
+   */
+  druid?: boolean;
   /**
    * Classic Regicide Endless Mode only: how many steps past King this card has been upgraded, from being the
    * card of an enemy defeated during an endless round (see engine.ts's upgradeDefeatedRank). A Jack or Queen
@@ -205,6 +221,21 @@ export interface GameState {
    * one strike's total. The zone itself is never cleared for the rest of the mission.
    */
   zoneVengeanceOnKill: boolean;
+  /**
+   * Legacy-only (Mission 7): when true, gates the whole Pilgrim mechanic — the start-of-turn flip into
+   * `pilgrimZone`, the value-matching rescue on any attack play, and the deck-burn penalty on every enemy kill
+   * (see engine.ts's flipPilgrimCard / checkPilgrimRescue / dealDamageAndCheckDefeat).
+   */
+  pilgrimMechanic: boolean;
+  /** Legacy-only (Mission 7): the face-down Pilgrim deck, separate from the reserve deck — its top card flips into `pilgrimZone` at the start of every turn. */
+  pilgrimDeck: Card[];
+  /**
+   * Legacy-only (Mission 7): Pilgrim cards flipped face-up into the shared mission zone, awaiting rescue.
+   * Playing an attack whose total value exactly matches a Pilgrim's value here banishes that Pilgrim (rescued
+   * for good). On every enemy kill, the reserve deck burns cards from its top equal to the combined value of
+   * every Pilgrim still waiting here — never cleared except by exact-value rescues.
+   */
+  pilgrimZone: Card[];
 }
 
 export interface GameEvent {
@@ -248,6 +279,10 @@ export type GameAction =
       presetMissionZone?: Card[];
       /** See GameState.zoneVengeanceOnKill. */
       zoneVengeanceOnKill?: boolean;
+      /** See GameState.pilgrimMechanic. */
+      pilgrimMechanic?: boolean;
+      /** Unshuffled Pilgrim cards to seed GameState.pilgrimDeck with (shuffled at mission start). */
+      pilgrimCards?: Card[];
     }
   | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
   | { type: 'YIELD'; playerId: string }
@@ -305,6 +340,12 @@ export interface ClientGameState {
   missionZone: Card[];
   /** See GameState.zoneVengeanceOnKill. */
   zoneVengeanceOnKill: boolean;
+  /** See GameState.pilgrimMechanic. */
+  pilgrimMechanic: boolean;
+  /** See GameState.pilgrimZone. Public information — it's on the table. */
+  pilgrimZone: Card[];
+  /** See GameState.pilgrimDeck — count only, it's face-down. */
+  pilgrimDeckCount: number;
   you: {
     playerId: string;
   };

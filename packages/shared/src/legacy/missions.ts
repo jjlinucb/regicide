@@ -38,6 +38,10 @@ export interface Mission {
   presetMissionZone?: Card[];
   /** See GameState.zoneVengeanceOnKill. */
   zoneVengeanceOnKill?: boolean;
+  /** See GameState.pilgrimMechanic. */
+  pilgrimMechanic?: boolean;
+  /** Unshuffled Pilgrim cards seeding GameState.pilgrimDeck (see GameState.pilgrimMechanic). */
+  pilgrimCards?: Card[];
 }
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
@@ -58,6 +62,11 @@ function zoneCompanion(name: string, suit: Suit, rank: Rank): Card {
   return { id: `zone-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name };
 }
 
+/** A named survivor card seeding a mission's pilgrimCards (see Mission 7's GameState.pilgrimMechanic). Suit is flavor only — it carries no immunity or class power. */
+function pilgrim(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `pilgrim-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name };
+}
+
 /** Converts a mission's enemy specs into the engine's LegacyEnemySpec shape (suit-keyed). Mage enemies aren't used yet — the class only exists as a party reward so far. */
 export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemySpec[] {
   return enemies.map((e) => ({
@@ -71,8 +80,8 @@ export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemyS
 
 /**
  * Regicide Legacy's campaign — original content built on the same rules skeleton as the physical game, not its
- * proprietary mission text. Currently the first four missions of a longer arc: the party's early fights against
- * a corrupted syndicate, culminating in Mission 3's discovery of the Ashen Archive and its captive Mages.
+ * proprietary mission text. Currently the first seven missions of a longer arc: the party's early fights against
+ * a corrupted syndicate, on through the Well of Tears and Mission 7's Druids.
  */
 export const MISSIONS: Mission[] = [
   {
@@ -259,6 +268,57 @@ export const MISSIONS: Mission[] = [
         recruit('Kesh', 'GUARDIAN', '5', 'H'),
         recruit('Ambrey', 'GUARDIAN', '7', 'D'),
         specialRecruit('Dorna', 'GUARDIAN', '9', 'C'),
+      ],
+    },
+  },
+  {
+    id: 7,
+    title: 'Tales of Rebirth',
+    story:
+      "Word reaches the Syndicate of a lake gone wrong: the Well of Tears, its waters curdled black around " +
+      'something vast and mechanical that sank into the silt long before the corruption had a name. Twelve of ' +
+      'its broken, drowned children still patrol the shallows, and the survivors it dragged under surface one ' +
+      "by one as the fight drags on — waterlogged, terrified, and no help to anyone until they're pulled clear.",
+    // 4-4-4 escalating lineup — Schole (10/20), Deep (15/30), Abyssal (20/40) — one of each base class per tier,
+    // same structural pattern as Mission 4's Specimens.
+    enemies: [
+      enemy('Schole: Glimmerfin', 'WARRIOR', 20, 10),
+      enemy('Schole: Murkgill', 'BARD', 20, 10),
+      enemy('Schole: Tideclaw', 'CLERIC', 20, 10),
+      enemy('Schole: Brackenshell', 'PALADIN', 20, 10),
+      enemy('Deep: Waterlogged', 'WARRIOR', 30, 15),
+      enemy('Deep: Silttongue', 'BARD', 30, 15),
+      enemy('Deep: Chorus-Eel', 'CLERIC', 30, 15),
+      enemy('Deep: Ironscale', 'PALADIN', 30, 15),
+      enemy('Abyssal: Wormvein', 'WARRIOR', 40, 20),
+      enemy('Abyssal: Drownsong', 'BARD', 40, 20),
+      enemy('Abyssal: Hollowfang', 'CLERIC', 40, 20),
+      enemy('Abyssal: Leadmaw', 'PALADIN', 40, 20),
+    ],
+    // The Pilgrim mechanic: a survivor flips face-up into the mission zone at the start of every turn. Playing
+    // an attack whose total value exactly matches a waiting Pilgrim rescues them (banished for good); every
+    // enemy kill instead burns cards off the top of the reserve deck equal to whatever's still left unrescued
+    // (see GameState.pilgrimMechanic).
+    pilgrimMechanic: true,
+    pilgrimCards: [
+      pilgrim('Old Fenwick', 'H', '2'),
+      pilgrim('Little Sae', 'D', '3'),
+      pilgrim('Bettina the Ferrywoman', 'C', '4'),
+      pilgrim('Corq Mudfoot', 'S', '5'),
+      pilgrim('Sister Yvaine', 'H', '6'),
+      pilgrim('Harlan Reedy', 'D', '7'),
+      pilgrim('Widow Corrin', 'C', '8'),
+      pilgrim('Young Thistle', 'S', '9'),
+    ],
+    // Reward: the Druid faction — 4 permanent new recruits, survivors themselves once, who learned something
+    // from the Well before the party pulled them out. Playing one activates Regrowth: salvage cards back out of
+    // the banish pile and return them to the reserve deck — Zolgar's Wellspring salvages 2 instead of 1.
+    reward: {
+      recruits: [
+        recruit('Tolman', 'DRUID', '3', 'H'),
+        recruit('Maya', 'DRUID', '5', 'D'),
+        recruit('Alanta', 'DRUID', '7', 'C'),
+        specialRecruit('Zolgar', 'DRUID', '9', 'S'),
       ],
     },
   },

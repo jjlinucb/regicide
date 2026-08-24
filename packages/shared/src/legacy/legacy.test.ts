@@ -59,7 +59,7 @@ describe('legacy: mission setup', () => {
   });
 
   it('every non-standard-castle mission has at least one enemy and converts cleanly to engine specs', () => {
-    expect(MISSIONS.length).toBe(6);
+    expect(MISSIONS.length).toBe(7);
     for (const mission of MISSIONS) {
       if (mission.standardCastle) continue;
       expect(mission.enemies.length).toBeGreaterThan(0);
@@ -916,5 +916,143 @@ describe('legacy: Guardian class power (absolute shield, one attack at a time)',
 
     expect(state.currentEnemy?.spadesShield).toBe(20);
     expect(state.turnPhase).toBe('AWAIT_PLAY'); // no damage suffered, same player continues
+  });
+});
+
+describe('legacy: mission 7 mechanics (Pilgrim zone)', () => {
+  function startWellMission(n: number, enemies: LegacyEnemySpec[], pilgrimCards: Card[]): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'well-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      pilgrimMechanic: true,
+      pilgrimCards,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  const fenwick: Card = { id: 'fenwick', kind: 'suited', suit: 'H', rank: '2', name: 'Old Fenwick' };
+  const sae: Card = { id: 'sae', kind: 'suited', suit: 'D', rank: '3', name: 'Little Sae' };
+
+  it('flips the top Pilgrim into the zone right at mission start, before anyone has played', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 20, attack: 10 };
+    const state = startWellMission(1, [boss], [fenwick, sae]);
+    expect(state.pilgrimZone.length).toBe(1);
+    expect(state.pilgrimZone[0].id).toBe('fenwick');
+    expect(state.pilgrimDeck.length).toBe(1);
+  });
+
+  it('flips another Pilgrim at the start of the next turn', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 };
+    let state = startWellMission(1, [boss], [fenwick, sae]);
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = res.state;
+    expect(state.pilgrimZone.length).toBe(2);
+    expect(state.pilgrimZone[1].id).toBe('sae');
+  });
+
+  it("rescues (banishes) a Pilgrim when an attack's total value exactly matches theirs", () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
+    let state = startWellMission(1, [boss], [fenwick]); // fenwick is worth 2
+    state = rig(state, [suited('D', '2')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.pilgrimZone.length).toBe(0);
+    expect(state.banishPile.some((c) => c.id === 'fenwick')).toBe(true);
+    expect(state.discardPile.some((c) => c.id === 'fenwick')).toBe(false);
+  });
+
+  it('leaves a waiting Pilgrim alone when the played value does not match', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
+    let state = startWellMission(1, [boss], [fenwick]); // worth 2
+    state = rig(state, [suited('D', '5')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.pilgrimZone.length).toBe(1);
+  });
+
+  it("burns reserve-deck cards on kill equal to the Pilgrim zone's combined unrescued value", () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
+    let state = startWellMission(1, [boss], [fenwick, sae]); // zone = [fenwick(2)] after the mission-start flip
+    let res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = res.state; // zone = [fenwick(2), sae(3)] after the next turn's flip
+    expect(state.pilgrimZone.length).toBe(2);
+
+    const tavernBefore = state.tavernDeck.length;
+    // Spades matches the boss's own immunity (blocked, no Diamonds-style draw side effect) — isolates the burn.
+    state = rig(state, [suited('S', '8')]); // kills the boss outright, doesn't match either Pilgrim's value
+    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.pilgrimZone.length).toBe(2); // neither rescued
+    expect(tavernBefore - state.tavernDeck.length).toBe(5); // burned 2 + 3 = 5 off the reserve deck's top
+  });
+});
+
+describe('legacy: mission 7 reward (Druid faction)', () => {
+  it('rewards 4 Druid recruits, one carrying the Wellspring special ability', () => {
+    const mission7 = getMission(7)!;
+    const party = applyReward(buildInitialParty(), mission7.reward);
+    const druids = party.filter((c) => c.kind === 'suited' && c.druid);
+    expect(druids.length).toBe(4);
+    expect(druids.filter((c) => c.kind === 'suited' && c.special === 'WELLSPRING').length).toBe(1);
+  });
+
+  it('a Druid recruit takes its explicit suit (Druid has none of its own) and is flagged druid', () => {
+    const card = buildRecruitCard({ name: 'Test Druid', class: 'DRUID', rank: '5', suit: 'D' });
+    expect(card.kind === 'suited' && card.druid).toBe(true);
+    expect(card.kind === 'suited' && card.suit).toBe('D');
+  });
+});
+
+describe('legacy: Druid class power (Regrowth — salvage from the banish pile)', () => {
+  function druidCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
+    return { ...suited(suit, rank), druid: true, ...(special ? { special: 'WELLSPRING' } : {}) };
+  }
+
+  it("salvages 1 card from the banish pile to the bottom of the reserve deck, ignoring its printed suit's power", () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
+    let state = startMission(1, [boss]);
+    state.banishPile = [suited('H', '6')]; // Hearts (Cleric/heal) power never fires for a Druid card
+    state = rig(state, [druidCard('H', '3')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.banishPile.length).toBe(0);
+    expect(state.tavernDeck[state.tavernDeck.length - 1]?.rank).toBe('6'); // returned to the bottom
+    expect(state.discardPile.length).toBe(0); // no heal fired — Hearts isn't a Druid's power
+  });
+
+  it('Wellspring salvages 2 cards instead of 1', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
+    let state = startMission(1, [boss]);
+    state.banishPile = [suited('H', '6'), suited('C', '4')];
+    state = rig(state, [druidCard('H', '3', true)]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.banishPile.length).toBe(0);
+  });
+
+  it('does nothing (no crash) when the banish pile is empty', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
+    let state = startMission(1, [boss]);
+    state = rig(state, [druidCard('H', '3')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    expect(res.state.banishPile.length).toBe(0);
   });
 });

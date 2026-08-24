@@ -328,6 +328,8 @@ export class RoomManager {
       exactKillSplashDamage: mission.exactKillSplashDamage,
       presetMissionZone: mission.presetMissionZone,
       zoneVengeanceOnKill: mission.zoneVengeanceOnKill,
+      pilgrimMechanic: mission.pilgrimMechanic,
+      pilgrimCards: mission.pilgrimCards,
       relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };
