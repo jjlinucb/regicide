@@ -269,15 +269,45 @@ export class RoomManager {
     return { room, player };
   }
 
+  /** Grants a single mission's reward (recruits, Dual-class Stickers, relics) and marks it completed. Shared by a normal win and by jumping ahead into a later mission (see startLegacyMission). */
+  private grantMissionReward(legacy: LegacyRoomData, mission: NonNullable<ReturnType<typeof getMission>>): void {
+    legacy.party = applyReward(legacy.party, mission.reward);
+    if (mission.reward.relics?.length) {
+      legacy.permanentRules = [...legacy.permanentRules, ...mission.reward.relics];
+    }
+    if (!legacy.missionsCompleted.includes(mission.id)) {
+      legacy.missionsCompleted = [...legacy.missionsCompleted, mission.id];
+    }
+  }
+
   startLegacyMission(code: string, requestingPlayerId: string, missionId: number): { room: Room } | { error: string } {
     const room = this.getRoom(code);
     if (!room || !room.legacy) return { error: 'Campaign not found.' };
     if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can start the mission.' };
     if (room.playerOrder.length < 1) return { error: 'Need at least 1 player.' };
-    if (missionId !== room.legacy.currentMission) return { error: 'Missions must be played in order.' };
+    if (missionId < 1 || missionId > MISSIONS.length) return { error: `Mission ${missionId} isn't built yet.` };
 
-    const mission = getMission(missionId);
-    if (!mission) return { error: 'Unknown mission.' };
+    const mission = getMission(missionId)!;
+
+    // Jumping ahead of the campaign's current mission (any mission in the list is unlocked for direct play):
+    // grant every skipped mission's reward first, as if it had been won normally, so the party arrives at
+    // full strength.
+    if (missionId > room.legacy.currentMission) {
+      for (let id = room.legacy.currentMission; id < missionId; id++) {
+        const skipped = getMission(id);
+        if (skipped) this.grantMissionReward(room.legacy, skipped);
+      }
+      room.legacy.currentMission = missionId;
+    }
+
+    // Mission-specific sideline: pull `sidelineCount` random members out of the reserve deck for this fight only
+    // — the campaign's persisted roster (room.legacy.party) is untouched, so they're back next mission.
+    let missionParty = room.legacy.party;
+    if (mission.sidelineCount) {
+      const shuffled = [...missionParty].sort(() => Math.random() - 0.5);
+      const sidelinedIds = new Set(shuffled.slice(0, mission.sidelineCount).map((c) => c.id));
+      missionParty = missionParty.filter((c) => !sidelinedIds.has(c.id));
+    }
 
     const n = room.playerOrder.length;
     const playerNames = room.playerOrder.map((id) => room.players.get(id)!.name);
@@ -286,11 +316,13 @@ export class RoomManager {
       playerIds: room.playerOrder,
       playerNames,
       seed: `${code}-${Date.now()}`,
-      party: room.legacy.party,
+      party: missionParty,
       enemies: mission.standardCastle ? [] : missionEnemiesToSpecs(mission.enemies),
       jesterCount: JESTERS_BY_PLAYER_COUNT[n] ?? 0,
       standardCastle: mission.standardCastle,
       exactKillOnly: mission.exactKillOnly,
+      endOfTurnZoneFlip: mission.endOfTurnZoneFlip,
+      jesterClaimNextPlayerOnly: mission.jesterClaimNextPlayerOnly,
       relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };
@@ -305,11 +337,7 @@ export class RoomManager {
     if (outcome === 'won') {
       const mission = getMission(missionId);
       if (mission) {
-        legacy.party = applyReward(legacy.party, mission.reward);
-        if (mission.reward.relics?.length) {
-          legacy.permanentRules = [...legacy.permanentRules, ...mission.reward.relics];
-        }
-        legacy.missionsCompleted = [...legacy.missionsCompleted, missionId];
+        this.grantMissionReward(legacy, mission);
         legacy.currentMission = missionId + 1;
       }
       await this.campaignStore.save(toRecord(room));

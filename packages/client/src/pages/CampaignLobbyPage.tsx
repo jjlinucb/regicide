@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { MISSIONS } from '@regicide/shared';
 import type { LegacySavePayload, LegacyStatePayload, RoomStatePayload } from '@regicide/shared';
 
@@ -33,7 +34,8 @@ export function CampaignLobbyPage({
 }) {
   const isHost = roomState.players.find((p) => p.id === myPlayerId)?.isHost ?? false;
   const currentMission = MISSIONS.find((m) => m.id === legacyState.currentMission);
-  const campaignComplete = !currentMission;
+  const [selectedMissionId, setSelectedMissionId] = useState(legacyState.currentMission);
+  const selectedMission = MISSIONS.find((m) => m.id === selectedMissionId) ?? currentMission;
 
   return (
     <div className="centered-page">
@@ -61,26 +63,40 @@ export function CampaignLobbyPage({
           {MISSIONS.map((m) => {
             const done = legacyState.missionsCompleted.includes(m.id);
             const isCurrent = m.id === legacyState.currentMission;
-            const locked = m.id > legacyState.currentMission;
+            const isSelected = m.id === selectedMissionId;
             return (
-              <div key={m.id} className={`legacy-mission-row${done ? ' done' : ''}${isCurrent ? ' current' : ''}${locked ? ' locked' : ''}`}>
+              <button
+                key={m.id}
+                type="button"
+                className={`legacy-mission-row${done ? ' done' : ''}${isCurrent ? ' current' : ''}${isSelected ? ' selected' : ''}`}
+                onClick={() => setSelectedMissionId(m.id)}
+              >
                 <span className="legacy-mission-num">{m.id}</span>
                 <span className="legacy-mission-title">{m.title}</span>
-                <span className="legacy-mission-status">{done ? '✓' : locked ? '🔒' : '▶'}</span>
-              </div>
+                <span className="legacy-mission-status">{done ? '✓' : '▶'}</span>
+              </button>
             );
           })}
+          {legacyState.currentMission > MISSIONS.length && (
+            <p style={{ fontSize: '0.8rem', color: 'var(--ink-dim)', margin: 0 }}>
+              🎉 All {MISSIONS.length} built missions are complete — more are on the way. Pick any of them below to replay.
+            </p>
+          )}
         </div>
 
-        {campaignComplete ? (
-          <p>🎉 Campaign complete — every mission has been won!</p>
-        ) : (
+        {selectedMission && (
           <div className="legacy-mission-brief">
-            <h3>{currentMission.title}</h3>
-            <p>{currentMission.story}</p>
+            <h3>{selectedMission.title}</h3>
+            <p>{selectedMission.story}</p>
+            {selectedMission.id > legacyState.currentMission && (
+              <p style={{ fontSize: '0.8rem', color: 'var(--ink-dim)' }}>
+                Jumping ahead — the rewards for mission{selectedMission.id - legacyState.currentMission > 1 ? 's' : ''}{' '}
+                {legacyState.currentMission}–{selectedMission.id - 1} will be granted automatically first.
+              </p>
+            )}
             {isHost ? (
-              <button className="btn" onClick={() => onStartMission(currentMission.id)}>
-                Begin Mission {currentMission.id}
+              <button className="btn" onClick={() => onStartMission(selectedMission.id)}>
+                {selectedMission.id > legacyState.currentMission ? 'Jump to' : 'Begin'} Mission {selectedMission.id}
               </button>
             ) : (
               <p style={{ color: 'var(--ink-dim)' }}>Waiting for the host to start the mission...</p>

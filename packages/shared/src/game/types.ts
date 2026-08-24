@@ -31,6 +31,12 @@ export interface SuitedCard {
    */
   secondSuit?: Suit;
   /**
+   * Legacy-only: a corrupted card. Its class power(s) always ignore enemy immunity (including mission-zone
+   * immunity), but the instant it's played, the top card of the reserve deck is banished as the cost (see
+   * engine.ts's resolveCommittedPlay) — permanently shrinking the party's deck for the rest of the mission.
+   */
+  corrupted?: boolean;
+  /**
    * Classic Regicide Endless Mode only: how many steps past King this card has been upgraded, from being the
    * card of an enemy defeated during an endless round (see engine.ts's upgradeDefeatedRank). A Jack or Queen
    * defeated during endless rounds has its `rank` itself promoted up the J→Q→K chain instead (no tier needed);
@@ -141,6 +147,19 @@ export interface GameState {
    * silently add one matching card via ASSIST_COMBO before the attacker calls RESOLVE_COMBO.
    */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
+  /**
+   * Legacy-only: when true (Mission 3), the top of the reserve deck flips face-up into `missionZone` at the end
+   * of every turn, and the current enemy becomes immune to that card's class(es) too (see zoneImmuneSuits).
+   */
+  endOfTurnZoneFlip: boolean;
+  /** Legacy-only: cards flipped into the shared mission zone (see endOfTurnZoneFlip). Cleared when the enemy is defeated. */
+  missionZone: Card[];
+  /** Legacy-only: extra classes the current enemy is immune to, stacked up from missionZone flips. Cleared with the zone. */
+  zoneImmuneSuits: Suit[];
+  /** Legacy-only: cards permanently removed from the game (mission-zone cleanup, etc.) — never reshuffled back in. */
+  banishPile: Card[];
+  /** Legacy-only (Mission 2's hydras): when true, an open Jester claim window may only be claimed by the next player in turn order, not any player. */
+  jesterClaimNextPlayerOnly: boolean;
 }
 
 export interface GameEvent {
@@ -166,6 +185,10 @@ export type GameAction =
       exactKillOnly?: boolean;
       /** See GameState.relics. */
       relics?: string[];
+      /** See GameState.endOfTurnZoneFlip. */
+      endOfTurnZoneFlip?: boolean;
+      /** See GameState.jesterClaimNextPlayerOnly. */
+      jesterClaimNextPlayerOnly?: boolean;
     }
   | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
   | { type: 'YIELD'; playerId: string }

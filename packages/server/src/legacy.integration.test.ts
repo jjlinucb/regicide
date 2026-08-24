@@ -126,6 +126,34 @@ describe('legacy campaign integration', () => {
     expect(resumedLegacyState.currentMission).toBe(2);
   });
 
+  it('jumping straight to mission 3 auto-grants missions 1 and 2\'s rewards first', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Zara' });
+
+    const result = rooms.startLegacyMission(created.code, created.playerId, 3);
+    if ('error' in result) throw new Error(result.error);
+
+    expect(result.room.legacy?.currentMission).toBe(3);
+    expect(result.room.legacy?.missionsCompleted).toEqual([1, 2]);
+    // Mission 1's Kinfolk Flute relic and mission 2's 4 Dual-class Stickers, both auto-granted.
+    expect(result.room.legacy?.permanentRules).toEqual(['KINFOLK_FLUTE']);
+    const stickered = result.room.legacy!.party.filter((c) => c.kind === 'suited' && c.secondSuit);
+    expect(stickered.length).toBe(4);
+    expect(result.room.gameState.ruleset).toBe('legacy');
+    expect(result.room.gameState.phase).toBe('IN_PROGRESS');
+    client.close();
+  });
+
+  it('rejects jumping to a mission that isn\'t built yet', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Yuki' });
+    const result = rooms.startLegacyMission(created.code, created.playerId, 12);
+    expect('error' in result).toBe(true);
+    client.close();
+  });
+
   it('rejects resuming an unknown campaign code', async () => {
     const client = ioClient(`http://localhost:${port}`);
     await waitFor(client, 'connect');

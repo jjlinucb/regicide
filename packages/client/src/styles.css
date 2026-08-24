@@ -660,12 +660,22 @@ button {
   border-radius: 6px;
   font-size: 0.85rem;
   color: var(--ink-dim);
+  width: 100%;
+  background: none;
+  border: 1px solid transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .legacy-mission-row.current {
-  background: var(--bg);
   color: var(--ink);
   font-weight: 600;
+}
+
+.legacy-mission-row.selected {
+  background: var(--bg);
+  border-color: var(--border);
 }
 
 .legacy-mission-row.done {
