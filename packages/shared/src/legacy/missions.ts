@@ -36,6 +36,8 @@ export interface Mission {
   exactKillSplashDamage?: boolean;
   /** See GameState.START_LEGACY_MISSION action's presetMissionZone. */
   presetMissionZone?: Card[];
+  /** See GameState.zoneVengeanceOnKill. */
+  zoneVengeanceOnKill?: boolean;
 }
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
@@ -214,6 +216,39 @@ export const MISSIONS: Mission[] = [
         recruit('Vena', 'REAVER', '7', 'S'),
         recruit('Kina', 'REAVER', '10', 'H'),
       ],
+    },
+  },
+  {
+    id: 6,
+    title: 'Shards of Memory',
+    story:
+      "The Garden of Remembrance was never meant to be walked by the living. Its statues stir as the party " +
+      "crosses the threshold, and Myla — freed from the Crimson Grove but not from whatever took root in her " +
+      "there — is pulled bodily from their side into the garden's center. Every foe struck down here seems to " +
+      "feed something in her, and she does not forgive the debt quietly.",
+    // 4-4 escalating lineup of animated statues, one tier heavier than Mission 5's — the mission's real danger
+    // is Myla's ever-growing zone strike, not raw enemy stats.
+    enemies: [
+      enemy('Statue Warden', 'WARRIOR', 30, 15),
+      enemy('Statue Cantor', 'BARD', 30, 15),
+      enemy('Statue Penitent', 'CLERIC', 30, 15),
+      enemy('Statue Sentinel', 'PALADIN', 30, 15),
+      enemy('Graven Warden', 'WARRIOR', 40, 20),
+      enemy('Graven Cantor', 'BARD', 40, 20),
+      enemy('Graven Penitent', 'CLERIC', 40, 20),
+      enemy('Graven Sentinel', 'PALADIN', 40, 20),
+    ],
+    // Myla (value 7) is stripped from the party and placed in the mission zone at the start — same static seed
+    // as Mission 5's presetMissionZone, but this time nothing keeps the zone fixed: zoneVengeanceOnKill grows
+    // it permanently with every kill and has her strike the party for the zone's live total each time.
+    presetMissionZone: [zoneCompanion('Myla', 'H', '7')],
+    // Every kill sacrifices the lowest-value card left on the enemy's table into the mission zone (never
+    // cleared for the rest of the mission), then Myla strikes for the zone's full value — exact kills spare
+    // the zone's single highest-value card from that one strike (see GameState.zoneVengeanceOnKill).
+    zoneVengeanceOnKill: true,
+    // Reward: two survivors pulled from the garden's earlier victims, freed once the statues stop moving.
+    reward: {
+      recruits: [recruit('Ferro', 'PALADIN', '8', 'S'), recruit('Sable', 'MAGE', '9')],
     },
   },
 ];

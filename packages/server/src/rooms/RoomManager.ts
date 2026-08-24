@@ -327,6 +327,7 @@ export class RoomManager {
       exactKillToReserveDeck: mission.exactKillToReserveDeck,
       exactKillSplashDamage: mission.exactKillSplashDamage,
       presetMissionZone: mission.presetMissionZone,
+      zoneVengeanceOnKill: mission.zoneVengeanceOnKill,
       relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };

@@ -187,6 +187,16 @@ export interface GameState {
    * (which can itself chain into a further kill; see engine.ts's dealDamageAndCheckDefeat).
    */
   exactKillSplashDamage: boolean;
+  /**
+   * Legacy-only (Mission 6): when true, every enemy kill permanently grows `missionZone` — the lowest-value
+   * card left on the enemy's table is moved into the zone instead of the discard pile — and then Myla (the
+   * zone's permanent occupant, see presetMissionZone) strikes: pendingDamage is set to the live sum of every
+   * card's value in missionZone and turnPhase becomes AWAIT_DEFEND, reusing the normal defend/loss flow so an
+   * uncovered hit ends the mission exactly like any other undefended attack (see engine.ts's
+   * dealDamageAndCheckDefeat). An exact-damage kill excludes the single highest-value zone card from that
+   * one strike's total. The zone itself is never cleared for the rest of the mission.
+   */
+  zoneVengeanceOnKill: boolean;
 }
 
 export interface GameEvent {
@@ -228,6 +238,8 @@ export type GameAction =
        * flipped into, never banished on defeat) since endOfTurnZoneFlip is left unset.
        */
       presetMissionZone?: Card[];
+      /** See GameState.zoneVengeanceOnKill. */
+      zoneVengeanceOnKill?: boolean;
     }
   | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
   | { type: 'YIELD'; playerId: string }
@@ -281,6 +293,10 @@ export interface ClientGameState {
   comboAssist: { attackerId: string; cardIds: string[] } | null;
   /** See GameState.discardTopBuffsAttack. */
   discardTopBuffsAttack: boolean;
+  /** See GameState.missionZone. Public information — it's on the table. */
+  missionZone: Card[];
+  /** See GameState.zoneVengeanceOnKill. */
+  zoneVengeanceOnKill: boolean;
   you: {
     playerId: string;
   };

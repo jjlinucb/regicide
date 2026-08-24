@@ -28,6 +28,8 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     endlessLoop: state.endlessLoop,
     comboAssist: state.comboAssist,
     discardTopBuffsAttack: state.discardTopBuffsAttack,
+    missionZone: state.missionZone,
+    zoneVengeanceOnKill: state.zoneVengeanceOnKill,
     you: { playerId: viewerPlayerId },
   };
 }

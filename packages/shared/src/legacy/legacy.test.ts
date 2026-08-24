@@ -59,7 +59,7 @@ describe('legacy: mission setup', () => {
   });
 
   it('every non-standard-castle mission has at least one enemy and converts cleanly to engine specs', () => {
-    expect(MISSIONS.length).toBe(5);
+    expect(MISSIONS.length).toBe(6);
     for (const mission of MISSIONS) {
       if (mission.standardCastle) continue;
       expect(mission.enemies.length).toBeGreaterThan(0);
@@ -758,5 +758,80 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone,
 
     expect(state.currentEnemy?.name).toBe('Second Sporeling');
     expect(state.currentEnemy?.damageTaken).toBe(7); // First Sporeling's base attack (7), splashed in
+  });
+});
+
+describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
+  function startGardenMission(n: number, enemies: LegacyEnemySpec[], presetMissionZone: Card[]): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'garden-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      presetMissionZone,
+      zoneVengeanceOnKill: true,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
+
+  it('sacrifices the lowest-value card left on the table into the mission zone on kill (never the discard pile)', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 8, attack: 1 };
+    let state = startGardenMission(1, [boss], [myla]);
+    state = rig(state, [suited('D', '9')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.missionZone.length).toBe(2); // Myla + the sacrificed 9
+    expect(state.missionZone.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')).toBe(true);
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')).toBe(false);
+  });
+
+  it("Myla strikes for the zone's live sum right after it grows, routed through AWAIT_DEFEND", () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 8, attack: 1 };
+    const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'D', health: 20, attack: 1 };
+    let state = startGardenMission(1, [boss, next], [myla]);
+    state = rig(state, [suited('D', '9')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    // Overkill (8 health, 9 damage) — not an exact kill, so no card is spared: 7 (Myla) + 9 = 16.
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    expect(state.pendingDamage).toBe(16);
+  });
+
+  it('an exact-damage kill spares the mission zone\'s single highest-value card from that strike', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 9, attack: 1 };
+    const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'D', health: 20, attack: 1 };
+    let state = startGardenMission(1, [boss, next], [myla]);
+    state = rig(state, [suited('D', '9')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    // Exact kill: zone becomes [Myla(7), 9], but the 9 (highest) is spared from this strike — only 7 lands.
+    expect(state.missionZone.length).toBe(2);
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    expect(state.pendingDamage).toBe(7);
+  });
+
+  it('leaves the mission zone permanently grown after a kill — nothing clears it', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 5, attack: 1 };
+    let state = startGardenMission(1, [boss], [myla]);
+    state = rig(state, [suited('H', '5')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.missionZone.length).toBe(2); // Myla + the sacrificed 5, permanently
   });
 });
