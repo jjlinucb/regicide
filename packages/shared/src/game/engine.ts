@@ -619,10 +619,13 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${shape.totalValue}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
   );
   const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
-  // Mage and Reaver cards' printed suits don't join the combined suit-power resolution below — a Mage's class
-  // power is the arcane bolt above instead (which already resolved), and a Reaver's is the reserve-deck tear
-  // resolved just below (Mage always goes first, per legacy/classes.ts).
-  const nonArcaneCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane && !c.reaver);
+  // Mage, Reaver, and Guardian cards' printed suits don't join the combined suit-power resolution below — a
+  // Mage's class power is the arcane bolt above instead (which already resolved), a Reaver's is the
+  // reserve-deck tear resolved just below, and a Guardian's is the permanent shield resolved just after that
+  // (Mage always goes first, per legacy/classes.ts).
+  const nonArcaneCards = cards.filter(
+    (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian,
+  );
   const nonArcaneSuits = Array.from(new Set(nonArcaneCards.flatMap(cardSuits)));
 
   // Corrupted cards: their class power always ignores immunity, at the cost of banishing the top of the
@@ -663,6 +666,23 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     }
   }
 
+  // Guardians (Mission 6): playing one raises an absolute shield that blocks the enemy's very next attack
+  // entirely, regardless of the card's own value — spent the instant it's used, not a stacking reduction.
+  // Aegis instead holds the shield permanently, zeroing the enemy's attack for the rest of the fight (same
+  // final effect as Bulwark, but from a Guardian's suit-less card).
+  const guardianCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian));
+  let guardianBlocksNextAttack = false;
+  if (state.ruleset === 'legacy' && guardianCards.length > 0) {
+    const enemy = state.currentEnemy!;
+    if (hasSpecial(guardianCards, 'AEGIS')) {
+      enemy.spadesShield = enemy.baseAttack;
+      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises Aegis — the shield holds permanently, the enemy's attack reduced to 0.`);
+    } else {
+      guardianBlocksNextAttack = true;
+      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises an absolute shield, blocking the enemy's next attack entirely.`);
+    }
+  }
+
   const clubsMultiplier = resolveSuitPowers(state, cards, nonArcaneSuits, shape.totalValue, Boolean(claimedJester), corruptedSuits);
   const damageMultiplier = clubsMultiplier * reaverMultiplier;
   const damage = (shape.totalValue + reaverBonus) * damageMultiplier + arcaneBonus;
@@ -673,9 +693,9 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   if (state.phase !== 'IN_PROGRESS') return ok(state);
   if (defeated) return ok(state); // enemy was defeated, same player continues against the next one
 
-  const enemyAttack = resolvedEnemyAttack(state);
+  const enemyAttack = guardianBlocksNextAttack ? 0 : resolvedEnemyAttack(state);
   if (enemyAttack <= 0) {
-    log(state, `The enemy's attack has been reduced to 0 — no damage suffered.`);
+    log(state, guardianBlocksNextAttack ? 'The shield holds — no damage suffered.' : `The enemy's attack has been reduced to 0 — no damage suffered.`);
     advanceToNextPlayer(state);
     return ok(state);
   }

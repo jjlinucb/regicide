@@ -73,7 +73,7 @@ export interface RecruitSpec {
   rank: NonRoyalRank;
   /** True for a standout reward: grants the recruit's class's signature ability permanently, alongside their name. */
   special?: boolean;
-  /** Required for MAGE and REAVER recruits only — neither has a suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */
+  /** Required for MAGE, REAVER, and GUARDIAN recruits only — none has a suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */
   suit?: Suit;
 }
 
@@ -94,6 +94,7 @@ export function buildRecruitCard(spec: RecruitSpec): Card {
     name: spec.name,
     ...(spec.class === 'MAGE' ? { arcane: true } : {}),
     ...(spec.class === 'REAVER' ? { reaver: true } : {}),
+    ...(spec.class === 'GUARDIAN' ? { guardian: true } : {}),
     ...(spec.special ? { special: CLASS_THEME[spec.class].specialAbility } : {}),
   };
 }
@@ -106,14 +107,27 @@ export interface MissionReward {
   dualClassStickers?: number;
 }
 
+/** The "Lucky 4" ranks Dual-class Stickers target — one sticker per rank, matching the physical game's 4-sticker sheets. */
+const LUCKY_FOUR_RANKS: NonRoyalRank[] = ['3', '5', '7', '9'];
+
 /**
- * Dual-class Stickers reward: randomly picks `count` eligible party members (suited, non-Mage, no existing
- * second class) and gives each a second class icon (a random suit other than their own) — from then on, that
- * single card triggers both class powers whenever it's played (see rules.ts's cardSuits).
+ * Dual-class Stickers reward: one sticker per "Lucky 4" rank (3, 5, 7, 9) — for each rank, randomly picks one
+ * eligible party member of that rank (suited, non-Mage/Reaver/Guardian, no existing second class) and gives it
+ * a second class icon (a random suit other than their own) — from then on, that single card triggers both
+ * class powers whenever it's played (see rules.ts's cardSuits). `count` caps how many of the 4 ranks get a
+ * sticker, in case fewer than 4 are eligible.
  */
 export function applyDualClassStickers(party: Card[], count: number): Card[] {
-  const eligibleIds = party.filter((c) => c.kind === 'suited' && !c.arcane && !c.reaver && !c.secondSuit).map((c) => c.id);
-  const chosenIds = new Set(shuffle(eligibleIds, Math.random).slice(0, count));
+  const chosenIds = new Set<string>();
+  for (const rank of LUCKY_FOUR_RANKS) {
+    if (chosenIds.size >= count) break;
+    const eligible = party.filter(
+      (c) => c.kind === 'suited' && c.rank === rank && !c.arcane && !c.reaver && !c.guardian && !c.secondSuit,
+    );
+    if (eligible.length === 0) continue;
+    const pick = eligible[Math.floor(Math.random() * eligible.length)];
+    chosenIds.add(pick.id);
+  }
   return party.map((c) => {
     if (c.kind !== 'suited' || !chosenIds.has(c.id)) return c;
     const options = ALL_SUITS.filter((s) => s !== c.suit);

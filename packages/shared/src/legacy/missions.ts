@@ -85,8 +85,12 @@ export const MISSIONS: Mission[] = [
     enemies: [],
     standardCastle: true,
     // Reward: the Kinfolk Flute relic — once a player commits cards to an attack, any other player may
-    // silently slip in a matching card from hand to help complete the combo, no discussion allowed.
-    reward: { recruits: [], relics: ['KINFOLK_FLUTE'] },
+    // silently slip in a matching card from hand to help complete the combo, no discussion allowed — plus a
+    // pair of basic recruits pulled from the liberated stronghold to bolster the party's opening roster.
+    reward: {
+      recruits: [recruit('Coren Ashvale', 'WARRIOR', '2'), recruit('Dessa Windrow', 'BARD', '2')],
+      relics: ['KINFOLK_FLUTE'],
+    },
   },
   {
     id: 2,
@@ -126,19 +130,14 @@ export const MISSIONS: Mission[] = [
     // another class of immunity (see GameState.endOfTurnZoneFlip / missionZone).
     sidelineCount: 1,
     endOfTurnZoneFlip: true,
-    // Reward: the Mage class itself — 10 new party members, all Mages.
+    // Reward: the Mage class itself — 4 new party members, the "Lucky 4" ranks (3/5/7/9), like the other
+    // faction rewards this campaign grants (see Mission 6's Guardian reward).
     reward: {
       recruits: [
-        recruit('Wren Ashglass', 'MAGE', '2', 'H'),
         recruit('Corvath the Kindled', 'MAGE', '3', 'D'),
-        recruit('Selwyn Duskbind', 'MAGE', '4', 'C'),
         recruit('Ophira Emberquill', 'MAGE', '5', 'S'),
-        recruit('Talon Grayveil', 'MAGE', '6', 'H'),
         recruit('Marn Cindervoice', 'MAGE', '7', 'D'),
-        recruit('Ysabet Hollowflame', 'MAGE', '8', 'C'),
         recruit('Ruven Ashcaller', 'MAGE', '9', 'S'),
-        recruit('Delphine Nightember', 'MAGE', '10', 'H'),
-        recruit('Corin Pale-Ash', 'MAGE', 'A', 'D'),
       ],
     },
   },
@@ -206,16 +205,20 @@ export const MISSIONS: Mission[] = [
     // An exact kill on a Sporeling bursts outward: the enemy's own base attack is dealt as splash damage
     // straight into whatever's newly revealed — occasionally strong enough to chain into a second kill.
     exactKillSplashDamage: true,
-    // Reward: the Reaver faction — 4 permanent new recruits. Playing one tears the top card off the reserve
-    // deck for bonus damage (banished either way) and doubles the whole attack, stacking to quadruple with a
-    // Warrior card in the same play.
+    // Reward: the Reaver faction — 4 permanent new recruits (playing one tears the top card off the reserve
+    // deck for bonus damage, banished either way, and doubles the whole attack, stacking to quadruple with a
+    // Warrior card in the same play) — plus a second round of Dual-class Stickers, and Myla herself (value 7),
+    // who spent this whole fight locked to the mission zone as a fixed immunity and now joins the party for
+    // real: a normal, drawable, playable Cleric card from Mission 6 onward.
     reward: {
       recruits: [
         recruit('Oaken', 'REAVER', '3', 'D'),
         recruit('Haror', 'REAVER', '5', 'C'),
         recruit('Vena', 'REAVER', '7', 'S'),
         recruit('Kina', 'REAVER', '10', 'H'),
+        recruit('Myla', 'CLERIC', '7'),
       ],
+      dualClassStickers: 4,
     },
   },
   {
@@ -246,9 +249,17 @@ export const MISSIONS: Mission[] = [
     // cleared for the rest of the mission), then Myla strikes for the zone's full value — exact kills spare
     // the zone's single highest-value card from that one strike (see GameState.zoneVengeanceOnKill).
     zoneVengeanceOnKill: true,
-    // Reward: two survivors pulled from the garden's earlier victims, freed once the statues stop moving.
+    // Reward: the Guardian faction — 4 permanent new recruits, statues themselves once, freed as the garden's
+    // stone cracks open around them. Playing one raises an absolute shield, blocking the enemy's very next
+    // attack entirely (spent instantly) — Dorna's Aegis holds it permanently instead, same final effect as
+    // Bulwark.
     reward: {
-      recruits: [recruit('Ferro', 'PALADIN', '8', 'S'), recruit('Sable', 'MAGE', '9')],
+      recruits: [
+        recruit('Ferro', 'GUARDIAN', '3', 'S'),
+        recruit('Kesh', 'GUARDIAN', '5', 'H'),
+        recruit('Ambrey', 'GUARDIAN', '7', 'D'),
+        specialRecruit('Dorna', 'GUARDIAN', '9', 'C'),
+      ],
     },
   },
 ];
