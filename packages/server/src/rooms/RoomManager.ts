@@ -333,6 +333,7 @@ export class RoomManager {
       zoneVengeanceOnKill: mission.zoneVengeanceOnKill,
       pilgrimMechanic: mission.pilgrimMechanic,
       pilgrimCards: mission.pilgrimCards,
+      ascendingZone: mission.ascendingZone,
       capturedPilesActive: mission.capturedPilesActive,
       extraReserveCards: mission.extraReserveCards,
       relics: room.legacy.permanentRules,

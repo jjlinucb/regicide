@@ -1,6 +1,16 @@
 import type { SpecialAbilityId, Suit } from '../game/types.js';
 
-export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAVER' | 'GUARDIAN' | 'DRUID' | 'EVERGREEN';
+export type ClassId =
+  | 'WARRIOR'
+  | 'BARD'
+  | 'CLERIC'
+  | 'PALADIN'
+  | 'MAGE'
+  | 'REAVER'
+  | 'GUARDIAN'
+  | 'DRUID'
+  | 'CHANTER'
+  | 'EVERGREEN';
 
 /**
  * Regicide Legacy's four base classes map 1:1 onto classic Regicide's four suits — Warrior=Clubs (double damage),
@@ -8,14 +18,15 @@ export type ClassId = 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN' | 'MAGE' | 'REAV
  * card IS a suited card (see legacy/party.ts); this table is purely the display layer so suit letters never
  * leak into Legacy UI text.
  *
- * Mage (introduced Mission 3) and Reaver (introduced Mission 5) are the odd ones out: neither has a suit of its
- * own (there's no 5th or 6th suit in a standard deck). Both kinds of card keep whatever suit they're printed
- * with, purely for immunity bookkeeping, but their class power never joins the combined suit-power resolution —
- * see SuitedCard.arcane/reaver and engine.ts's resolveArcaneBolts/resolveCommittedPlay.
+ * Mage (Mission 3), Reaver (Mission 5), Guardian (Mission 6), Druid (Mission 7), Chanter (Mission 8), and
+ * Evergreen (Mission 9) are the odd ones out: none has a suit of its own (there's no 5th+ suit in a standard
+ * deck). Each kind of card keeps whatever suit it's printed with, purely for immunity bookkeeping, but its
+ * class power never joins the combined suit-power resolution — see
+ * SuitedCard.arcane/reaver/guardian/druid/chanter/evergreen and engine.ts's resolveArcaneBolts/resolveCommittedPlay.
  */
 export interface ClassTheme {
   id: ClassId;
-  /** Absent only for MAGE — see class doc above. */
+  /** Absent for MAGE, REAVER, GUARDIAN, DRUID, CHANTER, and EVERGREEN — see class doc above. */
   suit?: Suit;
   name: string;
   tag: string;
@@ -112,6 +123,16 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     specialName: 'Wellspring',
     specialText: 'Wellspring: Regrowth salvages 2 cards from the banish pile instead of 1.',
   },
+  CHANTER: {
+    id: 'CHANTER',
+    name: 'Chanter',
+    tag: 'Team Draw',
+    glyph: '🎼',
+    color: '#3a8c8c',
+    specialAbility: 'ENCORE',
+    specialName: 'Encore',
+    specialText: 'Encore: doubles how many cards everyone draws in the chant.',
+  },
   EVERGREEN: {
     id: 'EVERGREEN',
     name: 'Evergreen',
@@ -147,12 +168,14 @@ export function classForCard(card: {
   reaver?: boolean;
   guardian?: boolean;
   druid?: boolean;
+  chanter?: boolean;
   evergreen?: boolean;
 }): ClassTheme {
   if (card.arcane) return CLASS_THEME.MAGE;
   if (card.reaver) return CLASS_THEME.REAVER;
   if (card.guardian) return CLASS_THEME.GUARDIAN;
   if (card.druid) return CLASS_THEME.DRUID;
+  if (card.chanter) return CLASS_THEME.CHANTER;
   if (card.evergreen) return CLASS_THEME.EVERGREEN;
   return SUIT_TO_CLASS[card.suit];
 }

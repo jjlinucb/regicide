@@ -96,6 +96,7 @@ export function buildRecruitCard(spec: RecruitSpec): Card {
     ...(spec.class === 'REAVER' ? { reaver: true } : {}),
     ...(spec.class === 'GUARDIAN' ? { guardian: true } : {}),
     ...(spec.class === 'DRUID' ? { druid: true } : {}),
+    ...(spec.class === 'CHANTER' ? { chanter: true } : {}),
     ...(spec.class === 'EVERGREEN' ? { evergreen: true } : {}),
     ...(spec.special ? { special: CLASS_THEME[spec.class].specialAbility } : {}),
   };
@@ -126,7 +127,16 @@ export function applyDualClassStickers(party: Card[], count: number): Card[] {
   for (const rank of LUCKY_FOUR_RANKS) {
     if (chosenIds.size >= count) break;
     const eligible = party.filter(
-      (c) => c.kind === 'suited' && c.rank === rank && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.secondSuit,
+      (c) =>
+        c.kind === 'suited' &&
+        c.rank === rank &&
+        !c.arcane &&
+        !c.reaver &&
+        !c.guardian &&
+        !c.druid &&
+        !c.chanter &&
+        !c.evergreen &&
+        !c.secondSuit,
     );
     if (eligible.length === 0) continue;
     const pick = eligible[Math.floor(Math.random() * eligible.length)];

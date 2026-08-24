@@ -9,8 +9,9 @@ export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'A' | 
  * ARCANE_SURGE doubles a Mage card's own arcane bolt, PLUNDER tears 2 reserve cards instead of 1 for a Reaver
  * (both still banished; the higher value is kept), AEGIS makes a Guardian's shield hold permanently — reducing
  * the enemy's attack to 0 for the rest of the fight instead of blocking just its next attack, WELLSPRING salvages
- * 2 cards from the banish pile instead of 1 for a Druid's Regrowth, EVERGREEN is Gøran's own signature (see
- * SuitedCard.evergreen) carried here only for type-shape consistency with the other classes.
+ * 2 cards from the banish pile instead of 1 for a Druid's Regrowth, ENCORE doubles how many cards everyone
+ * draws in a Chanter's chant, and EVERGREEN is Gøran's own signature (see SuitedCard.evergreen) carried here
+ * only for type-shape consistency with the other classes.
  */
 export type SpecialAbilityId =
   | 'CLEAVE'
@@ -21,6 +22,7 @@ export type SpecialAbilityId =
   | 'PLUNDER'
   | 'AEGIS'
   | 'WELLSPRING'
+  | 'ENCORE'
   | 'EVERGREEN';
 
 export interface SuitedCard {
@@ -52,8 +54,10 @@ export interface SuitedCard {
   /**
    * Legacy-only: marks a Reaver card (Mission 5's new faction). Like a Mage, it still carries a suit for
    * immunity bookkeeping, but its class power isn't the combined suit-power resolution — instead, playing it
-   * tears the top card off the reserve deck, adds that card's raw value to the attack, permanently banishes
-   * it, and doubles the whole attack's final damage (see engine.ts's resolveCommittedPlay).
+   * tears the top card off the reserve deck, adds that card's raw value to the attack, and permanently
+   * banishes it. Unlike a Warrior, a Reaver never doubles damage on its own — the bonus is a flat addition
+   * that still benefits from a Warrior's own doubling if one's played alongside it (see engine.ts's
+   * resolveCommittedPlay).
    */
   reaver?: boolean;
   /**
@@ -70,6 +74,23 @@ export interface SuitedCard {
    * bottom of the reserve deck (see engine.ts's resolveCommittedPlay's druidCards handling).
    */
   druid?: boolean;
+  /**
+   * Legacy-only: marks a Chanter card (Mission 8's new faction). Like a Mage, Reaver, or Guardian, it still
+   * carries a suit for immunity bookkeeping, but its class power isn't the combined suit-power resolution —
+   * instead, playing it has every player at the table draw its own value in cards all at once, even past their
+   * hand limit, then each over-limit player individually discards back down (see engine.ts's
+   * resolveCommittedPlay's chanterCards handling and GameState.chanterWindow).
+   */
+  chanter?: boolean;
+  /**
+   * Legacy-only (Mission 8): marks a Pilgrim survivor card seeded into that mission's own reserve deck —
+   * unrelated to Mission 7's separate pilgrimDeck/pilgrimZone mechanic (see GameState.pilgrimZone), despite the
+   * shared name; both missions independently reused "Pilgrim" as flavor for stranded survivors. Otherwise an
+   * entirely ordinary card — playable and discardable like any other — except when placed into Mission 8's
+   * ascending mission zone: a Pilgrim card placed there never buffs the current enemy's attack the way a
+   * non-Pilgrim card bridging a gap does (see GameState.ascendingZone / rules.ts's ascendingZoneAttackBuff).
+   */
+  pilgrim?: boolean;
   /**
    * Legacy-only: marks Gøran's card (Mission 9's reward). Its class power isn't the combined suit-power
    * resolution restricted to its own printed suit — instead, playing it resolves all four base class powers at
@@ -142,7 +163,8 @@ export interface LegacyEnemySpec {
 export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
 
 /**
- * What the current player must do next. AWAIT_JESTER_CLAIM and AWAIT_COMBO_ASSIST are Legacy-only.
+ * What the current player must do next. AWAIT_JESTER_CLAIM, AWAIT_COMBO_ASSIST, and AWAIT_AZURE_EMBLEM are
+ * Legacy-only. AWAIT_ZONE_PURGE and AWAIT_CHANT_TRIM are Mission 8-only (see GameState.zonePurge / chanterWindow).
  * AWAIT_END_OF_TURN and AWAIT_RESCUE_CHOICE are Mission 9's captured-piles mechanic only (see
  * GameState.capturedPilesActive).
  */
@@ -151,6 +173,9 @@ export type TurnPhase =
   | 'AWAIT_DEFEND'
   | 'AWAIT_JESTER_CLAIM'
   | 'AWAIT_COMBO_ASSIST'
+  | 'AWAIT_AZURE_EMBLEM'
+  | 'AWAIT_ZONE_PURGE'
+  | 'AWAIT_CHANT_TRIM'
   | 'AWAIT_END_OF_TURN'
   | 'AWAIT_RESCUE_CHOICE';
 
@@ -216,6 +241,13 @@ export interface GameState {
    */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
   /**
+   * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic: the open Azure Emblem window — opened whenever
+   * a play includes a Mage card. Every other player, one at a time in turn order, may silently place a single
+   * card from hand atop the reserve deck via RESOLVE_AZURE_EMBLEM (or decline by omitting a card), stocking it
+   * for later. `blockNextAttack` mirrors a Guardian shield raised in the same play.
+   */
+  azureEmblemWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
+  /**
    * Legacy-only: when true (Mission 3), the top of the reserve deck flips face-up into `missionZone` at the end
    * of every turn, and the current enemy becomes immune to that card's class(es) too (see zoneImmuneSuits).
    */
@@ -273,6 +305,33 @@ export interface GameState {
    */
   pilgrimZone: Card[];
   /**
+   * Legacy-only (Mission 8): when true, the mission zone builds an ascending A-through-10 chain instead of any
+   * of the other missionZone modes above. A player may place a card from hand into the zone via PLACE_IN_ZONE
+   * only if its value is exactly one higher than the zone's current top card — starting from the "Pilgrim
+   * Puppy" (value 1) seeded via presetMissionZone. Non-Pilgrim cards used to bridge a gap buff the current
+   * enemy's attack for as long as they sit there (see rules.ts's ascendingZoneAttackBuff); Pilgrim cards never
+   * do. Completing the chain at 10 triggers the purge (see zonePurge) and permanently closes the zone
+   * (zoneClosed). Unrelated to Mission 7's pilgrimZone above — see SuitedCard.pilgrim.
+   */
+  ascendingZone: boolean;
+  /** Legacy-only (Mission 8): true once the ascending zone has purged at 10 — PLACE_IN_ZONE is rejected for the rest of the mission. */
+  zoneClosed: boolean;
+  /**
+   * Legacy-only (Mission 8): the open "Ultimate Banishment" window, opened the instant the ascending zone's
+   * 10-card purge fires (its cards already moved to discardPile). The triggering player may banish any subset
+   * of the discard pile permanently via RESOLVE_ZONE_PURGE; whatever's left shuffles into the bottom of the
+   * reserve deck.
+   */
+  zonePurge: { playerId: string } | null;
+  /**
+   * Legacy-only (Mission 8): the open chant window, opened when a Chanter card is played (see SuitedCard.chanter).
+   * Every player has already drawn the chant's card count at once, even past their hand limit; `pendingPlayerIds`
+   * queues whoever is now over their hand limit and still needs to trim back down via RESOLVE_CHANT, front of
+   * the queue first. `blockNextAttack` mirrors a Guardian shield raised in the same play, applied once the last
+   * trim resolves and the turn's enemy-attack tail finally runs.
+   */
+  chanterWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
+  /**
    * Legacy-only (Mission 9): when true, gates the whole captured-piles deckbuilding mechanic — the 3
    * `capturedPiles`, the AWAIT_END_OF_TURN banish-to-rescue/decline choice at the end of every turn (skipped
    * entirely right after defeating an enemy), and the AWAIT_RESCUE_CHOICE bonus on an exact-damage kill (see
@@ -328,17 +387,30 @@ export type GameAction =
       pilgrimMechanic?: boolean;
       /** Unshuffled Pilgrim cards to seed GameState.pilgrimDeck with (shuffled at mission start). */
       pilgrimCards?: Card[];
+      /** See GameState.ascendingZone. */
+      ascendingZone?: boolean;
       /** See GameState.capturedPilesActive. */
       capturedPilesActive?: boolean;
       /**
-       * Legacy-only (Mission 9): extra cards shuffled directly into this mission's ordinary reserve deck
-       * alongside whatever's left of the party after capturedPilesActive's 30-card split (e.g. a fresh pool of
-       * Pilgrim survivor cards) — unlike pilgrimCards above, these carry no special zone mechanic of their own.
+       * Legacy-only: named one-off cards (e.g. Pilgrim survivors) shuffled into this mission's reserve deck
+       * alongside the campaign party — never added to the persisted campaign roster. Used by Mission 8's Pilgrim
+       * survivors and by Mission 9 (alongside whatever's left of the party after capturedPilesActive's 30-card
+       * split); unlike pilgrimCards above, these carry no special zone mechanic of their own.
        */
       extraReserveCards?: Card[];
     }
   | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
   | { type: 'YIELD'; playerId: string }
+  /** Legacy-only (Mission 8): places a card from hand into the ascending mission zone instead of attacking — ends the turn like a Yield, but progresses the chain (see GameState.ascendingZone). */
+  | { type: 'PLACE_IN_ZONE'; playerId: string; cardId: string }
+  /** Legacy-only (Mission 8): resolves an open Ultimate Banishment window after the zone's 10-card purge (see GameState.zonePurge). Any subset of the discard pile (by id) is banished forever; the rest shuffles into the reserve deck. */
+  | { type: 'RESOLVE_ZONE_PURGE'; playerId: string; banishCardIds: string[] }
+  /**
+   * Legacy-only (Mission 8): the front-of-queue player in an open chant window (see GameState.chanterWindow)
+   * discards exactly enough hand cards to reach their hand limit again, after the chant's mass draw pushed them
+   * over it.
+   */
+  | { type: 'RESOLVE_CHANT'; playerId: string; discardCardIds: string[] }
   | { type: 'ACTIVATE_JESTER'; playerId: string; cardId: string; nextPlayerId: string }
   /** Legacy-only equivalent of ACTIVATE_JESTER: plays the Jester into the open claim window instead of choosing who goes next. */
   | { type: 'PLAY_JESTER'; playerId: string; cardId: string }
@@ -348,6 +420,12 @@ export type GameAction =
   | { type: 'ASSIST_COMBO'; playerId: string; cardId: string }
   /** Legacy-only, gated by the 'KINFOLK_FLUTE' relic: the attacker locks in and resolves the open combo-assist window. */
   | { type: 'RESOLVE_COMBO'; playerId: string }
+  /**
+   * Legacy-only, gated by the 'AZURE_EMBLEM' relic: the front-of-queue player in an open Azure Emblem window
+   * (see GameState.azureEmblemWindow) either places `cardId` from their hand atop the reserve deck, or declines
+   * by omitting it.
+   */
+  | { type: 'RESOLVE_AZURE_EMBLEM'; playerId: string; cardId?: string }
   | { type: 'DEFEND'; playerId: string; cardIds: string[] }
   | { type: 'USE_SOLO_JESTER'; playerId: string }
   /**
@@ -396,6 +474,8 @@ export interface ClientGameState {
   endlessLoop: number;
   /** See GameState.comboAssist. */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
+  /** See GameState.azureEmblemWindow. Public information — it's on the table. */
+  azureEmblemWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
   /** See GameState.discardTopBuffsAttack. */
   discardTopBuffsAttack: boolean;
   /** See GameState.missionZone. Public information — it's on the table. */
@@ -408,6 +488,14 @@ export interface ClientGameState {
   pilgrimZone: Card[];
   /** See GameState.pilgrimDeck — count only, it's face-down. */
   pilgrimDeckCount: number;
+  /** See GameState.ascendingZone. */
+  ascendingZone: boolean;
+  /** See GameState.zoneClosed. */
+  zoneClosed: boolean;
+  /** See GameState.zonePurge. Public information — it's on the table. */
+  zonePurge: { playerId: string } | null;
+  /** See GameState.chanterWindow. Public information — it's on the table. */
+  chanterWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
   /** See GameState.capturedPilesActive. */
   capturedPilesActive: boolean;
   /** See GameState.capturedPiles — each pile's face-down cards are redacted to a count, its face-up card is public. */
