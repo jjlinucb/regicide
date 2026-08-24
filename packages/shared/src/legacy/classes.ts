@@ -95,12 +95,12 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
   GUARDIAN: {
     id: 'GUARDIAN',
     name: 'Guardian',
-    tag: 'Permanent Shield',
+    tag: 'Absolute Shield',
     glyph: '⛨',
     color: '#4a6b5c',
     specialAbility: 'AEGIS',
     specialName: 'Aegis',
-    specialText: 'Aegis: reduces the enemy\'s attack to 0 for the rest of the fight.',
+    specialText: 'Aegis: the shield holds permanently, reducing the enemy\'s attack to 0 for the rest of the fight.',
   },
 };
 

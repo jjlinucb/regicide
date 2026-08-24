@@ -205,16 +205,20 @@ export const MISSIONS: Mission[] = [
     // An exact kill on a Sporeling bursts outward: the enemy's own base attack is dealt as splash damage
     // straight into whatever's newly revealed — occasionally strong enough to chain into a second kill.
     exactKillSplashDamage: true,
-    // Reward: the Reaver faction — 4 permanent new recruits. Playing one tears the top card off the reserve
-    // deck for bonus damage (banished either way) and doubles the whole attack, stacking to quadruple with a
-    // Warrior card in the same play.
+    // Reward: the Reaver faction — 4 permanent new recruits (playing one tears the top card off the reserve
+    // deck for bonus damage, banished either way, and doubles the whole attack, stacking to quadruple with a
+    // Warrior card in the same play) — plus a second round of Dual-class Stickers, and Myla herself (value 7),
+    // who spent this whole fight locked to the mission zone as a fixed immunity and now joins the party for
+    // real: a normal, drawable, playable Cleric card from Mission 6 onward.
     reward: {
       recruits: [
         recruit('Oaken', 'REAVER', '3', 'D'),
         recruit('Haror', 'REAVER', '5', 'C'),
         recruit('Vena', 'REAVER', '7', 'S'),
         recruit('Kina', 'REAVER', '10', 'H'),
+        recruit('Myla', 'CLERIC', '7'),
       ],
+      dualClassStickers: 4,
     },
   },
   {
@@ -246,8 +250,9 @@ export const MISSIONS: Mission[] = [
     // the zone's single highest-value card from that one strike (see GameState.zoneVengeanceOnKill).
     zoneVengeanceOnKill: true,
     // Reward: the Guardian faction — 4 permanent new recruits, statues themselves once, freed as the garden's
-    // stone cracks open around them. Playing one permanently reduces the enemy's attack by its own value —
-    // the same shield a Paladin builds with Spades, off a suit-less card that stacks independently.
+    // stone cracks open around them. Playing one raises an absolute shield, blocking the enemy's very next
+    // attack entirely (spent instantly) — Dorna's Aegis holds it permanently instead, same final effect as
+    // Bulwark.
     reward: {
       recruits: [
         recruit('Ferro', 'GUARDIAN', '3', 'S'),

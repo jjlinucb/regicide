@@ -666,18 +666,20 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     }
   }
 
-  // Guardians (Mission 6): playing one permanently reduces the enemy's attack for the rest of the fight — the
-  // same shield a Paladin builds with Spades, but off a suit-less card. Aegis zeroes it outright, same as Bulwark.
+  // Guardians (Mission 6): playing one raises an absolute shield that blocks the enemy's very next attack
+  // entirely, regardless of the card's own value — spent the instant it's used, not a stacking reduction.
+  // Aegis instead holds the shield permanently, zeroing the enemy's attack for the rest of the fight (same
+  // final effect as Bulwark, but from a Guardian's suit-less card).
   const guardianCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian));
+  let guardianBlocksNextAttack = false;
   if (state.ruleset === 'legacy' && guardianCards.length > 0) {
     const enemy = state.currentEnemy!;
     if (hasSpecial(guardianCards, 'AEGIS')) {
       enemy.spadesShield = enemy.baseAttack;
-      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises Aegis — the enemy's attack is reduced to 0.`);
+      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises Aegis — the shield holds permanently, the enemy's attack reduced to 0.`);
     } else {
-      const shieldValue = guardianCards.reduce((sum, c) => sum + cardValue(c), 0);
-      enemy.spadesShield += shieldValue;
-      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises a permanent shield, reducing the enemy's attack by ${shieldValue}.`);
+      guardianBlocksNextAttack = true;
+      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises an absolute shield, blocking the enemy's next attack entirely.`);
     }
   }
 
@@ -691,9 +693,9 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   if (state.phase !== 'IN_PROGRESS') return ok(state);
   if (defeated) return ok(state); // enemy was defeated, same player continues against the next one
 
-  const enemyAttack = resolvedEnemyAttack(state);
+  const enemyAttack = guardianBlocksNextAttack ? 0 : resolvedEnemyAttack(state);
   if (enemyAttack <= 0) {
-    log(state, `The enemy's attack has been reduced to 0 — no damage suffered.`);
+    log(state, guardianBlocksNextAttack ? 'The shield holds — no damage suffered.' : `The enemy's attack has been reduced to 0 — no damage suffered.`);
     advanceToNextPlayer(state);
     return ok(state);
   }
