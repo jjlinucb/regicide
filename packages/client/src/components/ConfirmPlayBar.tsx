@@ -12,6 +12,8 @@ interface Props {
   onYield: () => void;
   onDefend: () => void;
   onClear: () => void;
+  /** Mission 8 only: shown as a third option alongside Yield/Play when the ascending mission zone is open. */
+  placeInZone?: { canPlace: boolean; requiredValue: number; onPlace: () => void };
 }
 
 export function ConfirmPlayBar({
@@ -26,6 +28,7 @@ export function ConfirmPlayBar({
   onYield,
   onDefend,
   onClear,
+  placeInZone,
 }: Props) {
   if (turnPhase === 'AWAIT_DEFEND') {
     const covered = selectedTotal >= pendingDamage;
@@ -63,6 +66,16 @@ export function ConfirmPlayBar({
       <button className="btn btn-secondary" disabled={!canYield} onClick={onYield}>
         Yield
       </button>
+      {placeInZone && (
+        <button
+          className="btn btn-secondary"
+          disabled={!placeInZone.canPlace}
+          title={`Place the selected card in the mission zone (needs a card worth exactly ${placeInZone.requiredValue})`}
+          onClick={placeInZone.onPlace}
+        >
+          Place in Zone
+        </button>
+      )}
       <button className="btn" disabled={selectedCount === 0 || !!playError} onClick={onPlay}>
         Play
       </button>

@@ -42,6 +42,10 @@ export interface Mission {
   pilgrimMechanic?: boolean;
   /** Unshuffled Pilgrim cards seeding GameState.pilgrimDeck (see GameState.pilgrimMechanic). */
   pilgrimCards?: Card[];
+  /** See GameState.ascendingZone. */
+  ascendingZone?: boolean;
+  /** See GameAction's START_LEGACY_MISSION.extraReserveCards. */
+  extraReserveCards?: Card[];
 }
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
@@ -62,9 +66,15 @@ function zoneCompanion(name: string, suit: Suit, rank: Rank): Card {
   return { id: `zone-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name };
 }
 
-/** A named survivor card seeding a mission's pilgrimCards (see Mission 7's GameState.pilgrimMechanic). Suit is flavor only — it carries no immunity or class power. */
+/**
+ * A named survivor card, shared by Mission 7's pilgrimCards (see GameState.pilgrimMechanic) and Mission 8's
+ * ascending mission zone (see GameState.ascendingZone) — both missions independently reused "Pilgrim" as flavor
+ * for stranded survivors. The `pilgrim` flag only matters to Mission 8 (placing one in its zone never buffs the
+ * current enemy's attack the way an ordinary card bridging a gap does); Mission 7 never reads the flag, since it
+ * tracks its own Pilgrims through the separate pilgrimDeck/pilgrimZone state instead.
+ */
 function pilgrim(name: string, suit: Suit, rank: Rank): Card {
-  return { id: `pilgrim-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name };
+  return { id: `pilgrim-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, pilgrim: true };
 }
 
 /** Converts a mission's enemy specs into the engine's LegacyEnemySpec shape (suit-keyed). Mage enemies aren't used yet — the class only exists as a party reward so far. */
@@ -80,8 +90,8 @@ export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemyS
 
 /**
  * Regicide Legacy's campaign — original content built on the same rules skeleton as the physical game, not its
- * proprietary mission text. Currently the first seven missions of a longer arc: the party's early fights against
- * a corrupted syndicate, on through the Well of Tears and Mission 7's Druids.
+ * proprietary mission text. Currently the first eight missions of a longer arc: the party's early fights against
+ * a corrupted syndicate, on through the Well of Tears' Druids and Heaven's Edge's Chanters.
  */
 export const MISSIONS: Mission[] = [
   {
@@ -261,7 +271,8 @@ export const MISSIONS: Mission[] = [
     // Reward: the Guardian faction — 4 permanent new recruits, statues themselves once, freed as the garden's
     // stone cracks open around them. Playing one raises an absolute shield, blocking the enemy's very next
     // attack entirely (spent instantly) — Dorna's Aegis holds it permanently instead, same final effect as
-    // Bulwark.
+    // Bulwark. Plus the Azure Emblem relic: whenever a Mage joins an attack from here on, every other player
+    // gets one chance to silently place a card from hand atop the reserve deck, stocking it for later.
     reward: {
       recruits: [
         recruit('Ferro', 'GUARDIAN', '3', 'S'),
@@ -269,6 +280,7 @@ export const MISSIONS: Mission[] = [
         recruit('Ambrey', 'GUARDIAN', '7', 'D'),
         specialRecruit('Dorna', 'GUARDIAN', '9', 'C'),
       ],
+      relics: ['AZURE_EMBLEM'],
     },
   },
   {
@@ -319,6 +331,69 @@ export const MISSIONS: Mission[] = [
         recruit('Maya', 'DRUID', '5', 'D'),
         recruit('Alanta', 'DRUID', '7', 'C'),
         specialRecruit('Zolgar', 'DRUID', '9', 'S'),
+      ],
+    },
+  },
+  {
+    id: 8,
+    title: 'Winds of Chaos',
+    story:
+      "The road out of the lowlands climbs to Heaven's Edge, a knife-ridge of cliffs and waterfalls where the " +
+      "wind itself seems to be arguing with the mountain. Goran, the old guide who's kept these paths safe for " +
+      "a generation, meets the party at the switchback with bad news: four veils of mist further up hide a nest " +
+      "of trolls, and beyond them — riding the thin air over the falls — something with wings wide enough to " +
+      "blot out the sun. Villagers scattered by the storm are stranded across the cliffside path below, too " +
+      'panicked to move except in a very particular order.',
+    // Wave 1: 6 uniform Trolls (buffer phase). Wave 2: 6 uniform Wyverns, a full tier above anything the
+    // campaign has fought yet — community consensus is they "hit like a truck," so the party had better have
+    // finished the chain (and its purge) before this wave drops.
+    enemies: [
+      enemy('Grael Stonejaw', 'WARRIOR', 20, 10),
+      enemy('Mossen Foghide', 'BARD', 20, 10),
+      enemy('Rimtusk the Wet', 'CLERIC', 20, 10),
+      enemy('Cragfoot', 'PALADIN', 20, 10),
+      enemy('Windbroken Skarn', 'WARRIOR', 20, 10),
+      enemy('The Last Bridgekeeper', 'BARD', 20, 10),
+      enemy('Wyvern of the First Veil', 'CLERIC', 50, 25),
+      enemy('Wyvern of the Second Veil', 'PALADIN', 50, 25),
+      enemy('Wyvern of the Third Veil', 'WARRIOR', 50, 25),
+      enemy('Wyvern of the Fourth Veil', 'BARD', 50, 25),
+      enemy('Stormrend, Elder Wyvern', 'CLERIC', 50, 25),
+      enemy("Skytallon, Warden of Heaven's Edge", 'PALADIN', 50, 25),
+    ],
+    // The mission zone builds an ascending A-through-10 chain instead of any prior mission's zone mode. Pilgrim
+    // cards are ordinary cards here — no hand-trap restriction, playable or discardable like any other — but
+    // placing one into the next open slot of the chain (via PLACE_IN_ZONE) costs nothing extra; pressing an
+    // ordinary party card into the same gap works too, but buffs the current enemy's attack for as long as it
+    // sits there (see GameState.ascendingZone / rules.ts's ascendingZoneAttackBuff). Completing the chain at 10
+    // purges the whole zone to the discard pile, opens the Ultimate Banishment (see GameState.zonePurge), and
+    // closes the zone forever.
+    ascendingZone: true,
+    // "Scrap," the Pilgrim Puppy, is the chain's permanent anchor — seeded straight into the zone at value 1 (an
+    // Ace), never re-placed. The other 9 Pilgrims (values 2-10, the last being Goran himself) are shuffled into
+    // the reserve deck alongside the party, ordinary cards in every other respect.
+    presetMissionZone: [pilgrim('Scrap', 'H', 'A')],
+    extraReserveCards: [
+      pilgrim('Old Yarrow', 'S', '2'),
+      pilgrim('Little Mireille', 'D', '3'),
+      pilgrim('Bosk the Carter', 'C', '4'),
+      pilgrim('Sister Halvard', 'H', '5'),
+      pilgrim('Corin Drizzlecoat', 'S', '6'),
+      pilgrim('Fenna Longrope', 'D', '7'),
+      pilgrim('Uncle Thom', 'C', '8'),
+      pilgrim('Widow Aeliss', 'H', '9'),
+      pilgrim('Goran', 'S', '10'),
+    ],
+    // Reward: the Chanter faction — 4 permanent new recruits, survivors of the climb who picked up the mountain's
+    // own rhythm. Playing one has the whole table draw its value in cards at once, even past hand limit, then
+    // trim back down — a shared surge the party can use to hunt for whatever rank the chain still wants. Bram's
+    // Encore doubles how many cards everyone draws.
+    reward: {
+      recruits: [
+        recruit('Sela Windchant', 'CHANTER', '3', 'D'),
+        recruit('Orin Deepvoice', 'CHANTER', '5', 'H'),
+        recruit('Ketta Skysong', 'CHANTER', '7', 'C'),
+        specialRecruit('Bram the Refrainkeeper', 'CHANTER', '9', 'S'),
       ],
     },
   },

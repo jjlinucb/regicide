@@ -285,9 +285,8 @@ export class RoomManager {
     if (!room || !room.legacy) return { error: 'Campaign not found.' };
     if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can start the mission.' };
     if (room.playerOrder.length < 1) return { error: 'Need at least 1 player.' };
-    if (missionId < 1 || missionId > MISSIONS.length) return { error: `Mission ${missionId} isn't built yet.` };
-
-    const mission = getMission(missionId)!;
+    const mission = getMission(missionId);
+    if (missionId < 1 || !mission) return { error: `Mission ${missionId} isn't built yet.` };
 
     // Jumping ahead of the campaign's current mission (any mission in the list is unlocked for direct play):
     // grant every skipped mission's reward first, as if it had been won normally, so the party arrives at
@@ -330,6 +329,8 @@ export class RoomManager {
       zoneVengeanceOnKill: mission.zoneVengeanceOnKill,
       pilgrimMechanic: mission.pilgrimMechanic,
       pilgrimCards: mission.pilgrimCards,
+      ascendingZone: mission.ascendingZone,
+      extraReserveCards: mission.extraReserveCards,
       relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };

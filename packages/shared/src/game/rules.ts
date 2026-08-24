@@ -116,3 +116,12 @@ export function discardPileTopValue(discardPile: Card[]): number {
 export function currentEnemyHealthRemaining(enemy: EnemyState): number {
   return enemy.maxHealth - enemy.damageTaken;
 }
+
+/**
+ * Legacy-only (Mission 8): the current attack buff from non-Pilgrim cards sitting in the ascending mission zone
+ * (see GameState.ascendingZone). Cards flagged `pilgrim` — the chain's intended fillers — contribute nothing;
+ * only ordinary cards pressed into service to bridge a gap do, at their own card value.
+ */
+export function ascendingZoneAttackBuff(missionZone: Card[]): number {
+  return missionZone.reduce((sum, c) => (c.kind === 'suited' && !c.pilgrim ? sum + cardValue(c) : sum), 0);
+}

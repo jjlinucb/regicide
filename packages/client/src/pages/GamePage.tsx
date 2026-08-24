@@ -15,6 +15,7 @@ import { Hand } from '../components/Hand';
 import { ConfirmPlayBar } from '../components/ConfirmPlayBar';
 import { JesterPicker } from '../components/JesterPicker';
 import { VictoryCrest } from '../components/VictoryCrest';
+import { ZonePurgePicker } from '../components/ZonePurgePicker';
 
 const MEDAL_INFO: Record<'gold' | 'silver' | 'bronze', { emoji: string; label: string }> = {
   gold: { emoji: '🥇', label: 'Gold Victory' },
@@ -69,6 +70,30 @@ export function GamePage({
   const isComboAssistWindow = state.turnPhase === 'AWAIT_COMBO_ASSIST' && Boolean(state.comboAssist);
   const isComboAttacker = state.comboAssist?.attackerId === myPlayerId;
   const canAssistCombo = isComboAssistWindow && !isComboAttacker;
+
+  // Mission 8: the ascending mission zone chain, the chant's hand-trim queue, and the post-purge banishment window.
+  const zoneTop = state.missionZone[state.missionZone.length - 1];
+  const zoneRequiredValue = zoneTop ? cardValue(zoneTop) + 1 : 1;
+  const isChantWindow = state.turnPhase === 'AWAIT_CHANT_TRIM' && Boolean(state.chanterWindow);
+  const chantTrimmerId = state.chanterWindow?.pendingPlayerIds[0];
+  const isMyChantTrim = isChantWindow && chantTrimmerId === myPlayerId;
+  const myChantOverflow = Math.max(0, myHand.length - state.maxHandSize);
+  const isZonePurgeWindow = state.turnPhase === 'AWAIT_ZONE_PURGE' && Boolean(state.zonePurge);
+  const isMyZonePurgeWindow = isZonePurgeWindow && state.zonePurge?.playerId === myPlayerId;
+
+  // Mission 6 relic: the Azure Emblem window, opened whenever a Mage joins an attack.
+  const isAzureEmblemWindow = state.turnPhase === 'AWAIT_AZURE_EMBLEM' && Boolean(state.azureEmblemWindow);
+  const azureEmblemTurnPlayerId = state.azureEmblemWindow?.pendingPlayerIds[0];
+  const isMyAzureEmblemTurn = isAzureEmblemWindow && azureEmblemTurnPlayerId === myPlayerId;
+  const canPlaceInZone =
+    isLegacy &&
+    state.ascendingZone &&
+    !state.zoneClosed &&
+    isMyTurn &&
+    state.turnPhase === 'AWAIT_PLAY' &&
+    selectedCards.length === 1 &&
+    selectedCards[0].kind === 'suited' &&
+    cardValue(selectedCards[0]) === zoneRequiredValue;
 
   if (state.phase === 'WON' || state.phase === 'LOST') {
     return (
@@ -128,11 +153,23 @@ export function GamePage({
             ? isComboAttacker
               ? 'Your attack is open for the Kinfolk Flute — resolve it when ready.'
               : 'An attack is open for the Kinfolk Flute — silently add a matching card, or leave it alone.'
-            : isMyTurn
-              ? state.turnPhase === 'AWAIT_DEFEND'
-                ? `Defend! Discard ${state.pendingDamage} damage worth of cards.`
-                : 'Your turn — play a card, a combo, or yield.'
-              : `Waiting for ${state.players[state.currentPlayerIndex]?.name}...`}
+            : isAzureEmblemWindow
+              ? isMyAzureEmblemTurn
+                ? 'Azure Emblem: silently place a card atop the reserve deck, or decline.'
+                : `${state.players.find((p) => p.id === azureEmblemTurnPlayerId)?.name} is responding to the Azure Emblem...`
+              : isChantWindow
+                ? isMyChantTrim
+                  ? `The chant drew everyone up — discard exactly ${myChantOverflow} card(s) to get back to your hand limit.`
+                  : `${state.players.find((p) => p.id === chantTrimmerId)?.name} is trimming their hand from the chant...`
+                : isZonePurgeWindow
+                  ? isMyZonePurgeWindow
+                    ? 'Choose cards to banish forever from the discard pile, or continue.'
+                    : `${state.players.find((p) => p.id === state.zonePurge!.playerId)?.name} is sorting the Ultimate Banishment...`
+                  : isMyTurn
+                    ? state.turnPhase === 'AWAIT_DEFEND'
+                      ? `Defend! Discard ${state.pendingDamage} damage worth of cards.`
+                      : 'Your turn — play a card, a combo, or yield.'
+                    : `Waiting for ${state.players[state.currentPlayerIndex]?.name}...`}
           {isHost && (
             <button
               type="button"
@@ -173,6 +210,43 @@ export function GamePage({
             )}
           </div>
         )}
+        {isMyAzureEmblemTurn && (
+          <div className="legacy-jester-claim-banner">
+            <span>🔷 Azure Emblem: pick exactly one card below to place silently atop the reserve deck, or decline.</span>
+            <div className="jester-picker-choices" style={{ display: 'inline-flex', gap: '0.5rem' }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={selectedCards.length !== 1}
+                onClick={() => {
+                  sendAction({ type: 'RESOLVE_AZURE_EMBLEM', playerId: myPlayerId, cardId: selectedCards[0]?.id });
+                  setSelectedIds(new Set());
+                }}
+              >
+                Place it
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => sendAction({ type: 'RESOLVE_AZURE_EMBLEM', playerId: myPlayerId })}>
+                Decline
+              </button>
+            </div>
+          </div>
+        )}
+        {isMyChantTrim && (
+          <div className="legacy-jester-claim-banner">
+            <span>🎼 The chant drew everyone up — pick exactly {myChantOverflow} card(s) below to discard back down to your hand limit.</span>
+            <button
+              type="button"
+              className="btn"
+              disabled={selectedCards.length !== myChantOverflow}
+              onClick={() => {
+                sendAction({ type: 'RESOLVE_CHANT', playerId: myPlayerId, discardCardIds: selectedCards.map((c) => c.id) });
+                setSelectedIds(new Set());
+              }}
+            >
+              Discard {selectedCards.length} / {myChantOverflow}
+            </button>
+          </div>
+        )}
         {state.zoneVengeanceOnKill && state.missionZone.length > 0 && (
           <div className="legacy-jester-claim-banner">
             <span>
@@ -190,6 +264,19 @@ export function GamePage({
               them — {state.pilgrimZone.map((c) => (c.kind === 'suited' ? `${c.name ?? c.rank} (${cardValue(c)})` : 'Jester')).join(', ')}.
               Every kill burns that much off the top of the reserve deck.
             </span>
+          </div>
+        )}
+        {state.ascendingZone && !state.zoneClosed && (
+          <div className="legacy-jester-claim-banner">
+            <span>
+              🏔 Mission Zone chain: {state.missionZone.map((c) => (c.kind === 'suited' ? c.name ?? c.rank : 'Jester')).join(' → ') || '—'} — needs a{' '}
+              {zoneRequiredValue} next. Non-Pilgrim cards buff the enemy's attack while they sit there.
+            </span>
+          </div>
+        )}
+        {state.ascendingZone && state.zoneClosed && (
+          <div className="legacy-jester-claim-banner">
+            <span>🏔 The mission zone has purged and closed for good.</span>
           </div>
         )}
         {state.currentEnemy && (
@@ -230,7 +317,15 @@ export function GamePage({
           cards={myHand}
           selectedIds={selectedIds}
           onToggle={toggleCard}
-          interactive={canAssistCombo || (isMyTurn && !isComboAssistWindow && state.turnPhase !== 'AWAIT_JESTER_CLAIM')}
+          interactive={
+            canAssistCombo ||
+            isMyChantTrim ||
+            isMyAzureEmblemTurn ||
+            (isMyTurn &&
+              !isComboAssistWindow &&
+              state.turnPhase !== 'AWAIT_JESTER_CLAIM' &&
+              state.turnPhase !== 'AWAIT_ZONE_PURGE')
+          }
           enemy={state.currentEnemy}
         />
       </div>
@@ -288,27 +383,52 @@ export function GamePage({
         />
       )}
 
-      {isMyTurn && !isComboAssistWindow && state.turnPhase !== 'AWAIT_JESTER_CLAIM' && !(isLoneJester && state.turnPhase === 'AWAIT_PLAY') && (
-        <ConfirmPlayBar
-          turnPhase={state.turnPhase}
-          pendingDamage={state.pendingDamage}
-          selectedTotal={selectedTotal}
-          selectedCount={selectedCards.length}
-          handSize={myHand.length}
-          playError={playError}
-          canYield={true}
-          onClear={() => setSelectedIds(new Set())}
-          onPlay={() => {
-            sendAction({ type: 'PLAY_CARDS', playerId: myPlayerId, cardIds: selectedCards.map((c) => c.id) });
-            setSelectedIds(new Set());
-          }}
-          onYield={() => sendAction({ type: 'YIELD', playerId: myPlayerId })}
-          onDefend={() => {
-            sendAction({ type: 'DEFEND', playerId: myPlayerId, cardIds: selectedCards.map((c) => c.id) });
-            setSelectedIds(new Set());
-          }}
+      {isMyZonePurgeWindow && (
+        <ZonePurgePicker
+          discardPile={state.discardPile}
+          onResolve={(banishCardIds) => sendAction({ type: 'RESOLVE_ZONE_PURGE', playerId: myPlayerId, banishCardIds })}
         />
       )}
+
+      {isMyTurn &&
+        !isComboAssistWindow &&
+        !isAzureEmblemWindow &&
+        !isChantWindow &&
+        !isZonePurgeWindow &&
+        state.turnPhase !== 'AWAIT_JESTER_CLAIM' &&
+        !(isLoneJester && state.turnPhase === 'AWAIT_PLAY') && (
+          <ConfirmPlayBar
+            turnPhase={state.turnPhase}
+            pendingDamage={state.pendingDamage}
+            selectedTotal={selectedTotal}
+            selectedCount={selectedCards.length}
+            handSize={myHand.length}
+            playError={playError}
+            canYield={true}
+            onClear={() => setSelectedIds(new Set())}
+            onPlay={() => {
+              sendAction({ type: 'PLAY_CARDS', playerId: myPlayerId, cardIds: selectedCards.map((c) => c.id) });
+              setSelectedIds(new Set());
+            }}
+            onYield={() => sendAction({ type: 'YIELD', playerId: myPlayerId })}
+            onDefend={() => {
+              sendAction({ type: 'DEFEND', playerId: myPlayerId, cardIds: selectedCards.map((c) => c.id) });
+              setSelectedIds(new Set());
+            }}
+            placeInZone={
+              isLegacy && state.ascendingZone && !state.zoneClosed && state.turnPhase === 'AWAIT_PLAY'
+                ? {
+                    canPlace: canPlaceInZone,
+                    requiredValue: zoneRequiredValue,
+                    onPlace: () => {
+                      sendAction({ type: 'PLACE_IN_ZONE', playerId: myPlayerId, cardId: selectedCards[0].id });
+                      setSelectedIds(new Set());
+                    },
+                  }
+                : undefined
+            }
+          />
+        )}
     </div>
   );
 }
