@@ -43,6 +43,12 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     chanterWindow: state.chanterWindow,
     capturedPilesActive: state.capturedPilesActive,
     capturedPiles: state.capturedPiles.map((p) => ({ faceUp: p.faceUp, faceDownCount: p.faceDown.length })),
+    zoneImmuneSuits: state.zoneImmuneSuits,
+    banishPile: state.banishPile,
+    beastDeckMechanic: state.beastDeckMechanic,
+    beastDeckCount: state.beastDeck.length,
+    beastDeckDiscard: state.beastDeckDiscard,
+    restoredCardMechanic: state.restoredCardMechanic,
     you: { playerId: viewerPlayerId },
   };
 }

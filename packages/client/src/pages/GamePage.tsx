@@ -8,6 +8,7 @@ import {
   type GameAction,
 } from '@regicide/shared';
 import { EnemyDisplay } from '../components/EnemyDisplay';
+import { MissionZonePanel } from '../components/MissionZonePanel';
 import { DeckPiles } from '../components/DeckPiles';
 import { PlayerList } from '../components/PlayerList';
 import { ActionLog } from '../components/ActionLog';
@@ -254,55 +255,15 @@ export function GamePage({
             </button>
           </div>
         )}
-        {state.rollingZoneBonus && (
-          <div className="legacy-jester-claim-banner">
-            <span>
-              🍄 Mission Zone (rolling):{' '}
-              {state.rollingZoneCard
-                ? `${state.rollingZoneCard.kind === 'suited' ? state.rollingZoneCard.name ?? state.rollingZoneCard.rank : 'Jester'} — buffing the enemy's attack by ${cardValue(state.rollingZoneCard)} until it cycles out next turn.`
-                : 'empty for now.'}
-            </span>
-          </div>
-        )}
-        {state.zoneVengeanceOnKill && state.missionZone.length > 0 && (
-          <div className="legacy-jester-claim-banner">
-            <span>
-              👻 Mission Zone ({state.missionZone.length} card{state.missionZone.length === 1 ? '' : 's'}, never cleared):{' '}
-              {state.missionZone.map((c) => (c.kind === 'suited' ? c.name ?? `${c.rank} of ${c.suit}` : 'Jester')).join(', ')} — Myla strikes for{' '}
-              {state.missionZone.reduce((sum, c) => sum + cardValue(c), 0)} on the next kill (less her strongest card on an exact hit).
-            </span>
-          </div>
-        )}
-        {state.pilgrimMechanic && state.pilgrimZone.length > 0 && (
-          <div className="legacy-jester-claim-banner">
-            <span>
-              🌊 Pilgrim Zone ({state.pilgrimZone.length} waiting, combined strength{' '}
-              {state.pilgrimZone.reduce((sum, c) => sum + cardValue(c), 0)}): play an attack matching one's exact value to rescue
-              them — {state.pilgrimZone.map((c) => (c.kind === 'suited' ? `${c.name ?? c.rank} (${cardValue(c)})` : 'Jester')).join(', ')}.
-              Every kill burns that much off the top of the reserve deck.
-            </span>
-          </div>
-        )}
-        {state.ascendingZone && !state.zoneClosed && (
-          <div className="legacy-jester-claim-banner">
-            <span>
-              🏔 Mission Zone chain: {state.missionZone.map((c) => (c.kind === 'suited' ? c.name ?? c.rank : 'Jester')).join(' → ') || '—'} — needs a{' '}
-              {zoneRequiredValue} next. Non-Pilgrim cards buff the enemy's attack while they sit there.
-            </span>
-          </div>
-        )}
-        {state.ascendingZone && state.zoneClosed && (
-          <div className="legacy-jester-claim-banner">
-            <span>🏔 The mission zone has purged and closed for good.</span>
-          </div>
-        )}
         {state.currentEnemy && (
           <EnemyDisplay
             enemy={state.currentEnemy}
             discardPile={state.discardPile}
             discardTopBuffsAttack={state.discardTopBuffsAttack}
+            zoneImmuneSuits={state.zoneImmuneSuits}
           />
         )}
+        <MissionZonePanel state={state} />
         <DeckPiles state={state} />
         {state.capturedPilesActive && <CapturedPiles piles={state.capturedPiles} />}
         <PlayerList state={state} myPlayerId={myPlayerId} />

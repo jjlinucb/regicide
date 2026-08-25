@@ -219,40 +219,6 @@ button {
   cursor: default;
 }
 
-.corruption-overlay {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.corruption-overlay .crack-line {
-  stroke: #1a1015;
-  stroke-width: 2;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-  opacity: 0.55;
-}
-
-.corruption-overlay .crack-thin {
-  stroke-width: 1.2;
-  opacity: 0.4;
-}
-
-.corruption-overlay .vine-line {
-  stroke: #3c5a2e;
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  fill: none;
-  opacity: 0.65;
-}
-
-.corruption-overlay .thorns path {
-  fill: #3c5a2e;
-  opacity: 0.7;
-}
-
 .boss-playing-card .playing-card .rank {
   font-size: 2.6rem;
 }
@@ -264,15 +230,36 @@ button {
 .enemy-title {
   font-size: 1.4rem;
   font-weight: 700;
+  color: var(--ink);
 }
 
-.suit-H,
-.suit-D {
+.enemy-title.red {
   color: var(--heart);
 }
-.suit-C,
-.suit-S {
-  color: var(--ink);
+
+.immunity-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.immunity-label {
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+}
+
+.immunity-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid;
+  font-size: 0.95rem;
+  background: var(--bg-elevated);
 }
 
 .health-bar-track {
@@ -296,21 +283,174 @@ button {
   gap: 16px;
   font-size: 0.9rem;
   color: var(--ink-dim);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.enemy-stat-block strong {
+  color: var(--ink);
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.strength-ledger {
+  display: flex;
+  gap: 6px;
+  margin-left: 6px;
+  font-size: 0.78rem;
+}
+
+.strength-term {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.strength-term.positive {
+  color: var(--danger);
+}
+
+.strength-term.negative {
+  color: var(--success);
 }
 
 .deck-row {
   display: flex;
   gap: 10px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 
-.deck-pill {
+/* ---------- Card piles (reserve/discard/banish/etc.) ---------- */
+
+.card-pile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.card-pile-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 6px 14px;
   font-size: 0.85rem;
   color: var(--ink-dim);
+}
+
+.card-pile-summary:disabled {
+  cursor: default;
+}
+
+.card-pile.empty .card-pile-summary {
+  opacity: 0.7;
+}
+
+.card-pile-stack {
+  font-size: 1rem;
+}
+
+.card-pile-toggle {
+  font-size: 0.65rem;
+}
+
+.card-pile-empty-note {
+  font-size: 0.7rem;
+  color: var(--ink-dim);
+}
+
+.card-pile-top-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--ink-dim);
+}
+
+.card-pile-contents {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+  max-width: 100%;
+}
+
+.card-pile-card {
+  position: relative;
+}
+
+.card-pile-top-label {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.55rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+
+/* ---------- Mission zone panels ---------- */
+
+.mission-zone-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mission-zone-panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mission-zone-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.mission-zone-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.mission-zone-caption {
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+}
+
+.mission-zone-cards {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mission-zone-empty {
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+}
+
+.mission-zone-beast-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .player-strip {

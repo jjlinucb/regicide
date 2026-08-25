@@ -672,6 +672,18 @@ export interface ClientGameState {
   capturedPilesActive: boolean;
   /** See GameState.capturedPiles — each pile's face-down cards are redacted to a count, its face-up card is public. */
   capturedPiles: ClientCapturedPile[];
+  /** See GameState.zoneImmuneSuits. Public information — it's on the table. */
+  zoneImmuneSuits: Suit[];
+  /** See GameState.banishPile. Public information — it's a visible discard-style pile, just permanent. */
+  banishPile: Card[];
+  /** See GameState.beastDeckMechanic. */
+  beastDeckMechanic: boolean;
+  /** See GameState.beastDeck — count only, it's face-down. */
+  beastDeckCount: number;
+  /** See GameState.beastDeckDiscard. Public information — already-flipped beast cards sit face-up. */
+  beastDeckDiscard: Card[];
+  /** See GameState.restoredCardMechanic. */
+  restoredCardMechanic: boolean;
   you: {
     playerId: string;
   };
