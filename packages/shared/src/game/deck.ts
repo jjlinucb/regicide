@@ -109,13 +109,14 @@ export function buildEndlessCastleDeck(loop: number, rng: () => number): EnemySt
 }
 
 /**
- * Endless Mode's Tavern deck: the standard 40 cards plus the 4 Kings (now playable, worth 20 per rules.cardValue)
- * and jesters per player count.
+ * Endless Mode's Tavern deck: the standard 40 cards plus the 4 Jacks and 4 Kings (now playable, worth 10/20 per
+ * rules.cardValue, and further boosted by GameState.playerCourtTier — see engine.ts) and jesters per player count.
  */
 export function buildEndlessTavernDeck(playerCount: number, rng: () => number): Card[] {
   const jesterCount = JESTERS_BY_PLAYER_COUNT[playerCount] ?? 0;
+  const jacks: SuitedCard[] = SUITS.map((s) => ({ id: nextId(), kind: 'suited', suit: s, rank: 'J' }));
   const kings: SuitedCard[] = SUITS.map((s) => ({ id: nextId(), kind: 'suited', suit: s, rank: 'K' }));
-  const cards = [...buildStandardPartyCards(), ...kings, ...makeJesters(jesterCount)];
+  const cards = [...buildStandardPartyCards(), ...jacks, ...kings, ...makeJesters(jesterCount)];
   return shuffle(cards, rng);
 }
 

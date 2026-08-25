@@ -648,6 +648,31 @@ function upgradeDefeatedRank(rank: 'J' | 'Q' | 'K', loop: number): { rank: 'J' |
   return { rank: 'K', tier: idx - (RANK_ORDER.length - 1) };
 }
 
+const PLAYER_COURT_TIER_FOR_RANK: Record<'J' | 'Q' | 'K', number> = { J: 1, Q: 2, K: 3 };
+
+/**
+ * Endless Mode only: a distinct, player-side court tier (see GameState.playerCourtTier) — separate from
+ * upgradeDefeatedRank's own defeated-enemy-card promotion. Every J/Q/K enemy defeat ratchets this up
+ * (monotonically, never resets on a new round), and it boosts the player's own Jack/Queen cards' value by
+ * stamping the same `.tier` field cardValue() already reads. Kings and number/Ace cards are untouched — Kings
+ * are already the top rank and use the separate enemy-tier mechanic if any. Sweeps every zone a Jack/Queen card
+ * could currently sit in (tavern deck, every hand, discard pile) using Math.max so it only ever upgrades, never
+ * clobbers a higher tier a card might already carry (e.g. from upgradeDefeatedRank's chain, though in practice
+ * that chain only ever produces K-rank cards past King, so there's no real collision — see engine.ts:634-649).
+ */
+function applyPlayerCourtTier(state: GameState, tier: number): void {
+  if (tier <= state.playerCourtTier) return;
+  state.playerCourtTier = tier;
+  const bump = (card: Card) => {
+    if (card.kind === 'suited' && (card.rank === 'J' || card.rank === 'Q')) {
+      card.tier = Math.max(card.tier ?? 0, state.playerCourtTier);
+    }
+  };
+  state.tavernDeck.forEach(bump);
+  state.discardPile.forEach(bump);
+  for (const player of state.players) player.hand.forEach(bump);
+}
+
 /**
  * The current enemy's attack, live — folds in Mission 4's discard-pile buff (see GameState.discardTopBuffsAttack)
  * and/or Mission 8's ascending-zone buff (see GameState.ascendingZone) when active.
@@ -868,6 +893,9 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       }
     }
   } else {
+    if (state.endlessLoop > 0) {
+      applyPlayerCourtTier(state, PLAYER_COURT_TIER_FOR_RANK[enemy.rank]);
+    }
     const exact = remaining === 0;
     const upgrade = upgradeDefeatedRank(enemy.rank, state.endlessLoop);
     const upgraded = upgrade.rank !== enemy.rank || upgrade.tier > 0;
@@ -1024,6 +1052,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.victoryMedal = null;
   state.jesterClaim = null;
   state.endlessLoop = 0;
+  state.playerCourtTier = 0;
   state.exactKillOnly = false;
   state.relics = [];
   state.comboAssist = null;
@@ -1145,6 +1174,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.victoryMedal = null;
   state.jesterClaim = null;
   state.endlessLoop = 0;
+  state.playerCourtTier = 0;
   state.exactKillOnly = action.exactKillOnly ?? false;
   state.relics = action.relics ?? [];
   state.comboAssist = null;
@@ -1210,6 +1240,16 @@ function startEndlessRound(state: GameState): EngineResult {
   const rng = () => nextRandom(state);
   const castleDeck = buildEndlessCastleDeck(loop, rng);
   const tavernDeck = buildEndlessTavernDeck(n, rng);
+  if (state.playerCourtTier > 0) {
+    // Fresh Jacks/Queens shuffled into this round's deck should reflect whatever court tier the run has already
+    // earned (see applyPlayerCourtTier) — only these newly built cards need the sweep; the previous round's
+    // hands/discard are about to be discarded/cleared below.
+    for (const card of tavernDeck) {
+      if (card.kind === 'suited' && (card.rank === 'J' || card.rank === 'Q')) {
+        card.tier = Math.max(card.tier ?? 0, state.playerCourtTier);
+      }
+    }
+  }
 
   for (const player of state.players) {
     player.hand = [];
@@ -1246,7 +1286,7 @@ function startEndlessRound(state: GameState): EngineResult {
  * and by RESOLVE_COMBO, once an open Kinfolk Flute assist window is locked in.
  */
 function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null): EngineResult {
-  const shape = validatePlayShape(cards);
+  const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
 
   log(
@@ -1439,7 +1479,7 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
     return fail('Use the Jester action to play the Jester.');
   }
 
-  const shape = validatePlayShape(cards);
+  const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
 
   const claimedJester =
@@ -1502,7 +1542,7 @@ function assistCombo(state: GameState, action: Extract<GameAction, { type: 'ASSI
   if (card.kind !== 'suited') return fail('Only a suited card can be added to a combo.');
 
   const existing = state.currentEnemy!.tableCards.filter((c) => state.comboAssist!.cardIds.includes(c.id));
-  const combined = validatePlayShape([...existing, card]);
+  const combined = validatePlayShape([...existing, card], state.endlessLoop);
   if ('error' in combined) return fail(`That card doesn't fit the combo: ${combined.error}`);
 
   assister.hand = assister.hand.filter((c) => c.id !== card.id);
@@ -1979,6 +2019,7 @@ export function createLobbyState(): GameState {
     victoryMedal: null,
     jesterClaim: null,
     endlessLoop: 0,
+    playerCourtTier: 0,
     exactKillOnly: false,
     relics: [],
     comboAssist: null,

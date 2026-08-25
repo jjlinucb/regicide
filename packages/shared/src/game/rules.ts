@@ -45,8 +45,15 @@ export interface PlayShape {
   suits: Suit[];
 }
 
-/** Validates a proposed set of played cards (excluding the single-jester case, handled separately) per the Combos/Animal-or-Beast-Companion rules. Returns an error string or the resolved shape. */
-export function validatePlayShape(cards: Card[]): PlayShape | { error: string } {
+/**
+ * Validates a proposed set of played cards (excluding the single-jester case, handled separately) per the
+ * Combos/Animal-or-Beast-Companion rules. Returns an error string or the resolved shape.
+ *
+ * `loop` is Endless Mode's `state.endlessLoop` (0 outside Endless Mode, or before its first extra round) — it
+ * raises the combo total-value cap by 2 per loop (10 + 2*loop) so endless combos scale with the game's growing
+ * card values. The 4-card-per-combo count cap is unaffected regardless of loop.
+ */
+export function validatePlayShape(cards: Card[], loop = 0): PlayShape | { error: string } {
   if (cards.length === 0) return { error: 'No cards selected.' };
   if (cards.some((c) => c.kind === 'jester')) {
     return { error: 'The Jester must be played alone.' };
@@ -85,8 +92,9 @@ export function validatePlayShape(cards: Card[]): PlayShape | { error: string } 
     return { error: 'Combos are limited to 4 cards.' };
   }
   const totalValue = suited.reduce((sum, c) => sum + cardValue(c), 0);
-  if (totalValue > 10) {
-    return { error: 'Combo total must be 10 or less.' };
+  const comboCap = 10 + 2 * Math.max(0, loop);
+  if (totalValue > comboCap) {
+    return { error: `Combo total must be ${comboCap} or less.` };
   }
   const suits = Array.from(new Set(suited.flatMap(cardSuits)));
   return { totalValue, suits };
