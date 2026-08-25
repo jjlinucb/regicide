@@ -55,7 +55,7 @@ export function GamePage({
 
   const playError = useMemo(() => {
     if (selectedCards.length === 0 || isLoneJester) return null;
-    const shape = validatePlayShape(selectedCards);
+    const shape = validatePlayShape(selectedCards, state.endlessLoop);
     return 'error' in shape ? shape.error : null;
   }, [selectedCards, isLoneJester]);
 

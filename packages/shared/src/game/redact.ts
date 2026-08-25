@@ -28,6 +28,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     victoryMedal: state.victoryMedal,
     jesterClaim: state.jesterClaim,
     endlessLoop: state.endlessLoop,
+    playerCourtTier: state.playerCourtTier,
     comboAssist: state.comboAssist,
     azureEmblemWindow: state.azureEmblemWindow,
     discardTopBuffsAttack: state.discardTopBuffsAttack,
