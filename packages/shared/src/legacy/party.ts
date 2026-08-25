@@ -178,3 +178,18 @@ export function applyReward(party: Card[], reward: MissionReward): Card[] {
   if (reward.mageSticker) next = applyMageSticker(next);
   return next;
 }
+
+/**
+ * Mission 10's "deck rehabilitation" mechanic (community research, best-effort — see legacy/missions.ts's Mission
+ * 10 entry): folds GameState.restoredPartyCards — the pristine, cleansed original cards of every corrupted hero
+ * exact-killed during the mission — back into the campaign's permanent party roster at mission end. Unlike
+ * applyReward's recruits (freshly minted via buildRecruitCard), these are the SAME cards the party already had —
+ * they were only pulled out of circulation for the fight (see deck.ts's buildCorruptedPartyEnemies) — so this
+ * just re-adds them, skipping any id already present in case a card somehow made it back another way.
+ */
+export function applyRestoredPartyCards(party: Card[], restored: Card[]): Card[] {
+  if (restored.length === 0) return party;
+  const existingIds = new Set(party.map((c) => c.id));
+  const toRestore = restored.filter((c) => !existingIds.has(c.id));
+  return [...party, ...toRestore];
+}

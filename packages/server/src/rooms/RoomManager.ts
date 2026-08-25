@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { applyAction, createLobbyState } from '@regicide/shared';
 import type { Card, GameAction, GameState, LegacySavePayload } from '@regicide/shared';
-import { applyReward, buildInitialParty, getMission, JESTERS_BY_PLAYER_COUNT, missionEnemiesToSpecs } from '@regicide/shared';
+import {
+  applyRestoredPartyCards,
+  applyReward,
+  buildInitialParty,
+  getMission,
+  JESTERS_BY_PLAYER_COUNT,
+  missionEnemiesToSpecs,
+} from '@regicide/shared';
 import { generateRoomCode } from './roomCode.js';
 import { generateUniqueCampaignCode, type CampaignRecord, type CampaignStore } from '../db/campaigns.js';
 
@@ -271,9 +278,19 @@ export class RoomManager {
     return { room, player };
   }
 
-  /** Grants a single mission's reward (recruits, Dual-class Stickers, relics) and marks it completed. Shared by a normal win and by jumping ahead into a later mission (see startLegacyMission). */
-  private grantMissionReward(legacy: LegacyRoomData, mission: NonNullable<ReturnType<typeof getMission>>): void {
+  /**
+   * Grants a single mission's reward (recruits, Dual-class Stickers, relics) and marks it completed. Shared by a
+   * normal win and by jumping ahead into a later mission (see startLegacyMission). `restoredPartyCards` is
+   * Mission 10 only (see GameState.restoredPartyCards) — omitted (or empty) for every other mission, and for a
+   * jumped-ahead grant where no mission was actually played.
+   */
+  private grantMissionReward(
+    legacy: LegacyRoomData,
+    mission: NonNullable<ReturnType<typeof getMission>>,
+    restoredPartyCards: Card[] = [],
+  ): void {
     legacy.party = applyReward(legacy.party, mission.reward);
+    legacy.party = applyRestoredPartyCards(legacy.party, restoredPartyCards);
     if (mission.reward.relics?.length) {
       legacy.permanentRules = [...legacy.permanentRules, ...mission.reward.relics];
     }
@@ -338,6 +355,8 @@ export class RoomManager {
       ascendingZone: mission.ascendingZone,
       capturedPilesActive: mission.capturedPilesActive,
       extraReserveCards: mission.extraReserveCards,
+      corruptedPartyEnemies: mission.corruptedPartyEnemies,
+      startOfTurnZoneFlip: mission.startOfTurnZoneFlip,
       relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };
@@ -352,7 +371,7 @@ export class RoomManager {
     if (outcome === 'won') {
       const mission = getMission(missionId);
       if (mission) {
-        this.grantMissionReward(legacy, mission);
+        this.grantMissionReward(legacy, mission, room.gameState.restoredPartyCards);
         legacy.currentMission = missionId + 1;
       }
       await this.campaignStore.save(toRecord(room));

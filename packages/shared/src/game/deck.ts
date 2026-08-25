@@ -1,4 +1,5 @@
 import type { Card, CapturedPile, EnemyState, LegacyEnemySpec, Suit, SuitedCard } from './types.js';
+import { cardValue } from './rules.js';
 
 const SUITS: Suit[] = ['H', 'D', 'C', 'S'];
 const NUMBER_RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10'] as const;
@@ -172,4 +173,50 @@ export function buildCapturedPiles(party: Card[], rng: () => number): { piles: C
     return { faceDown: pileCards, faceUp };
   });
   return { piles, leftoverParty };
+}
+
+/** Legacy-only (Mission 10, "Pride to Fall"): how many party members are twisted into the enemy line. */
+export const CORRUPTED_PARTY_ENEMY_COUNT = 8;
+
+/**
+ * Legacy-only (Mission 10): pulls CORRUPTED_PARTY_ENEMY_COUNT cards out of the campaign party (randomly, via the
+ * mission's own seeded RNG — the transcript says "eight" without specifying which ones, so this is a judgment
+ * call, not a transcript detail) and turns each into a fixed-order enemy, sorted weakest-to-strongest by card
+ * value. Each enemy's health is fixed at 5x its (base) strength per the transcript — a flat multiple set here at
+ * spec-build time, never recalculated later even though the enemy's *dealt* attack climbs with the mission zone
+ * (see engine.ts's resolvedEnemyAttack). `secondSuit` carries over too, so a Dual-class Stickers party member
+ * comes back immune to both classes, same as the class-immunity rule the transcript says otherwise applies "as
+ * normal." Returns the enemies plus whatever's left of the party (not pulled) for the caller to build the
+ * mission's reserve deck from — same shape as buildCapturedPiles above, the closest existing precedent for
+ * carving mission-specific state out of the party at setup.
+ */
+export function buildCorruptedPartyEnemies(
+  party: Card[],
+  rng: () => number,
+): { enemies: EnemyState[]; leftoverParty: Card[] } {
+  const suited = party.filter((c): c is SuitedCard => c.kind === 'suited');
+  const shuffled = shuffle(suited, rng);
+  const chosen = shuffled.slice(0, CORRUPTED_PARTY_ENEMY_COUNT);
+  const chosenIds = new Set(chosen.map((c) => c.id));
+  const leftoverParty = party.filter((c) => !chosenIds.has(c.id));
+
+  const sorted = chosen.slice().sort((a, b) => cardValue(a) - cardValue(b));
+  const enemies: EnemyState[] = sorted.map((card) => {
+    const strength = cardValue(card);
+    return {
+      suit: card.suit,
+      secondSuit: card.secondSuit,
+      rank: 'J', // unused for display in Legacy (name takes over) — kept only to satisfy EnemyState's shape.
+      name: card.name ?? `${card.rank} of ${card.suit}`,
+      maxHealth: strength * 5,
+      baseAttack: strength,
+      damageTaken: 0,
+      spadesShield: 0,
+      blockedSpadesShield: 0,
+      immunityBroken: false,
+      tableCards: [],
+      sourceCard: card,
+    };
+  });
+  return { enemies, leftoverParty };
 }

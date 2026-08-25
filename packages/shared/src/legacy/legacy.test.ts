@@ -3,7 +3,14 @@ import { applyAction, createLobbyState } from '../game/engine.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs } from './missions.js';
-import { applyDualClassStickers, applyMageSticker, applyReward, buildInitialParty, buildRecruitCard } from './party.js';
+import {
+  applyDualClassStickers,
+  applyMageSticker,
+  applyReward,
+  applyRestoredPartyCards,
+  buildInitialParty,
+  buildRecruitCard,
+} from './party.js';
 
 function suited(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
   return { id: `${suit}${rank}-${Math.random()}`, kind: 'suited', suit, rank };
@@ -58,10 +65,12 @@ describe('legacy: mission setup', () => {
     expect(handCount + state.tavernDeck.length).toBe(40);
   });
 
-  it('every non-standard-castle mission has at least one enemy and converts cleanly to engine specs', () => {
-    expect(MISSIONS.length).toBe(9);
+  it('every non-standard-castle, non-corrupted-party-enemies mission has at least one enemy and converts cleanly to engine specs', () => {
+    expect(MISSIONS.length).toBe(10);
     for (const mission of MISSIONS) {
-      if (mission.standardCastle) continue;
+      // Mission 10's enemies aren't a static list either — like standardCastle, its queue is built at mission
+      // start instead (see GameState.corruptedPartyEnemies), so `enemies` is deliberately left empty.
+      if (mission.standardCastle || mission.corruptedPartyEnemies) continue;
       expect(mission.enemies.length).toBeGreaterThan(0);
       const specs = missionEnemiesToSpecs(mission.enemies);
       for (const spec of specs) {
@@ -1966,5 +1975,267 @@ describe('legacy: mission 9 reward (Evergreen Mother relic, Gøran, Mage sticker
     expect(goranCard).toBeDefined();
     if (goranCard?.kind === 'suited') expect(goranCard.special).toBe('EVERGREEN');
     expect(party.filter((c) => c.kind === 'suited' && c.secondClassArcane).length).toBe(1);
+  });
+});
+
+describe('legacy: mission 10 setup (Pride to Fall)', () => {
+  function startMission10(n: number, opts: { startOfTurnZoneFlip?: boolean; party?: Card[] } = {}): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'mission-10-test',
+      party: opts.party ?? buildInitialParty(),
+      enemies: [],
+      jesterCount: 0,
+      corruptedPartyEnemies: true,
+      startOfTurnZoneFlip: opts.startOfTurnZoneFlip ?? true,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('the mission entry has no static enemy list (built from the party instead) and documents no transcript reward', () => {
+    const mission10 = getMission(10)!;
+    expect(mission10.title).toBe('Pride to Fall');
+    expect(mission10.enemies).toEqual([]);
+    expect(mission10.corruptedPartyEnemies).toBe(true);
+    expect(mission10.startOfTurnZoneFlip).toBe(true);
+    expect(mission10.reward.recruits).toEqual([]);
+    expect(mission10.reward.relics).toBeUndefined();
+  });
+
+  it('builds an 8-enemy queue from the party, sorted weakest-to-strongest, health fixed at 5x each enemy\'s base strength', () => {
+    // Isolate from the start-of-turn flip so the leftover-party accounting below stays a clean subtraction.
+    const state = startMission10(1, { startOfTurnZoneFlip: false });
+    const queue = [state.currentEnemy!, ...state.castleDeck];
+    expect(queue.length).toBe(8);
+    for (const e of queue) {
+      expect(e.maxHealth).toBe(e.baseAttack * 5);
+      expect(e.sourceCard).toBeDefined();
+    }
+    for (let i = 1; i < queue.length; i++) {
+      expect(queue[i].baseAttack).toBeGreaterThanOrEqual(queue[i - 1].baseAttack);
+    }
+    // All 8 pulled from distinct party cards.
+    expect(new Set(queue.map((e) => e.sourceCard!.id)).size).toBe(8);
+    // The 40-card starting party minus the 8 pulled for the enemy queue = 32 left in circulation.
+    const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
+    expect(handCount + state.tavernDeck.length).toBe(32);
+  });
+
+  it('fails to start when the party has fewer than 8 eligible members to corrupt', () => {
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'too-small',
+      party: buildInitialParty().slice(0, 5),
+      enemies: [],
+      jesterCount: 0,
+      corruptedPartyEnemies: true,
+      startOfTurnZoneFlip: true,
+    });
+    expect(res.ok).toBe(false);
+  });
+
+  it('flips the top of the reserve deck into the mission zone at the START of every turn (not the end)', () => {
+    let state = startMission10(1);
+    // The first player's first turn already got its start-of-turn flip at mission start.
+    expect(state.missionZone.length).toBe(1);
+    // 0 attack (and a huge Spades shield, to swallow whatever the zone bonus turns out to be) so YIELD ends the
+    // turn outright with no AWAIT_DEFEND detour.
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    // Yielding ends the turn (single player loops back to themselves) — a second flip should have fired.
+    expect(res.state.missionZone.length).toBe(2);
+  });
+});
+
+describe('legacy: mission 10 class powers (corrupted-hero enemies)', () => {
+  function startMission10(opts: { startOfTurnZoneFlip?: boolean } = {}): GameState {
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'mission-10-powers-test',
+      party: buildInitialParty(),
+      enemies: [],
+      jesterCount: 0,
+      corruptedPartyEnemies: true,
+      startOfTurnZoneFlip: opts.startOfTurnZoneFlip ?? true,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it("an enemy Warrior doubles total strength (base + mission-zone bonus) BEFORE the players' own Spades shield is subtracted", () => {
+    let state = startMission10();
+    state = rig(state, [], { suit: 'C', baseAttack: 5, spadesShield: 3 }); // Warrior suit
+    state.missionZone = [suited('D', '2')]; // zone bonus of 2, overwriting whatever the setup flip put there
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    // (5 base + 2 zone) * 2 (Warrior) = 14, minus 3 Spades shield = 11.
+    expect(res.state.pendingDamage).toBe(11);
+    expect(res.state.turnPhase).toBe('AWAIT_DEFEND');
+  });
+
+  it('a non-Warrior enemy gets no doubling — just base + zone bonus, minus Spades shield', () => {
+    let state = startMission10();
+    state = rig(state, [], { suit: 'S', baseAttack: 5, spadesShield: 3 }); // Paladin suit, not Warrior
+    state.missionZone = [suited('D', '2')];
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    // 5 base + 2 zone - 3 shield = 4, no doubling.
+    expect(res.state.pendingDamage).toBe(4);
+  });
+
+  it('an enemy Paladin reduces damage it takes by its own base strength', () => {
+    let state = startMission10();
+    state = rig(state, [suited('D', '10')], { suit: 'S', baseAttack: 4, maxHealth: 100, damageTaken: 0 }); // Paladin suit
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    // 10 raw damage - 4 (the enemy's own base strength) = 6.
+    expect(res.state.currentEnemy?.damageTaken).toBe(6);
+  });
+
+  it("floors an enemy Paladin's damage reduction at 0 rather than going negative", () => {
+    let state = startMission10();
+    state = rig(state, [suited('D', '2')], { suit: 'S', baseAttack: 4, maxHealth: 100, damageTaken: 0 });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.currentEnemy?.damageTaken).toBe(0);
+  });
+
+  it('an enemy Cleric drags the discard pile\'s top card into the mission zone at the end of the turn', () => {
+    let state = startMission10({ startOfTurnZoneFlip: false }); // isolate from the unrelated zone-flip mechanic
+    state = rig(state, [], { suit: 'H', baseAttack: 0 }); // Cleric suit, 0 attack so YIELD ends the turn outright
+    state.discardPile = [suited('D', '3')];
+    const draggedId = state.discardPile[0].id;
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    expect(res.state.discardPile.length).toBe(0);
+    expect(res.state.missionZone.map((c) => c.id)).toEqual([draggedId]);
+  });
+
+  it('an enemy Bard forces the ending player to move their lowest-value hand card into the mission zone', () => {
+    let state = startMission10({ startOfTurnZoneFlip: false });
+    const low = suited('C', '2');
+    const mid = suited('H', '5');
+    const high = suited('D', '8');
+    state = rig(state, [mid, low, high], { suit: 'D', baseAttack: 0 }); // Bard suit, 0 attack
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    expect(res.state.players[0].hand.map((c) => c.id).sort()).toEqual([high.id, mid.id].sort());
+    expect(res.state.missionZone.map((c) => c.id)).toEqual([low.id]);
+  });
+
+  it("an enemy Bard's forced move is skipped entirely when the ending player's hand is empty", () => {
+    let state = startMission10({ startOfTurnZoneFlip: false });
+    state = rig(state, [], { suit: 'D', baseAttack: 0 });
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    expect(res.state.missionZone.length).toBe(0);
+  });
+
+  it('defeating an enemy skips that turn\'s end-of-turn class effect entirely', () => {
+    let state = startMission10({ startOfTurnZoneFlip: false });
+    // Warrior suit (no always-on damage-taken interaction) so the overkill math below stays simple.
+    state = rig(state, [suited('D', '9')], { suit: 'C', baseAttack: 0, maxHealth: 5, damageTaken: 0 });
+    state.discardPile = [suited('H', '3')]; // would be dragged into the zone if a Cleric's effect fired — it's a Warrior here, but proves the *kill-skips-advanceToNextPlayer* path generally
+    const untouchedId = state.discardPile[0].id;
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    // Overkill (9 damage on 5 health) defeats the enemy and lets the same player continue — advanceToNextPlayer,
+    // and therefore resolveCorruptedEnemyEndOfTurnEffect and flipStartOfTurnZoneCard, never ran this turn.
+    expect(res.state.turnPhase).toBe('AWAIT_PLAY');
+    expect(res.state.missionZone.length).toBe(0);
+    expect(res.state.discardPile.some((c) => c.id === untouchedId)).toBe(true);
+  });
+});
+
+describe('legacy: mission 10 mission-zone defeat handling + deck-rehabilitation reward', () => {
+  function startMission10(): GameState {
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'mission-10-defeat-test',
+      party: buildInitialParty(),
+      enemies: [],
+      jesterCount: 0,
+      corruptedPartyEnemies: true,
+      startOfTurnZoneFlip: false, // isolated from the unrelated start-of-turn flip mechanic
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('an exact kill sends the whole mission zone to the discard pile and restores the fallen hero, cleansed', () => {
+    let state = startMission10();
+    // Warrior suit avoids the enemy-Paladin damage-taken reduction, keeping the exact-kill math simple.
+    state = rig(state, [suited('D', '9')], { suit: 'C', baseAttack: 0, maxHealth: 9, damageTaken: 0 });
+    const zoneCards = [suited('H', '2'), suited('D', '3')];
+    state.missionZone = zoneCards;
+    const heroSourceCard = state.currentEnemy!.sourceCard!;
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.missionZone.length).toBe(0);
+    expect(res.state.banishPile.length).toBe(0);
+    for (const c of zoneCards) expect(res.state.discardPile.some((d) => d.id === c.id)).toBe(true);
+    expect(res.state.restoredPartyCards.map((c) => c.id)).toEqual([heroSourceCard.id]);
+  });
+
+  it('an overkill (non-exact) banishes the whole mission zone instead, and restores nothing', () => {
+    let state = startMission10();
+    state = rig(state, [suited('D', '9')], { suit: 'C', baseAttack: 0, maxHealth: 5, damageTaken: 0 });
+    const zoneCards = [suited('H', '2'), suited('D', '3')];
+    state.missionZone = zoneCards;
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.missionZone.length).toBe(0);
+    for (const c of zoneCards) expect(res.state.banishPile.some((d) => d.id === c.id)).toBe(true);
+    expect(res.state.discardPile.some((d) => zoneCards.some((c) => c.id === d.id))).toBe(false);
+    expect(res.state.restoredPartyCards.length).toBe(0);
+  });
+});
+
+describe('legacy: mission 10 reward (applyRestoredPartyCards — "deck rehabilitation")', () => {
+  it('adds every restored card back into the campaign party, skipping any id already present', () => {
+    const party = buildInitialParty();
+    const alreadyThere = party[0];
+    const brandNew: Card = { id: 'restored-hero-1', kind: 'suited', suit: 'H', rank: '5', name: 'Cleansed Hero' };
+
+    const next = applyRestoredPartyCards(party, [alreadyThere, brandNew]);
+
+    expect(next.length).toBe(party.length + 1); // the duplicate was skipped, only the new card was added
+    expect(next.some((c) => c.id === 'restored-hero-1')).toBe(true);
+  });
+
+  it('is a no-op (same reference) for an empty restored list', () => {
+    const party = buildInitialParty();
+    expect(applyRestoredPartyCards(party, [])).toBe(party);
   });
 });

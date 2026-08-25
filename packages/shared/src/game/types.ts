@@ -161,6 +161,15 @@ export interface EnemyState {
    * the reserve deck (see engine.ts's resolveCommittedPlay / applyCorruptedCost).
    */
   corrupted?: boolean;
+  /**
+   * Legacy-only (Mission 10), set only for enemies built by GameState.corruptedPartyEnemies: the original,
+   * pristine party card this enemy was twisted from (see deck.ts's buildCorruptedPartyEnemies). Unrelated to
+   * `corrupted` above — a Mission 10 enemy is immune to its own class exactly like any other enemy (per the
+   * transcript), it doesn't ignore immunity the way a Mission 4 corrupted-return enemy does. Tracked so an
+   * exact-damage kill can restore the underlying hero, cleansed, to the campaign party at mission end (see
+   * GameState.restoredPartyCards).
+   */
+  sourceCard?: Card;
 }
 
 /** A mission-specific enemy spec used to build a Legacy mission's enemy deck (see legacy/missions.ts). */
@@ -383,6 +392,38 @@ export interface GameState {
   capturedPilesActive: boolean;
   /** Legacy-only (Mission 9): the 3 captured piles seeded at mission start (see deck.ts's buildCapturedPiles). */
   capturedPiles: CapturedPile[];
+  /**
+   * Legacy-only (Mission 10, "Pride to Fall"): when true, the mission's 8-enemy fight queue is built at mission
+   * start from the campaign's own party instead of a static MissionEnemySpec list — 8 cards are pulled from
+   * `party` (see START_LEGACY_MISSION), corrupted, sorted weakest-to-strongest by card value, and each becomes an
+   * enemy with health fixed at 5x its (base, pre-zone-bonus) strength (see deck.ts's buildCorruptedPartyEnemies).
+   * Also gates this mission's 2 always-on class powers, resolved via resolvedEnemyAttack /
+   * applyEnemyPaladinDamageReduction: an enemy Warrior doubles its total strength (base + mission-zone bonus,
+   * see startOfTurnZoneFlip) before any Spades shield is subtracted; an enemy Paladin reduces damage it takes by
+   * its own base strength. The other 2 classes' powers are end-of-turn effects (see engine.ts's
+   * resolveCorruptedEnemyEndOfTurnEffect) rather than always-on math, so they don't need a flag check here.
+   */
+  corruptedPartyEnemies: boolean;
+  /**
+   * Legacy-only (Mission 10): when true, the top of the reserve deck flips face-up into the shared `missionZone`
+   * at the START of every turn (not the end, unlike Mission 3's endOfTurnZoneFlip — the transcript is explicit
+   * about the timing, contradicting a community-research claim of an end-of-turn flip; that claim was NOT used).
+   * Unlike Mission 3, the flipped cards never grant suit immunity — their combined value instead buffs the
+   * current enemy's own dealt attack for as long as they sit there (see resolvedEnemyAttack), climbing the
+   * longer the fight drags on. Reuses `missionZone` itself (no separate array) since Mission 10 doesn't use any
+   * of the other missionZone modes above.
+   */
+  startOfTurnZoneFlip: boolean;
+  /**
+   * Legacy-only (Mission 10), best-effort from community research (the transcript documents no reward at all —
+   * see legacy/missions.ts's Mission 10 entry): every corrupted-hero enemy felled with an exact-damage hit during
+   * the mission (see dealDamageAndCheckDefeat) has its original, pristine party card pushed here — "cleansed" of
+   * the corruption just by virtue of being the untouched original, never mutated. Applied to the campaign's
+   * permanent party roster at mission end (see party.ts's applyRestoredPartyCards), on top of the mission's own
+   * static `reward`. An enemy defeated by overkill (not exact) contributes nothing here — per the transcript,
+   * its own card still goes to the discard pile like any other Legacy enemy, just with no restoration bonus.
+   */
+  restoredPartyCards: Card[];
 }
 
 export interface GameEvent {
@@ -445,6 +486,10 @@ export type GameAction =
        * split); unlike pilgrimCards above, these carry no special zone mechanic of their own.
        */
       extraReserveCards?: Card[];
+      /** See GameState.corruptedPartyEnemies. */
+      corruptedPartyEnemies?: boolean;
+      /** See GameState.startOfTurnZoneFlip. */
+      startOfTurnZoneFlip?: boolean;
     }
   | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
   | { type: 'YIELD'; playerId: string }

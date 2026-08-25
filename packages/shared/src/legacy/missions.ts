@@ -52,6 +52,10 @@ export interface Mission {
   capturedPilesActive?: boolean;
   /** See GameAction's START_LEGACY_MISSION.extraReserveCards. */
   extraReserveCards?: Card[];
+  /** See GameState.corruptedPartyEnemies. */
+  corruptedPartyEnemies?: boolean;
+  /** See GameState.startOfTurnZoneFlip. */
+  startOfTurnZoneFlip?: boolean;
 }
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
@@ -105,8 +109,9 @@ export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemyS
 
 /**
  * Regicide Legacy's campaign — original content built on the same rules skeleton as the physical game, not its
- * proprietary mission text. Currently the first eight missions of a longer arc: the party's early fights against
- * a corrupted syndicate, on through the Well of Tears' Druids and Heaven's Edge's Chanters.
+ * proprietary mission text. Currently the first ten missions of a longer arc: the party's early fights against
+ * a corrupted syndicate, on through the Well of Tears' Druids, Heaven's Edge's Chanters, the Twin Seed Temple,
+ * and the mastermind's own corrupted-hero ambush at Mission 10.
  */
 export const MISSIONS: Mission[] = [
   {
@@ -508,6 +513,55 @@ export const MISSIONS: Mission[] = [
       recruits: [specialRecruit('Gøran', 'EVERGREEN', '10', 'H')],
       relics: ['EVERGREEN_MOTHER'],
       mageSticker: true,
+    },
+  },
+  {
+    id: 10,
+    // Title carried over as-is from community research — the transcript never states a title outright, so this
+    // is unconfirmed (best-transcribed-from-flavor, not a transcript quote) the same way some earlier missions'
+    // flavor details are caveated. "Twinseed Temple Ruins" as the location is likewise community-sourced, not
+    // repeated here as a separate field since this file has no location field for any mission.
+    title: 'Pride to Fall',
+    story:
+      "The Twin Seed Temple hasn't finished smoldering before the campaign's mastermind steps out of the ashes " +
+      "to meet the party in person — and she hasn't come alone. Eight of the Golden Blade Syndicate's own, " +
+      'fallen across the missions behind them and twisted by the same corruption the party has been cutting ' +
+      "down all along, now stand between them and her: friends' faces, wearing an enemy's immunity.",
+    // The fixed 8-enemy queue isn't a static MissionEnemySpec list like every earlier mission — per the
+    // transcript, it's built at mission start from 8 of the campaign's OWN party members (see
+    // GameState.corruptedPartyEnemies / deck.ts's buildCorruptedPartyEnemies), corrupted and sorted
+    // weakest-to-strongest by card value, each with health fixed at 5x its (base, pre-zone-bonus) strength. Which
+    // 8 members get pulled isn't specified by the transcript beyond "eight" — this picks randomly (via the
+    // mission's own seeded RNG, so still reproducible) rather than, say, the 8 lowest-value party cards; a
+    // judgment call, not a transcript detail.
+    enemies: [],
+    corruptedPartyEnemies: true,
+    // Start-of-turn (not end-of-turn) mission-zone flip, feeding bonus STRENGTH onto the current enemy's own
+    // dealt attack for as long as those cards sit there — materially different from Mission 3's
+    // endOfTurnZoneFlip (end-of-turn timing, grants suit immunity instead of an attack buff). The transcript is
+    // explicit about the start-of-turn timing; a community-research claim that this flip happens at the END of
+    // the turn instead contradicts the transcript and was NOT used.
+    startOfTurnZoneFlip: true,
+    // Reward: no reward was transcribed for this mission (no reward video/segment exists in the source
+    // transcript) — everything below is best-effort from community research alone, flagged uncertain per this
+    // file's usual convention for less-certain items.
+    //  - Community research describes 3 late-campaign narrative/story cards unlocking campaign progression, and
+    //    the next region ("Rootmarsh") being unlocked as Mission 11's setting. Both are pure flavor/story beats
+    //    with no gameplay effect of their own (mirroring how Missions 6/9's narrative reward text — Myla's arc,
+    //    the temple's fate — lives only in this comment and the `story` field, not as MissionReward data) — no
+    //    fabricated card names or full quotes are recorded here, only that they exist thematically, since the
+    //    source fragments ("The fight is tough...", "The high arcane...", "The Syndicate's...") are too partial
+    //    to reconstruct honestly.
+    //  - The one reward with a real gameplay payoff — community research's "deck rehabilitation": any of the 8
+    //    corrupted heroes felled with an EXACT hit during this mission (saved to the discard pile per this
+    //    mission's own exact-kill rule, not banished) get restored to the permanent party roster, cleansed, once
+    //    the mission ends — is mechanical, not data-driven, so it isn't encoded as a MissionReward field at all.
+    //    It's implemented instead as GameState.restoredPartyCards, populated by engine.ts's
+    //    dealDamageAndCheckDefeat on every exact kill and folded into the campaign party by party.ts's
+    //    applyRestoredPartyCards at mission end (see RoomManager.completeLegacyMission). Marked uncertain the
+    //    same way the flavor beats above are — community research, not transcript-confirmed.
+    reward: {
+      recruits: [],
     },
   },
 ];

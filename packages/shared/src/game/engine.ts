@@ -2,7 +2,9 @@ import type { Card, CapturedPile, EngineResult, GameAction, GameState, PlayerSta
 import {
   buildCapturedPiles,
   buildCastleDeck,
+  buildCorruptedPartyEnemies,
   buildEndlessCastleDeck,
+  CORRUPTED_PARTY_ENEMY_COUNT,
   buildEndlessTavernDeck,
   buildLegacyReserveDeck,
   buildTavernDeck,
@@ -116,12 +118,16 @@ function checkForStuckLoss(state: GameState): void {
 }
 
 function advanceToNextPlayer(state: GameState): void {
+  // Mission 10: the current enemy's end-of-turn power fires for the turn that's ending, before the
+  // current-player pointer moves on to whoever's turn is starting next (see resolveCorruptedEnemyEndOfTurnEffect).
+  resolveCorruptedEnemyEndOfTurnEffect(state);
   state.pendingDamage = 0;
   state.turnPhase = 'AWAIT_PLAY';
   state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
   flipMissionZoneCard(state);
   rollMissionZoneBonusCard(state);
   flipPilgrimCard(state);
+  flipStartOfTurnZoneCard(state);
   // Mission 8's placement window only ever covers the turn a kill happened on (or the continued turn right
   // after it) — once play moves on to a fresh turn with no kill behind it, close the window back up.
   state.zoneOpenForPlacement = false;
@@ -214,6 +220,71 @@ function checkPilgrimRescue(state: GameState, totalValue: number): void {
   const [rescued] = state.pilgrimZone.splice(idx, 1);
   state.banishPile.push(rescued);
   log(state, `${rescued.kind === 'suited' ? rescued.name ?? `the ${rescued.rank}` : 'A Jester'} is rescued from the mission zone — banished safely, for good.`);
+}
+
+/**
+ * Mission 10 ("Pride to Fall") only: at the START of every turn — unlike Mission 3's flipMissionZoneCard, which
+ * fires at the end — the top of the reserve deck flips face-up into the shared mission zone. Reuses
+ * `missionZone` itself (Mission 10 doesn't use any of the other zone modes), but unlike Mission 3's flip these
+ * cards never grant suit immunity — their combined value instead buffs the current enemy's own dealt attack for
+ * as long as they sit there (see resolvedEnemyAttack). Called both once at mission start (the first player's
+ * first turn) and from advanceToNextPlayer; like every other zone flip, a kill that lets the same player
+ * continue their turn naturally skips a flip that turn, since that path never calls advanceToNextPlayer.
+ */
+function flipStartOfTurnZoneCard(state: GameState): void {
+  if (!state.startOfTurnZoneFlip || !state.currentEnemy) return;
+  const card = state.tavernDeck.shift();
+  if (!card) return;
+  state.missionZone.push(card);
+  const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester';
+  log(state, `The mission zone flips ${label} — the corrupted line grows bolder.`);
+}
+
+/**
+ * Mission 10 only: the current enemy's end-of-turn class power, for the turn that's ending — called from
+ * advanceToNextPlayer BEFORE the current-player pointer advances, so "current player" here still means whoever's
+ * turn just ended (per the transcript's "current player must move a card from hand"). A Cleric enemy drags the
+ * discard pile's top card into the mission zone; a Bard enemy forces that player to move a card from hand into
+ * the zone, skipped entirely if their hand is empty — this picks their lowest-value card, since the transcript
+ * gives the player no choice in the matter ("must move a card"), a judgment call rather than a transcript detail.
+ * Warrior and Paladin enemies have no end-of-turn effect of their own — see resolvedEnemyAttack and
+ * applyEnemyPaladinDamageReduction for their always-on powers instead. Naturally skipped on a turn a kill
+ * happened on, since dealDamageAndCheckDefeat's same-player-continues path never calls advanceToNextPlayer —
+ * exactly the transcript's "defeating an enemy skips end-of-turn effects that turn."
+ */
+function resolveCorruptedEnemyEndOfTurnEffect(state: GameState): void {
+  if (!state.corruptedPartyEnemies || !state.currentEnemy) return;
+  const cls = classForSuit(state.currentEnemy.suit).id;
+  if (cls === 'CLERIC') {
+    const dragged = state.discardPile.pop();
+    if (!dragged) return;
+    state.missionZone.push(dragged);
+    const label = dragged.kind === 'suited' ? dragged.name ?? `the ${dragged.rank}` : 'the Jester';
+    log(state, `${enemyLabel(state.currentEnemy)} drags ${label} from the discard pile into the mission zone.`);
+  } else if (cls === 'BARD') {
+    const player = currentPlayer(state);
+    if (player.hand.length === 0) return;
+    let lowestIdx = 0;
+    for (let i = 1; i < player.hand.length; i++) {
+      if (cardValue(player.hand[i]) < cardValue(player.hand[lowestIdx])) lowestIdx = i;
+    }
+    const [moved] = player.hand.splice(lowestIdx, 1);
+    state.missionZone.push(moved);
+    const label = moved.kind === 'suited' ? moved.name ?? `the ${moved.rank}` : 'the Jester';
+    log(state, `${enemyLabel(state.currentEnemy)} forces ${player.name} to surrender ${label} into the mission zone.`);
+  }
+}
+
+/**
+ * Mission 10 only: an enemy Paladin's extra power — reduces damage it takes by its own base strength (the
+ * pre-zone-bonus figure), floored at 0. Distinct from a Paladin's own Spades power (enemy.spadesShield), which
+ * instead reduces the ENEMY's own attack output — this is a defensive power on the incoming hit itself, with no
+ * analogue anywhere else in the engine.
+ */
+function applyEnemyPaladinDamageReduction(state: GameState, damage: number): number {
+  if (!state.corruptedPartyEnemies || !state.currentEnemy) return damage;
+  if (classForSuit(state.currentEnemy.suit).id !== 'PALADIN') return damage;
+  return Math.max(0, damage - state.currentEnemy.baseAttack);
 }
 
 function drawOneCard(state: GameState, player: PlayerState): boolean {
@@ -403,6 +474,17 @@ function upgradeDefeatedRank(rank: 'J' | 'Q' | 'K', loop: number): { rank: 'J' |
 function resolvedEnemyAttack(state: GameState): number {
   const enemy = state.currentEnemy!;
   if (state.ruleset !== 'legacy') return currentEnemyAttack(enemy);
+  if (state.corruptedPartyEnemies) {
+    // Mission 10: "double total strength (base + mission-zone bonus) BEFORE any Paladin [Spades] reduction is
+    // subtracted" — a different formula shape from every other mission's buff (which all fold their buff into
+    // baseAttack before spadesShield is subtracted, with no multiplier step in between), so this doesn't reuse
+    // currentEnemyAttackWithDiscardBuff.
+    const zoneBonus = state.startOfTurnZoneFlip ? state.missionZone.reduce((sum, c) => sum + cardValue(c), 0) : 0;
+    const totalStrength = enemy.baseAttack + zoneBonus;
+    const isWarrior = classForSuit(enemy.suit).id === 'WARRIOR';
+    const multiplied = isWarrior ? totalStrength * 2 : totalStrength;
+    return Math.max(0, multiplied - enemy.spadesShield);
+  }
   let buff = 0;
   if (state.discardTopBuffsAttack) buff += discardPileTopValue(state.discardPile);
   if (state.ascendingZone) buff += ascendingZoneAttackBuff(state.missionZone);
@@ -498,6 +580,32 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       }
       state.missionZone = [];
       state.zoneImmuneSuits = [];
+    }
+    if (state.corruptedPartyEnemies) {
+      // Mission 10: "Mission-zone cards go to the banish pile normally, or to the discard pile instead on an
+      // exact kill" — unlike Mission 3's endOfTurnZoneFlip (which saves only the single most-recently-flipped
+      // card on an exact kill), the transcript here reads as the WHOLE zone moving to discard together.
+      const exact = remaining === 0;
+      if (state.missionZone.length > 0) {
+        if (exact) {
+          state.discardPile.push(...state.missionZone);
+          log(state, 'An exact hit saves the whole mission zone — sent to the discard pile instead of banished.');
+        } else {
+          state.banishPile.push(...state.missionZone);
+          log(state, 'The mission zone is banished.');
+        }
+        state.missionZone = [];
+      }
+      // Community research's "deck rehabilitation" reward (uncertain — the transcript documents no reward for
+      // this mission at all; see legacy/missions.ts's Mission 10 entry): an exact-damage kill cleanses this
+      // corrupted hero — its original, untouched party card is tracked here and restored to the campaign roster
+      // at mission end (see GameState.restoredPartyCards / party.ts's applyRestoredPartyCards). An overkill
+      // leaves the hero lost for good — no restoration, same as any other Legacy enemy's defeat.
+      if (exact && enemy.sourceCard) {
+        state.restoredPartyCards.push(enemy.sourceCard);
+        const heroLabel = enemy.sourceCard.kind === 'suited' ? enemy.sourceCard.name ?? enemyLabel(enemy) : enemyLabel(enemy);
+        log(state, `${heroLabel}'s corruption breaks under the exact hit — cleansed, they may return to the party.`);
+      }
     }
     if (state.zoneVengeanceOnKill) {
       // Mission 6: whatever's left on the enemy's table after this kill doesn't just fall to the discard pile —
@@ -700,6 +808,9 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.chanterWindow = null;
   state.capturedPilesActive = false;
   state.capturedPiles = [];
+  state.corruptedPartyEnemies = false;
+  state.startOfTurnZoneFlip = false;
+  state.restoredPartyCards = [];
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -710,10 +821,26 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   const n = action.playerIds.length;
   if (n < 1 || n > 4) return fail('Regicide Legacy supports 1-4 players.');
   if (action.playerIds.length !== action.playerNames.length) return fail('Player id/name mismatch.');
-  if (!action.standardCastle && action.enemies.length === 0) return fail('A mission needs at least one enemy.');
+  const corruptedPartyEnemies = action.corruptedPartyEnemies ?? false;
+  if (!action.standardCastle && !corruptedPartyEnemies && action.enemies.length === 0) {
+    return fail('A mission needs at least one enemy.');
+  }
+  if (corruptedPartyEnemies && action.party.filter((c) => c.kind === 'suited').length < CORRUPTED_PARTY_ENEMY_COUNT) {
+    return fail(`Mission 10 needs at least ${CORRUPTED_PARTY_ENEMY_COUNT} eligible party members to corrupt.`);
+  }
 
   const buildRng = makeRng(action.seed);
-  const enemyDeck = action.standardCastle ? buildCastleDeck(buildRng) : action.enemies.map(makeLegacyEnemy);
+  // Mission 10: the 8-enemy fight queue isn't a static list — it's built from the party itself (see
+  // buildCorruptedPartyEnemies), so this needs to run before the reserve deck does, and its leftover party feeds
+  // the reserve deck below instead of the raw action.party (the 8 chosen cards aren't available to draw/play —
+  // they're standing on the other side of the table).
+  const corruptedEnemyBuild = corruptedPartyEnemies ? buildCorruptedPartyEnemies(action.party, buildRng) : null;
+  const enemyDeck = action.standardCastle
+    ? buildCastleDeck(buildRng)
+    : corruptedEnemyBuild
+      ? corruptedEnemyBuild.enemies
+      : action.enemies.map(makeLegacyEnemy);
+  const partyForReserve = corruptedEnemyBuild ? corruptedEnemyBuild.leftoverParty : action.party;
   const capturedPilesActive = action.capturedPilesActive ?? false;
   // Mission 9: 30 cards are split out of the party into 3 captured piles before anything is dealt — the reserve
   // deck for the mission is built from whatever's left of the party, plus any mission-only extras (e.g. a fresh
@@ -721,11 +848,11 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   let capturedPiles: CapturedPile[] = [];
   let reserveDeck: Card[];
   if (capturedPilesActive) {
-    const split = buildCapturedPiles(action.party, buildRng);
+    const split = buildCapturedPiles(partyForReserve, buildRng);
     capturedPiles = split.piles;
     reserveDeck = buildLegacyReserveDeck([...split.leftoverParty, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);
   } else {
-    reserveDeck = buildLegacyReserveDeck([...action.party, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);
+    reserveDeck = buildLegacyReserveDeck([...partyForReserve, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);
   }
   const maxHandSize = MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5;
 
@@ -794,9 +921,13 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.chanterWindow = null;
   state.capturedPilesActive = capturedPilesActive;
   state.capturedPiles = capturedPiles;
+  state.corruptedPartyEnemies = corruptedPartyEnemies;
+  state.startOfTurnZoneFlip = action.startOfTurnZoneFlip ?? false;
+  state.restoredPartyCards = [];
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
   flipPilgrimCard(state); // the first player's turn is starting right now, so the Mission 7 flip applies here too
+  flipStartOfTurnZoneCard(state); // Mission 10: same reasoning — the first turn's start-of-turn flip fires here too
   return ok(state);
 }
 
@@ -983,7 +1114,10 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   const ignoreImmunityForPlay = Boolean(claimedJester) || evergreenActive || enemyCorrupted;
 
   const clubsMultiplier = resolveSuitPowers(state, cards, effectiveSuits, shape.totalValue, ignoreImmunityForPlay, corruptedSuits);
-  const damage = (shape.totalValue + reaverBonus) * clubsMultiplier + arcaneBonus;
+  const rawDamage = (shape.totalValue + reaverBonus) * clubsMultiplier + arcaneBonus;
+  // Mission 10: an enemy Paladin's extra power reduces the damage it takes by its own base strength (see
+  // applyEnemyPaladinDamageReduction) — a no-op for every other mission/enemy.
+  const damage = applyEnemyPaladinDamageReduction(state, rawDamage);
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
   const defeated = dealDamageAndCheckDefeat(state, damage);
@@ -1565,6 +1699,9 @@ export function createLobbyState(): GameState {
     chanterWindow: null,
     capturedPilesActive: false,
     capturedPiles: [],
+    corruptedPartyEnemies: false,
+    startOfTurnZoneFlip: false,
+    restoredPartyCards: [],
   };
 }
 
