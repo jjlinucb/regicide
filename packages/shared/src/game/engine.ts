@@ -1513,7 +1513,10 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
     cards[0].kind === 'suited' &&
     isCompanionCard(cards[0]);
 
-  const canOpenComboAssist = state.ruleset === 'legacy' && !claimedJester && (kinfolkAssist || scarletAssist);
+  // Solo play has no one else to slip in a card, so the assist window would just force a pointless manual
+  // "resolve" click every attack — skip it and resolve immediately instead.
+  const canOpenComboAssist =
+    state.ruleset === 'legacy' && !claimedJester && state.players.length > 1 && (kinfolkAssist || scarletAssist);
 
   if (canOpenComboAssist) {
     state.comboAssist = { attackerId: player.id, cardIds: cards.map((c) => c.id) };

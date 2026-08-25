@@ -204,7 +204,22 @@ export const MISSIONS: Mission[] = [
       'ash, where the corruption didn\'t creep in from outside — it was summoned on purpose, by the academy\'s ' +
       'own staff. One of the Syndicate\'s own is pulled aside before the fight even starts, leaving the rest to ' +
       'work the blaze as it spreads and catches on everything it touches.',
-    enemies: [enemy('The Ash-Bound Warden', 'PALADIN', 28, 13), enemy('Cinderleaf, First Scholar', 'CLERIC', 32, 15)],
+    // A 6-enemy gauntlet of academy instructors, escalating Jack/Queen/King-style in three stat tiers (30/10 x3,
+    // 40/15 x2, 60/20 x1) — mirrors the base game's own J/Q/K stat table, tripled into a mission-specific lineup.
+    // Names are a placeholder invention (no verified source for them); the stat tiers and gauntlet shape came from
+    // the user's own research into the physical Regicide Legacy campaign, not the tutorial transcript, which only
+    // ever refers to "the enemy" singular.
+    enemies: [
+      enemy('Midnight the Cat', 'CLERIC', 30, 10, 'BARD'),
+      enemy('Japat', 'BARD', 30, 10, 'WARRIOR'),
+      enemy('Blast', 'WARRIOR', 30, 10, 'PALADIN'),
+      enemy('Senior Instructor Vail', 'PALADIN', 40, 15, 'CLERIC'),
+      enemy('Senior Instructor Rowe', 'CLERIC', 40, 15, 'WARRIOR'),
+      enemy('The Grand Mage', 'BARD', 60, 20, 'PALADIN'),
+    ],
+    // Only an exact-damage kill actually removes an enemy from the gauntlet — an overkill just recycles it to the
+    // back of the line, wounds healed (same mechanic Mission 2 already uses; see GameState.exactKillOnly).
+    exactKillOnly: true,
     // One random party member sits this mission out, and every end of turn the reserve deck feeds the fire
     // another class of immunity (see GameState.endOfTurnZoneFlip / missionZone).
     sidelineCount: 1,
