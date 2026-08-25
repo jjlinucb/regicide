@@ -254,6 +254,16 @@ export function GamePage({
             </button>
           </div>
         )}
+        {state.rollingZoneBonus && (
+          <div className="legacy-jester-claim-banner">
+            <span>
+              🍄 Mission Zone (rolling):{' '}
+              {state.rollingZoneCard
+                ? `${state.rollingZoneCard.kind === 'suited' ? state.rollingZoneCard.name ?? state.rollingZoneCard.rank : 'Jester'} — buffing the enemy's attack by ${cardValue(state.rollingZoneCard)} until it cycles out next turn.`
+                : 'empty for now.'}
+            </span>
+          </div>
+        )}
         {state.zoneVengeanceOnKill && state.missionZone.length > 0 && (
           <div className="legacy-jester-claim-banner">
             <span>

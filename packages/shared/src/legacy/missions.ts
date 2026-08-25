@@ -32,10 +32,14 @@ export interface Mission {
   discardTopBuffsAttack?: boolean;
   /** See GameState.exactKillToReserveDeck. */
   exactKillToReserveDeck?: boolean;
+  /** See GameState.corruptedReturnQueue. */
+  corruptedReturnQueue?: boolean;
   /** See GameState.exactKillSplashDamage. */
   exactKillSplashDamage?: boolean;
   /** See GameState.START_LEGACY_MISSION action's presetMissionZone. */
   presetMissionZone?: Card[];
+  /** See GameState.rollingZoneBonus. */
+  rollingZoneBonus?: boolean;
   /** See GameState.zoneVengeanceOnKill. */
   zoneVengeanceOnKill?: boolean;
   /** See GameState.pilgrimMechanic. */
@@ -61,6 +65,15 @@ function recruit(name: string, cls: ClassId, rank: RecruitSpec['rank'], suit?: S
 /** A standout reward: same as recruit(), but also grants the class's signature ability permanently. */
 function specialRecruit(name: string, cls: ClassId, rank: RecruitSpec['rank'], suit?: Suit): RecruitSpec {
   return { name, class: cls, rank, special: true, suit };
+}
+
+/**
+ * Mission 4's Beast Companion reward (x4): a recruit that plays by the Animal/Beast Companion pairing rule (see
+ * rules.ts's isBeastCompanion) instead of the combo rule — paired with one other card, it copies that card's
+ * strength instead of contributing its own printed value.
+ */
+function beastRecruit(name: string, cls: ClassId, rank: RecruitSpec['rank'], suit?: Suit): RecruitSpec {
+  return { name, class: cls, rank, suit, beast: true };
 }
 
 /** A one-off companion card placed straight into a mission's static presetMissionZone (never part of the reserve deck or party). */
@@ -98,18 +111,33 @@ export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemyS
 export const MISSIONS: Mission[] = [
   {
     id: 1,
-    title: 'The First Contract',
+    title: 'Call to Arms',
     story:
-      "A rot has crept into the capital itself, and the Golden Blade Syndicate takes its first commission to " +
-      "root it out: storm the old stronghold and put down its full corrupted court, twelve strong — the same " +
-      "fight every recruit trains on, before the campaign starts bending the rules on them.",
+      "A rot has crept into the capital itself, and the Golden Blade Syndicate is summoned before the ruling " +
+      "council to answer for it: storm the old stronghold and put down its full corrupted court, twelve strong " +
+      "— the same fight every recruit trains on, before the campaign starts bending the rules on them.",
     enemies: [],
     standardCastle: true,
-    // Reward: the Kinfolk Flute relic — once a player commits cards to an attack, any other player may
-    // silently slip in a matching card from hand to help complete the combo, no discussion allowed — plus a
-    // pair of basic recruits pulled from the liberated stronghold to bolster the party's opening roster.
+    // This mission is the tutorial baseline the rest of the campaign builds on — per the transcript, every one
+    // of its "special rules" turns out to already be the engine's own default behavior, not a mission-specific
+    // flag: cards played toward the fight already sit in enemy.tableCards and only reach the discard pile on
+    // defeat (see engine.ts's dealDamageAndCheckDefeat/playCards — nothing here sends them to discard mid-fight);
+    // a Paladin's Spades reduction already accumulates on enemy.spadesShield across the whole fight instead of
+    // being recalculated per play (see resolveSuitPowers); and landing the killing blow already skips that
+    // enemy's retaliation and lets the same player act first against the next one (dealDamageAndCheckDefeat's
+    // `if (defeated) return ok(state); // enemy was defeated, same player continues against the next one` —
+    // no AWAIT_DEFEND is ever opened for a hit that kills). The one genuine deviation from the baseline Legacy
+    // ruleset — exact-kill sends the felled enemy to the top of the reserve deck instead of the discard pile —
+    // reuses the existing exactKillToReserveDeck flag Mission 4 also uses. The corrupting-a-card and
+    // adding-a-recruit beats the transcript shows are likewise just the existing SuitedCard.corrupted mechanic
+    // and an ordinary mission reward — nothing mission-1-specific to add.
+    exactKillToReserveDeck: true,
+    // Reward: the Kinfolk Flute relic only — once a player commits cards to an attack, any other player may
+    // silently slip in a matching card from hand to help complete the combo, no discussion allowed. (The
+    // transcript names no recruit reward for this mission — the two basic recruits the shipped version invented
+    // here are dropped.)
     reward: {
-      recruits: [recruit('Coren Ashvale', 'WARRIOR', '2'), recruit('Dessa Windrow', 'BARD', '2')],
+      recruits: [],
       relics: ['KINFOLK_FLUTE'],
     },
   },
@@ -151,14 +179,21 @@ export const MISSIONS: Mission[] = [
     // another class of immunity (see GameState.endOfTurnZoneFlip / missionZone).
     sidelineCount: 1,
     endOfTurnZoneFlip: true,
-    // Reward: the Mage class itself — 4 new party members, the "Lucky 4" ranks (3/5/7/9), like the other
-    // faction rewards this campaign grants (see Mission 6's Guardian reward).
+    // Reward: the Mage class itself — per the transcript, a full 10 new party members (one per non-royal rank,
+    // 2 through Ace), not the "Lucky 4" ranks (3/5/7/9) the shipped version originally granted here — that
+    // smaller 4-recruit pattern belongs to the later faction rewards instead (e.g. Mission 6's Guardians).
     reward: {
       recruits: [
+        recruit('Ilyra Sparkwrit', 'MAGE', '2', 'H'),
         recruit('Corvath the Kindled', 'MAGE', '3', 'D'),
+        recruit('Dassin Coalglow', 'MAGE', '4', 'C'),
         recruit('Ophira Emberquill', 'MAGE', '5', 'S'),
+        recruit('Wystan Pyrewick', 'MAGE', '6', 'H'),
         recruit('Marn Cindervoice', 'MAGE', '7', 'D'),
+        recruit('Talis Ashborn', 'MAGE', '8', 'C'),
         recruit('Ruven Ashcaller', 'MAGE', '9', 'S'),
+        recruit('Sorrel Brandwake', 'MAGE', '10', 'H'),
+        recruit('Kael Emberdrake', 'MAGE', 'A', 'D'),
       ],
     },
   },
@@ -193,11 +228,25 @@ export const MISSIONS: Mission[] = [
     // kill sends the played cards to the discard pile as normal, in the order the attacker chose to play them
     // — letting the party bury their high cards and leave a low one on top to blunt the next buff.
     exactKillToReserveDeck: true,
+    // The transcript's other named mechanic: a defeated specimen doesn't stay gone — it rejoins the back of the
+    // fight queue corrupted, following the same rule an ordinary corrupted party card does (ignores immunity,
+    // costs a reserve-deck banish — see EnemyState.corrupted / engine.ts's resolveCommittedPlay). The shipped
+    // version never had this at all; a 12-enemy mission could in principle grow past 12 fights if every specimen
+    // requeues once, which is exactly the transcript's intent.
+    corruptedReturnQueue: true,
+    // Reward: two relics, not the Mage/Cleric recruits the shipped version originally granted here. Beast
+    // Companions (x4) play by the same Animal Companion pairing rule but copy the paired card's strength instead
+    // of contributing their own flat value (see rules.ts's validatePlayShape); the Scarlet Whistle then extends
+    // Mission 1's Kinfolk Flute silent-assist window to a lone Animal/Beast Companion attack (see engine.ts's
+    // playCards' scarletAssist).
     reward: {
       recruits: [
-        specialRecruit('Thessaly Brightbolt', 'MAGE', '8', 'H'),
-        recruit('Brother Talyn', 'CLERIC', '9'),
+        beastRecruit('Fennow', 'WARRIOR', 'A', 'C'),
+        beastRecruit('Cressida', 'BARD', 'A', 'D'),
+        beastRecruit('Orwick', 'CLERIC', 'A', 'H'),
+        beastRecruit('Sabrielle', 'PALADIN', 'A', 'S'),
       ],
+      relics: ['SCARLET_WHISTLE'],
     },
   },
   {
@@ -219,12 +268,23 @@ export const MISSIONS: Mission[] = [
       enemy('Elder Sporeling Wailer', 'CLERIC', 30, 15),
       enemy('Elder Sporeling Bulwark', 'PALADIN', 30, 15),
     ],
-    // Myla (value 7) sits permanently in the mission zone for the whole fight — every enemy here is immune to
-    // her class the same way Mission 3's zone grants immunity, but nothing flips in or out after this (no
-    // endOfTurnZoneFlip), so it's a single fixed immunity rather than a growing one.
+    // Myla (value 7) sits permanently in the mission zone for the whole fight, immune to her own class the same
+    // way Mission 3's zone grants immunity — she's the zone's fixed anchor, never flipped or banished, which is
+    // what lets her still plausibly be "in the mission zone" again come Mission 6.
     presetMissionZone: [zoneCompanion('Myla', 'H', '7')],
+    // The grove's *other* zone slot is what actually rolls: per the tutorial transcript ("a rolling mission
+    // zone/banish-pile cycle each turn feeds bonus strength to the current enemy"), a single card cycles through
+    // a second, separate slot every turn — last turn's card banished for good, a fresh one flipped in off the
+    // reserve deck to replace it, its value buffing whatever Sporeling is currently being fought (see
+    // GameState.rollingZoneBonus / engine.ts's rollMissionZoneBonusCard). Keeping this as its own slot instead of
+    // folding it into Myla's presetMissionZone is deliberate: it satisfies the transcript's "rolling... feeds
+    // bonus strength" mechanic without disturbing Myla's static presence, which Mission 6's story leans on.
+    rollingZoneBonus: true,
     // An exact kill on a Sporeling bursts outward: the enemy's own base attack is dealt as splash damage
-    // straight into whatever's newly revealed — occasionally strong enough to chain into a second kill.
+    // straight into whatever's newly revealed — occasionally strong enough to chain into a second kill. This is
+    // the transcript's other named mechanic ("defeating an enemy with exact damage carries bonus damage into the
+    // next fight, equal to the fallen enemy's base strength") — already covered by this existing flag, no
+    // separate implementation needed.
     exactKillSplashDamage: true,
     // Reward: the Reaver faction — 4 permanent new recruits (playing one tears the top card off the reserve
     // deck for bonus damage, banished either way, and doubles the whole attack, stacking to quadruple with a

@@ -25,6 +25,16 @@ export function isAnimalCompanion(card: Card): boolean {
   return card.kind === 'suited' && card.rank === 'A';
 }
 
+/** Legacy-only (Mission 4): a Beast Companion counts as a "companion" card for pairing purposes too (see isCompanionCard) — see SuitedCard.beast. */
+export function isBeastCompanion(card: Card): boolean {
+  return card.kind === 'suited' && Boolean(card.beast);
+}
+
+/** True for any card that plays by the Animal/Beast Companion pairing rule instead of the combo rule. */
+export function isCompanionCard(card: Card): boolean {
+  return isAnimalCompanion(card) || isBeastCompanion(card);
+}
+
 /** A card's class suit(s) — two for a Dual-class Stickers card (see SuitedCard.secondSuit), one otherwise. */
 export function cardSuits(card: Extract<Card, { kind: 'suited' }>): Suit[] {
   return card.secondSuit ? [card.suit, card.secondSuit] : [card.suit];
@@ -35,7 +45,7 @@ export interface PlayShape {
   suits: Suit[];
 }
 
-/** Validates a proposed set of played cards (excluding the single-jester case, handled separately) per the Combos/Animal Companion rules. Returns an error string or the resolved shape. */
+/** Validates a proposed set of played cards (excluding the single-jester case, handled separately) per the Combos/Animal-or-Beast-Companion rules. Returns an error string or the resolved shape. */
 export function validatePlayShape(cards: Card[]): PlayShape | { error: string } {
   if (cards.length === 0) return { error: 'No cards selected.' };
   if (cards.some((c) => c.kind === 'jester')) {
@@ -43,21 +53,27 @@ export function validatePlayShape(cards: Card[]): PlayShape | { error: string } 
   }
 
   const suited = cards as Extract<Card, { kind: 'suited' }>[];
-  const animalCount = suited.filter((c) => c.rank === 'A').length;
+  const companionCount = suited.filter(isCompanionCard).length;
 
   if (cards.length === 1) {
     return { totalValue: cardValue(cards[0]), suits: cardSuits(suited[0]) };
   }
 
-  if (cards.length === 2 && animalCount >= 1) {
-    // Animal Companion paired with one other card (which may be another Animal Companion). No sum cap.
-    const totalValue = suited.reduce((sum, c) => sum + cardValue(c), 0);
+  if (cards.length === 2 && companionCount >= 1) {
+    // Animal/Beast Companion paired with one other card (which may itself be a companion). No sum cap. A plain
+    // Animal Companion contributes its own printed value (an Ace's flat 1) same as always; a Beast Companion
+    // instead copies whatever value its partner card contributes (see SuitedCard.beast) — computed per-card so
+    // two companions paired together (Ace+Ace, Ace+Beast, Beast+Beast) still fall back to a normal value sum.
+    const [a, b] = suited;
+    const contribution = (card: Extract<Card, { kind: 'suited' }>, partner: Extract<Card, { kind: 'suited' }>) =>
+      isBeastCompanion(card) ? cardValue(partner) : cardValue(card);
+    const totalValue = contribution(a, b) + contribution(b, a);
     const suits = Array.from(new Set(suited.flatMap(cardSuits)));
     return { totalValue, suits };
   }
 
-  if (animalCount > 0) {
-    return { error: 'Animal Companions can only be played alone or paired with exactly one other card.' };
+  if (companionCount > 0) {
+    return { error: 'Animal/Beast Companions can only be played alone or paired with exactly one other card.' };
   }
 
   // Combo: 2-4 cards of the same rank, summing to 10 or less.

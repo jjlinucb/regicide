@@ -73,11 +73,13 @@ describe('legacy: mission setup', () => {
     expect(getMission(999)).toBeUndefined();
   });
 
-  it('mission 1 is the standard 12-enemy Castle deck and rewards the Kinfolk Flute relic plus 2 basic recruits', () => {
+  it('mission 1 ("Call to Arms") is the standard 12-enemy Castle deck, sends exact kills to the reserve deck, and rewards only the Kinfolk Flute relic', () => {
     const mission1 = getMission(1)!;
+    expect(mission1.title).toBe('Call to Arms');
     expect(mission1.standardCastle).toBe(true);
+    expect(mission1.exactKillToReserveDeck).toBe(true);
     expect(mission1.reward.relics).toEqual(['KINFOLK_FLUTE']);
-    expect(mission1.reward.recruits.length).toBe(2);
+    expect(mission1.reward.recruits.length).toBe(0);
     const ids = ['p0'];
     const res = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',
@@ -109,13 +111,25 @@ describe('legacy: mission setup', () => {
     expect(mission2.jesterClaimNextPlayerOnly).toBe(true);
   });
 
-  it('mission 3 sidelines a party member, flips the mission zone every turn, and rewards 4 Mage recruits', () => {
+  it('mission 3 sidelines a party member, flips the mission zone every turn, and rewards 10 Mage recruits', () => {
     const mission3 = getMission(3)!;
     expect(mission3.sidelineCount).toBe(1);
     expect(mission3.endOfTurnZoneFlip).toBe(true);
-    expect(mission3.reward.recruits.length).toBe(4);
+    expect(mission3.reward.recruits.length).toBe(10);
     expect(mission3.reward.recruits.every((r) => r.class === 'MAGE')).toBe(true);
-    expect(mission3.reward.recruits.map((r) => r.rank).sort()).toEqual(['3', '5', '7', '9']);
+    expect(mission3.reward.recruits.map((r) => r.rank).sort()).toEqual(
+      ['10', '2', '3', '4', '5', '6', '7', '8', '9', 'A'].sort(),
+    );
+  });
+
+  it('mission 4 buffs enemy attack from the discard pile, seals exact kills to the reserve deck, requeues defeats corrupted, and rewards Beast Companions + the Scarlet Whistle relic', () => {
+    const mission4 = getMission(4)!;
+    expect(mission4.discardTopBuffsAttack).toBe(true);
+    expect(mission4.exactKillToReserveDeck).toBe(true);
+    expect(mission4.corruptedReturnQueue).toBe(true);
+    expect(mission4.reward.relics).toEqual(['SCARLET_WHISTLE']);
+    expect(mission4.reward.recruits.length).toBe(4);
+    expect(mission4.reward.recruits.every((r) => r.beast)).toBe(true);
   });
 });
 
@@ -476,6 +490,59 @@ describe('legacy: Kinfolk Flute relic (mission 1) — combo-assist window', () =
   });
 });
 
+describe('legacy: mission 1 mechanics (exact-kill to reserve deck, killer skips retaliation and acts first)', () => {
+  function startCallToArms(n: number, enemies: LegacyEnemySpec[]): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'call-to-arms-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      exactKillToReserveDeck: true,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('sends an exact kill to the top of the reserve deck instead of the discard pile', () => {
+    const boss: LegacyEnemySpec = { name: 'Court Guard', suit: 'C', health: 10, attack: 1 };
+    let state = startCallToArms(1, [boss]);
+    state = rig(state, [suited('S', '10')]); // exact 10 damage, Spades doesn't double
+
+    const beforeReserveTop = state.tavernDeck[0];
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.tavernDeck[0]).not.toBe(beforeReserveTop);
+    expect(state.tavernDeck[0].kind).toBe('suited');
+    if (state.tavernDeck[0].kind === 'suited') expect(state.tavernDeck[0].suit).toBe('C');
+    // The played card itself still lands in the discard pile.
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '10')).toBe(true);
+  });
+
+  it('whoever lands the killing blow suffers no retaliation and immediately acts first against the next enemy', () => {
+    const first: LegacyEnemySpec = { name: 'Court Guard', suit: 'H', health: 10, attack: 50 }; // huge attack to prove retaliation was skipped
+    const second: LegacyEnemySpec = { name: 'Court Champion', suit: 'D', health: 20, attack: 5 };
+    let state = startCallToArms(2, [first, second]);
+    const killerId = state.players[state.currentPlayerIndex].id;
+    state = rig(state, [suited('C', '9')]); // Clubs doubles: 18 damage, overkills the 10-health guard
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: killerId, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    // No retaliation from the felled guard's huge attack: straight back to AWAIT_PLAY, not AWAIT_DEFEND.
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+    expect(state.pendingDamage).toBe(0);
+    // The killer, not the next player in turn order, immediately faces the new enemy.
+    expect(state.players[state.currentPlayerIndex].id).toBe(killerId);
+    expect(state.currentEnemy?.name).toBe('Court Champion');
+  });
+});
+
 describe('legacy: mission 2 modified Jester rule (next player only)', () => {
   it('rejects a claim from anyone but the next player in turn order, and allows the next player', () => {
     const enemy: LegacyEnemySpec = { name: 'Hydra Head', suit: 'H', secondSuit: 'D', health: 100, attack: 1 };
@@ -661,6 +728,130 @@ describe('legacy: mission 4 mechanics (discard-pile attack buff + exact-kill to 
   });
 });
 
+describe('legacy: mission 4 corrupted-return-queue (defeated enemies rejoin, corrupted)', () => {
+  function startFusionMission(enemies: LegacyEnemySpec[]): GameState {
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'fusion-corrupt-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      corruptedReturnQueue: true,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('requeues a defeated enemy to the back of the fight queue, corrupted, instead of removing it for good', () => {
+    const first: LegacyEnemySpec = { name: 'Specimen A', suit: 'S', health: 10, attack: 1 };
+    const second: LegacyEnemySpec = { name: 'Specimen B', suit: 'H', health: 10, attack: 1 };
+    let state = startFusionMission([first, second]);
+    state = rig(state, [suited('C', '9')]); // Clubs doubles: 18 damage, overkills the 10-health Specimen A
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.currentEnemy?.name).toBe('Specimen B'); // next enemy up front, as normal
+    expect(state.castleDeck.some((e) => e.name === 'Specimen A' && e.corrupted)).toBe(true);
+  });
+
+  it("a corrupted enemy's immunity is ignored automatically and costs a reserve-deck banish, without needing a Jester", () => {
+    let state = startFusionMission([{ name: 'Specimen A', suit: 'S', health: 10, attack: 1 }]);
+    state = structuredClone(state);
+    state.tavernDeck = [suited('C', '9'), ...state.tavernDeck]; // will be banished as the corrupted-enemy cost
+    state = rig(state, [suited('S', '2')], { corrupted: true }); // Spades card vs a Spades-immune corrupted enemy
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.log.some((e) => e.message.includes('blocked'))).toBe(false);
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '9')).toBe(true);
+    expect(state.currentEnemy?.spadesShield).toBe(2); // Spades power actually resolved, immunity ignored
+  });
+
+  it('does not requeue a corrupted enemy a second time once it is defeated again', () => {
+    let state = startFusionMission([{ name: 'Specimen A', suit: 'S', health: 10, attack: 1 }]);
+    state = rig(state, [suited('C', '9')], { corrupted: true }); // overkill, already corrupted
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.phase).toBe('WON'); // no further enemies, and no re-requeue keeping the fight open
+  });
+});
+
+describe('legacy: mission 4 Beast Companions (strength-copying pair) + Scarlet Whistle relic', () => {
+  function startBeastMission(): GameState {
+    const boss: LegacyEnemySpec = { name: 'Specimen A', suit: 'H', health: 100, attack: 1 };
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0', 'p1'],
+      playerNames: ['Player 0', 'Player 1'],
+      seed: 'beast-test',
+      party: buildInitialParty(),
+      enemies: [boss],
+      jesterCount: 0,
+      relics: ['SCARLET_WHISTLE'],
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('a Beast Companion paired with a card copies that card\'s strength instead of adding its own flat value', () => {
+    let state = startBeastMission();
+    const beast: SuitedCard = { ...suited('C', 'A'), beast: true };
+    const partner = suited('C', '7');
+    state = rig(state, [beast, partner]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [beast.id, partner.id] }),
+    );
+    state = res.state;
+
+    // Clubs doubles: (7 copied + 7) * 2 = 28 — an ordinary Animal Companion would only have added its own 1.
+    expect(state.currentEnemy?.damageTaken).toBe(28);
+  });
+
+  it('two plain Animal Companions (Aces) paired together still just sum their own values, unaffected by the beast rule', () => {
+    let state = startBeastMission();
+    const aceA = suited('C', 'A');
+    const aceB = suited('D', 'A');
+    state = rig(state, [aceA, aceB]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [aceA.id, aceB.id] }),
+    );
+    state = res.state;
+
+    // Clubs doubles: (1 + 1) * 2 = 4.
+    expect(state.currentEnemy?.damageTaken).toBe(4);
+  });
+
+  it('Scarlet Whistle opens a silent-assist window when a lone Animal/Beast Companion is played alone', () => {
+    let state = startBeastMission();
+    const beast: SuitedCard = { ...suited('S', 'A'), beast: true };
+    state = rig(state, [beast]);
+    const attackerId = state.players[0].id;
+    const assisterId = state.players[1].id;
+    state.players[1].hand = [suited('S', '6')];
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [beast.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_COMBO_ASSIST');
+
+    const assistCardId = state.players[1].hand[0].id;
+    res = ensureOk(applyAction(state, { type: 'ASSIST_COMBO', playerId: assisterId, cardId: assistCardId }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'RESOLVE_COMBO', playerId: attackerId }));
+    state = res.state;
+
+    // Beast copies the assisted-in Spades-6's value: Spades reduces attack by 6 (copied) + 6 (the real card) = 12.
+    expect(state.currentEnemy?.spadesShield).toBe(12);
+  });
+});
+
 describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone, exact-kill splash)', () => {
   function reaverCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
     return { ...suited(suit, rank), reaver: true, ...(special ? { special: 'PLUNDER' } : {}) };
@@ -669,7 +860,7 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone,
   function startCrimsonMission(
     n: number,
     enemies: LegacyEnemySpec[],
-    opts: { presetMissionZone?: Card[]; exactKillSplashDamage?: boolean } = {},
+    opts: { presetMissionZone?: Card[]; exactKillSplashDamage?: boolean; rollingZoneBonus?: boolean } = {},
   ): GameState {
     const ids = Array.from({ length: n }, (_, i) => `p${i}`);
     const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
@@ -761,6 +952,48 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone,
 
     expect(state.currentEnemy?.name).toBe('Second Sporeling');
     expect(state.currentEnemy?.damageTaken).toBe(7); // First Sporeling's base attack (7), splashed in
+  });
+
+  it("cycles a fresh card from the reserve deck into its own rolling zone slot at end of turn, without disturbing Myla's static seat", () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
+    const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
+    let state = startCrimsonMission(1, [boss], { presetMissionZone: [myla], rollingZoneBonus: true });
+    state = structuredClone(state);
+    state.tavernDeck = [suited('C', '4'), ...state.tavernDeck];
+    state = rig(state, [suited('D', '2')]);
+    expect(state.rollingZoneCard).toBeNull(); // nothing cycled in yet — only happens at end of turn
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = res.state;
+    // Solo game: yielding with a live enemy attack goes to AWAIT_DEFEND — cover it to trigger the end-of-turn cycle.
+    const res2 = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
+    state = res2.state;
+
+    // The rolling slot picked up the reserve deck's top card...
+    expect(state.rollingZoneCard).toMatchObject({ suit: 'C', rank: '4' });
+    // ...while Myla's static seat in missionZone is untouched, still granting Hearts immunity.
+    expect(state.missionZone).toEqual([myla]);
+    expect(state.zoneImmuneSuits).toEqual(['H']);
+  });
+
+  it("buffs the current enemy's attack by the rolling card's value, and banishes the outgoing card when a new one cycles in", () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 5 };
+    const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
+    let state = startCrimsonMission(2, [boss], { presetMissionZone: [myla], rollingZoneBonus: true });
+    state = structuredClone(state);
+    state.rollingZoneCard = suited('C', '4'); // pretend a card already cycled in on a prior turn
+    state.tavernDeck = [suited('D', '9'), ...state.tavernDeck];
+    state = rig(state, [suited('D', '9')]); // covers the buffed attack exactly
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = res.state;
+    expect(state.pendingDamage).toBe(9); // 5 base + 4 from the rolling card that was still in play this turn
+    const res2 = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
+    state = res2.state;
+
+    // The 4 that just buffed the attack is now banished for good, replaced by the fresh 9.
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '4')).toBe(true);
+    expect(state.rollingZoneCard).toMatchObject({ suit: 'D', rank: '9' });
   });
 });
 
@@ -1203,7 +1436,12 @@ describe('legacy: mission 8 mechanics (ascending mission zone chain)', () => {
       ...opts,
     });
     if (!res.ok) throw new Error(res.error);
-    return res.state;
+    // PLACE_IN_ZONE is gated to right after an enemy kill (see GameState.zoneOpenForPlacement) — most of these
+    // scenario tests exercise the placement mechanic directly rather than replaying a full kill first, so open
+    // the window here the same way a kill normally would.
+    const state = structuredClone(res.state);
+    state.zoneOpenForPlacement = true;
+    return state;
   }
 
   const puppy: Card = { id: 'puppy', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true };
@@ -1304,6 +1542,77 @@ describe('legacy: mission 8 mechanics (ascending mission zone chain)', () => {
     expect(state.tavernDeck.length).toBe(reserveBefore + 2); // puppy + ten shuffled to the bottom
     expect(state.zonePurge).toBeNull();
     expect(state.zoneClosed).toBe(true); // still closed — the purge only fires once
+  });
+});
+
+describe('legacy: mission 8 placement gating (zoneOpenForPlacement)', () => {
+  it('rejects PLACE_IN_ZONE on a normal turn with no recent kill', () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 100, attack: 1 };
+    const puppy: Card = { id: 'puppy', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true };
+    const ids = ['p0'];
+    const names = ['Player 0'];
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'gate-test',
+      party: buildInitialParty(),
+      enemies: [boss],
+      jesterCount: 0,
+      ascendingZone: true,
+      presetMissionZone: [puppy],
+    });
+    let state = ensureOk(res).state;
+    expect(state.zoneOpenForPlacement).toBe(false); // no kill has happened yet
+    state = rig(state, [suited('D', '2')]);
+
+    const placeRes = applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: state.players[0].hand[0].id });
+    expect(placeRes.ok).toBe(false);
+  });
+
+  it('opens the window on the turn immediately after a kill, and closes it again once that turn ends', () => {
+    const weak: LegacyEnemySpec = { name: 'Weakling', suit: 'S', health: 1, attack: 1 };
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 100, attack: 0 };
+    const puppy: Card = { id: 'puppy', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true };
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'gate-test-2',
+      party: buildInitialParty(),
+      enemies: [weak, boss],
+      jesterCount: 0,
+      ascendingZone: true,
+      presetMissionZone: [puppy],
+    });
+    let state = ensureOk(res).state;
+    const strike = suited('S', '2'); // a Spades card, no immunity here — kills the 1-health Weakling outright
+    state = rig(state, [strike]);
+
+    const killRes = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [strike.id] }));
+    state = killRes.state;
+
+    // The kill let the same player continue their turn against the Troll — the placement window is now open.
+    expect(state.currentEnemy?.name).toBe('Troll');
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+    expect(state.zoneOpenForPlacement).toBe(true);
+
+    const two: Card = { id: 'p2', kind: 'suited', suit: 'D', rank: '2', name: 'Old Yarrow', pilgrim: true };
+    state = rig(state, [two]);
+    const placeRes = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: two.id }));
+    state = placeRes.state;
+    expect(state.missionZone.map((c) => c.id)).toEqual(['puppy', 'p2']);
+
+    // Placing in the zone ends the turn — the Troll's 0 attack means it advances straight to the next player,
+    // closing the placement window behind it.
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+    expect(state.zoneOpenForPlacement).toBe(false);
+
+    // A later turn with no fresh kill can't place again.
+    const three: Card = { id: 'p3', kind: 'suited', suit: 'D', rank: '3', pilgrim: true };
+    state = rig(state, [three]);
+    const secondPlaceRes = applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: three.id });
+    expect(secondPlaceRes.ok).toBe(false);
   });
 });
 

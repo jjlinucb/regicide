@@ -75,6 +75,8 @@ export interface RecruitSpec {
   special?: boolean;
   /** Required for MAGE, REAVER, GUARDIAN, DRUID, and EVERGREEN recruits only — none has a suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */
   suit?: Suit;
+  /** Mission 4's Beast Companion reward (x4): marks the built card with SuitedCard.beast (see rules.ts's isBeastCompanion). Tied to one of the 4 base classes like any other recruit — just also plays by the Animal/Beast Companion pairing rule. */
+  beast?: boolean;
 }
 
 /**
@@ -99,6 +101,7 @@ export function buildRecruitCard(spec: RecruitSpec): Card {
     ...(spec.class === 'CHANTER' ? { chanter: true } : {}),
     ...(spec.class === 'EVERGREEN' ? { evergreen: true } : {}),
     ...(spec.special ? { special: CLASS_THEME[spec.class].specialAbility } : {}),
+    ...(spec.beast ? { beast: true } : {}),
   };
 }
 

@@ -102,7 +102,7 @@ describe('legacy campaign integration', () => {
     const legacyAfterWin = await legacyAfterWinPromise;
     expect(legacyAfterWin.missionsCompleted).toEqual([1]);
     expect(legacyAfterWin.currentMission).toBe(2);
-    expect(legacyAfterWin.party.length).toBe(42); // mission 1's reward is the Kinfolk Flute relic plus 2 basic recruits
+    expect(legacyAfterWin.party.length).toBe(40); // mission 1's reward is the Kinfolk Flute relic only, no recruits
     expect(legacyAfterWin.permanentRules).toEqual(['KINFOLK_FLUTE']);
 
     // Same flow as classic Regicide: after a mission ends, the host restarts (LOBBY) before the
@@ -121,7 +121,7 @@ describe('legacy campaign integration', () => {
     );
     expect(resumed.ok).toBe(true);
     const resumedLegacyState = await resumedLegacyStatePromise;
-    expect(resumedLegacyState.party.length).toBe(42);
+    expect(resumedLegacyState.party.length).toBe(40);
     expect(resumedLegacyState.permanentRules).toEqual(['KINFOLK_FLUTE']);
     expect(resumedLegacyState.currentMission).toBe(2);
   });

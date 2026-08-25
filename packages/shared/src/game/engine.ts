@@ -17,6 +17,7 @@ import {
   currentEnemyAttack,
   currentEnemyAttackWithDiscardBuff,
   discardPileTopValue,
+  isCompanionCard,
   isSuitBlockedByImmunity,
   MAX_SOLO_JESTERS,
   validatePlayShape,
@@ -119,7 +120,11 @@ function advanceToNextPlayer(state: GameState): void {
   state.turnPhase = 'AWAIT_PLAY';
   state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
   flipMissionZoneCard(state);
+  rollMissionZoneBonusCard(state);
   flipPilgrimCard(state);
+  // Mission 8's placement window only ever covers the turn a kill happened on (or the continued turn right
+  // after it) — once play moves on to a fresh turn with no kill behind it, close the window back up.
+  state.zoneOpenForPlacement = false;
   checkForStuckLoss(state);
 }
 
@@ -157,6 +162,28 @@ function flipMissionZoneCard(state: GameState): void {
     log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the enemy is now also immune to ${cardSuits(card).map((s) => classForSuit(s).name).join(' & ')}.`);
   } else {
     log(state, 'The mission zone flips a Jester.');
+  }
+}
+
+/**
+ * Mission 5 ("High and Mighty") only: a single "rolling" card cycles through its own zone slot every turn,
+ * separate from `missionZone` (which here holds only Myla's static presetMissionZone seat — a fixed immunity
+ * that never flips or banishes, preserving her narrative presence across Missions 5 and 6). Whatever card
+ * currently occupies the rolling slot is banished for good, and a fresh one flips in off the reserve deck to
+ * replace it — its value buffs the current enemy's attack for as long as it sits there (see resolvedEnemyAttack).
+ * Only called from advanceToNextPlayer, so a kill that lets the same player continue their turn naturally skips
+ * a cycle that turn, same as flipMissionZoneCard.
+ */
+function rollMissionZoneBonusCard(state: GameState): void {
+  if (!state.rollingZoneBonus) return;
+  if (state.rollingZoneCard) {
+    state.banishPile.push(state.rollingZoneCard);
+  }
+  const card = state.tavernDeck.shift();
+  state.rollingZoneCard = card ?? null;
+  if (card) {
+    const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester';
+    log(state, `The mission zone cycles ${label} in — last turn's card is banished for good, and the enemy grows bolder while this one sits there.`);
   }
 }
 
@@ -247,14 +274,14 @@ function hasSpecial(cards: Card[], ability: SpecialAbilityId): boolean {
 }
 
 /**
- * Pays a corrupted card's cost: normally banishes the top of the reserve deck (see SuitedCard.corrupted). With
- * Mission 9's 'EVERGREEN_MOTHER' relic in play, the cost changes to another player banishing a card from their
- * own hand instead — in solo play (no "other player" to ask), the same player banishes from their own remaining
- * hand instead (the relic's "solo side"). If there's no eligible hand to banish from (every other hand is empty,
- * or the solo player's own hand is), nothing happens.
+ * Pays a corrupted card's (or, via corruptedReturnQueue, a corrupted enemy's) cost: normally banishes the top of
+ * the reserve deck (see SuitedCard.corrupted / EnemyState.corrupted). With Mission 9's 'EVERGREEN_MOTHER' relic
+ * in play, the cost changes to another player banishing a card from their own hand instead — in solo play (no
+ * "other player" to ask), the same player banishes from their own remaining hand instead (the relic's "solo
+ * side"). If there's no eligible hand to banish from (every other hand is empty, or the solo player's own hand
+ * is), nothing happens.
  */
-function applyCorruptedCost(state: GameState, player: PlayerState, card: Extract<Card, { kind: 'suited' }>): void {
-  const label = card.name ?? 'A corrupted card';
+function applyCorruptedCost(state: GameState, player: PlayerState, label: string): void {
   if (state.relics.includes('EVERGREEN_MOTHER')) {
     const candidates = state.players.length === 1 ? [player] : state.players.filter((p) => p.id !== player.id);
     const eligible = candidates.filter((p) => p.hand.length > 0);
@@ -379,6 +406,7 @@ function resolvedEnemyAttack(state: GameState): number {
   let buff = 0;
   if (state.discardTopBuffsAttack) buff += discardPileTopValue(state.discardPile);
   if (state.ascendingZone) buff += ascendingZoneAttackBuff(state.missionZone);
+  if (state.rollingZoneBonus && state.rollingZoneCard) buff += cardValue(state.rollingZoneCard);
   return buff !== 0 ? currentEnemyAttackWithDiscardBuff(enemy, buff) : currentEnemyAttack(enemy);
 }
 
@@ -499,6 +527,23 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
         }
       }
     }
+    if (state.corruptedReturnQueue && !enemy.corrupted) {
+      // Mission 4: this defeat wasn't the last of it — the enemy rejoins the back of the fight queue, wounds
+      // healed and immunity intact, but corrupted (see EnemyState.corrupted / resolveCommittedPlay's
+      // enemyCorrupted handling). Guarded on `!enemy.corrupted` so a corrupted return, once defeated again,
+      // stays gone for good instead of looping forever.
+      const requeued = {
+        ...enemy,
+        damageTaken: 0,
+        spadesShield: 0,
+        blockedSpadesShield: 0,
+        immunityBroken: false,
+        tableCards: [],
+        corrupted: true,
+      };
+      state.castleDeck.push(requeued);
+      log(state, `${enemyLabel(enemy)} rejoins the fight queue, corrupted!`);
+    }
   } else {
     const exact = remaining === 0;
     const upgrade = upgradeDefeatedRank(enemy.rank, state.endlessLoop);
@@ -576,6 +621,9 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
   // Defeating player continues their turn against the new enemy (no defend, no turn advance).
   state.turnPhase = 'AWAIT_PLAY';
   state.pendingDamage = 0;
+  // Mission 8: the kill that just happened opens this turn's ascending-zone placement window (see
+  // GameState.zoneOpenForPlacement / placeInZone) — closed again at the next advanceToNextPlayer.
+  state.zoneOpenForPlacement = true;
   // The winning play may have emptied their hand; if yielding is also blocked right now,
   // they have no legal move and the game is lost (mirrors the check after a normal turn ends).
   checkForStuckLoss(state);
@@ -637,12 +685,16 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.jesterClaimNextPlayerOnly = false;
   state.discardTopBuffsAttack = false;
   state.exactKillToReserveDeck = false;
+  state.corruptedReturnQueue = false;
   state.exactKillSplashDamage = false;
+  state.rollingZoneBonus = false;
+  state.rollingZoneCard = null;
   state.zoneVengeanceOnKill = false;
   state.pilgrimMechanic = false;
   state.pilgrimDeck = [];
   state.pilgrimZone = [];
   state.ascendingZone = false;
+  state.zoneOpenForPlacement = false;
   state.zoneClosed = false;
   state.zonePurge = null;
   state.chanterWindow = null;
@@ -725,7 +777,10 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.jesterClaimNextPlayerOnly = action.jesterClaimNextPlayerOnly ?? false;
   state.discardTopBuffsAttack = action.discardTopBuffsAttack ?? false;
   state.exactKillToReserveDeck = action.exactKillToReserveDeck ?? false;
+  state.corruptedReturnQueue = action.corruptedReturnQueue ?? false;
   state.exactKillSplashDamage = action.exactKillSplashDamage ?? false;
+  state.rollingZoneBonus = action.rollingZoneBonus ?? false;
+  state.rollingZoneCard = null;
   state.zoneVengeanceOnKill = action.zoneVengeanceOnKill ?? false;
   state.pilgrimMechanic = action.pilgrimMechanic ?? false;
   // A small, fixed set of named survivors (not shuffled) — they surface in the same narrative order every time,
@@ -733,6 +788,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.pilgrimDeck = action.pilgrimCards ? [...action.pilgrimCards] : [];
   state.pilgrimZone = [];
   state.ascendingZone = action.ascendingZone ?? false;
+  state.zoneOpenForPlacement = false;
   state.zoneClosed = false;
   state.zonePurge = null;
   state.chanterWindow = null;
@@ -824,7 +880,16 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   const corruptedCards = nonArcaneCards.filter((c) => c.corrupted);
   const corruptedSuits = Array.from(new Set(corruptedCards.flatMap(cardSuits)));
   for (const c of corruptedCards) {
-    applyCorruptedCost(state, player, c);
+    applyCorruptedCost(state, player, c.name ?? 'A corrupted card');
+  }
+
+  // Corrupted enemy (Mission 4's corruptedReturnQueue): a defeated enemy that's rejoined the fight queue
+  // corrupted follows the same rule as a corrupted card — every play against it ignores its class immunity, at
+  // the cost of one applyCorruptedCost payment per play (not per card, since the corruption belongs to the
+  // enemy here, not to any of the cards played against it).
+  const enemyCorrupted = state.ruleset === 'legacy' && Boolean(state.currentEnemy?.corrupted);
+  if (enemyCorrupted) {
+    applyCorruptedCost(state, player, state.currentEnemy!.name ?? 'The corrupted enemy');
   }
 
   // Reavers (Mission 5): playing one tears the top card off the reserve deck, adds its raw value straight onto
@@ -915,7 +980,7 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     log(state, `${(cards.find((c) => c.kind === 'suited' && c.evergreen) as Extract<Card, { kind: 'suited' }> | undefined)?.name ?? 'Evergreen'} surges — all four powers resolve at once, ignoring immunity.`);
   }
   const effectiveSuits: Suit[] = evergreenActive ? Array.from(new Set([...nonArcaneSuits, 'H', 'D', 'C', 'S'])) : nonArcaneSuits;
-  const ignoreImmunityForPlay = Boolean(claimedJester) || evergreenActive;
+  const ignoreImmunityForPlay = Boolean(claimedJester) || evergreenActive || enemyCorrupted;
 
   const clubsMultiplier = resolveSuitPowers(state, cards, effectiveSuits, shape.totalValue, ignoreImmunityForPlay, corruptedSuits);
   const damage = (shape.totalValue + reaverBonus) * clubsMultiplier + arcaneBonus;
@@ -978,21 +1043,36 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
     state.jesterClaim = null;
   }
 
-  // Kinfolk Flute: with room left in the combo (fewer than 4 cards, total under 10) and no claimed Jester
-  // complicating things, open an assist window instead of resolving immediately — any other player may
+  // Kinfolk Flute (Mission 1): with room left in the combo (fewer than 4 cards, total under 10) and no claimed
+  // Jester complicating things, open an assist window instead of resolving immediately — any other player may
   // silently add one matching card before the attacker calls RESOLVE_COMBO.
-  const canOpenComboAssist =
-    state.ruleset === 'legacy' &&
+  const kinfolkAssist =
     state.relics.includes('KINFOLK_FLUTE') &&
-    !claimedJester &&
     cards.every((c) => c.kind === 'suited') &&
     cards.length < 4 &&
     shape.totalValue < 10;
 
+  // Scarlet Whistle (Mission 4): the same silent-assist window, opened instead whenever a lone Animal or Beast
+  // Companion is played alone — any other player may silently add one card from hand to help the attack, which
+  // then resolves as a normal companion pairing (see rules.ts's validatePlayShape / RESOLVE_COMBO reusing the
+  // same resolveCommittedPlay path Kinfolk Flute's window already uses).
+  const scarletAssist =
+    state.relics.includes('SCARLET_WHISTLE') &&
+    cards.length === 1 &&
+    cards[0].kind === 'suited' &&
+    isCompanionCard(cards[0]);
+
+  const canOpenComboAssist = state.ruleset === 'legacy' && !claimedJester && (kinfolkAssist || scarletAssist);
+
   if (canOpenComboAssist) {
     state.comboAssist = { attackerId: player.id, cardIds: cards.map((c) => c.id) };
     state.turnPhase = 'AWAIT_COMBO_ASSIST';
-    log(state, `${player.name} commits ${cards.length > 1 ? 'a combo' : 'a card'} to the attack — the Kinfolk Flute lets others silently add a matching card before it resolves.`);
+    log(
+      state,
+      kinfolkAssist
+        ? `${player.name} commits ${cards.length > 1 ? 'a combo' : 'a card'} to the attack — the Kinfolk Flute lets others silently add a matching card before it resolves.`
+        : `${player.name} attacks alone with a Companion card — the Scarlet Whistle lets another player silently add a card before it resolves.`,
+    );
     return ok(state);
   }
 
@@ -1243,6 +1323,8 @@ function beginZonePurge(state: GameState, player: PlayerState): EngineResult {
 function placeInZone(state: GameState, action: Extract<GameAction, { type: 'PLACE_IN_ZONE' }>): EngineResult {
   if (!state.ascendingZone) return fail('There is no ascending mission zone in this mission.');
   if (state.zoneClosed) return fail('The mission zone has closed — no more cards can be placed there.');
+  // Building the run only opens up right after an enemy kill (see GameState.zoneOpenForPlacement).
+  if (!state.zoneOpenForPlacement) return fail('The mission zone can only be built onto right after defeating an enemy.');
   const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_PLAY');
   if (err) return fail(err);
 
@@ -1468,12 +1550,16 @@ export function createLobbyState(): GameState {
     jesterClaimNextPlayerOnly: false,
     discardTopBuffsAttack: false,
     exactKillToReserveDeck: false,
+    corruptedReturnQueue: false,
     exactKillSplashDamage: false,
+    rollingZoneBonus: false,
+    rollingZoneCard: null,
     zoneVengeanceOnKill: false,
     pilgrimMechanic: false,
     pilgrimDeck: [],
     pilgrimZone: [],
     ascendingZone: false,
+    zoneOpenForPlacement: false,
     zoneClosed: false,
     zonePurge: null,
     chanterWindow: null,

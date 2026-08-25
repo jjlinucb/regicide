@@ -106,6 +106,13 @@ export interface SuitedCard {
    */
   secondClassArcane?: boolean;
   /**
+   * Legacy-only: marks a Beast Companion (Mission 4's reward, x4, each tied to a specific character). Works like
+   * an Animal Companion (see rules.ts's isAnimalCompanion) — playable alone, or paired with exactly one other
+   * card — but instead of contributing its own printed value (an Ace's flat 1) to the pair's total, it copies
+   * the strength of whatever card it's paired with (see rules.ts's validatePlayShape).
+   */
+  beast?: boolean;
+  /**
    * Classic Regicide Endless Mode only: how many steps past King this card has been upgraded, from being the
    * card of an enemy defeated during an endless round (see engine.ts's upgradeDefeatedRank). A Jack or Queen
    * defeated during endless rounds has its `rank` itself promoted up the J→Q→K chain instead (no tier needed);
@@ -147,6 +154,13 @@ export interface EnemyState {
   immunityBroken: boolean;
   /** All cards played against this enemy so far this fight (go to discard together on defeat). */
   tableCards: Card[];
+  /**
+   * Legacy-only (Mission 4): true for an enemy that's already been through the fight queue once and come back
+   * corrupted (see GameState.corruptedReturnQueue). Follows the same rule as a corrupted party card (see
+   * SuitedCard.corrupted): every play against it ignores its class immunity, at the cost of banishing the top of
+   * the reserve deck (see engine.ts's resolveCommittedPlay / applyCorruptedCost).
+   */
+  corrupted?: boolean;
 }
 
 /** A mission-specific enemy spec used to build a Legacy mission's enemy deck (see legacy/missions.ts). */
@@ -274,11 +288,30 @@ export interface GameState {
    */
   exactKillToReserveDeck: boolean;
   /**
+   * Legacy-only (Mission 4): when true, a defeated enemy doesn't just vanish to the discard pile — it rejoins
+   * the fight queue later, corrupted (see EnemyState.corrupted): every play against it from then on ignores its
+   * class immunity, at the cost of banishing the reserve deck's top card (the same rule a corrupted party card
+   * follows — see SuitedCard.corrupted / engine.ts's applyCorruptedCost). A corrupted enemy that's defeated
+   * again does not re-queue a second time.
+   */
+  corruptedReturnQueue: boolean;
+  /**
    * Legacy-only (Mission 5): when true, an exact-damage kill bursts outward — the defeated enemy's own base
    * attack is dealt as splash damage straight into whatever's newly revealed at the top of the enemy deck
    * (which can itself chain into a further kill; see engine.ts's dealDamageAndCheckDefeat).
    */
   exactKillSplashDamage: boolean;
+  /**
+   * Legacy-only (Mission 5): when true, a single "rolling" card cycles through its own zone slot every turn —
+   * separate from `missionZone`, which here holds only Myla's static presetMissionZone seat (fixed immunity,
+   * never flipped or banished). Each turn, whatever card currently occupies `rollingZoneCard` is banished for
+   * good and a fresh one flips in off the reserve deck to replace it (see engine.ts's rollMissionZoneBonusCard),
+   * its value buffing the current enemy's attack for as long as it sits there (see resolvedEnemyAttack) — the
+   * transcript's "rolling mission-zone/banish-pile cycle each turn feeds bonus strength to the current enemy."
+   */
+  rollingZoneBonus: boolean;
+  /** Legacy-only (Mission 5): the card currently occupying the rolling zone slot, if any (see rollingZoneBonus). */
+  rollingZoneCard: Card | null;
   /**
    * Legacy-only (Mission 6): when true, every enemy kill permanently grows `missionZone` — the lowest-value
    * card left on the enemy's table is moved into the zone instead of the discard pile — and then Myla (the
@@ -312,8 +345,18 @@ export interface GameState {
    * enemy's attack for as long as they sit there (see rules.ts's ascendingZoneAttackBuff); Pilgrim cards never
    * do. Completing the chain at 10 triggers the purge (see zonePurge) and permanently closes the zone
    * (zoneClosed). Unrelated to Mission 7's pilgrimZone above — see SuitedCard.pilgrim.
+   *
+   * PLACE_IN_ZONE is further gated by `zoneOpenForPlacement` below — building the run only opens up right after
+   * an enemy kill, per the transcript ("Defeating an enemy lets the party build an ascending 'run' of cards").
    */
   ascendingZone: boolean;
+  /**
+   * Legacy-only (Mission 8): true only in the placement window right after an enemy kill — set whenever a kill
+   * lets the same player continue their turn (see engine.ts's dealDamageAndCheckDefeat), cleared at the end of
+   * that turn (see engine.ts's advanceToNextPlayer). PLACE_IN_ZONE checks this before allowing a placement, so a
+   * later turn with no fresh kill can't build the run further.
+   */
+  zoneOpenForPlacement: boolean;
   /** Legacy-only (Mission 8): true once the ascending zone has purged at 10 — PLACE_IN_ZONE is rejected for the rest of the mission. */
   zoneClosed: boolean;
   /**
@@ -373,6 +416,8 @@ export type GameAction =
       discardTopBuffsAttack?: boolean;
       /** See GameState.exactKillToReserveDeck. */
       exactKillToReserveDeck?: boolean;
+      /** See GameState.corruptedReturnQueue. */
+      corruptedReturnQueue?: boolean;
       /** See GameState.exactKillSplashDamage. */
       exactKillSplashDamage?: boolean;
       /**
@@ -381,6 +426,8 @@ export type GameAction =
        * flipped into, never banished on defeat) since endOfTurnZoneFlip is left unset.
        */
       presetMissionZone?: Card[];
+      /** See GameState.rollingZoneBonus. */
+      rollingZoneBonus?: boolean;
       /** See GameState.zoneVengeanceOnKill. */
       zoneVengeanceOnKill?: boolean;
       /** See GameState.pilgrimMechanic. */
@@ -480,6 +527,10 @@ export interface ClientGameState {
   discardTopBuffsAttack: boolean;
   /** See GameState.missionZone. Public information — it's on the table. */
   missionZone: Card[];
+  /** See GameState.rollingZoneBonus. */
+  rollingZoneBonus: boolean;
+  /** See GameState.rollingZoneCard. Public information — it's on the table. */
+  rollingZoneCard: Card | null;
   /** See GameState.zoneVengeanceOnKill. */
   zoneVengeanceOnKill: boolean;
   /** See GameState.pilgrimMechanic. */
@@ -490,6 +541,8 @@ export interface ClientGameState {
   pilgrimDeckCount: number;
   /** See GameState.ascendingZone. */
   ascendingZone: boolean;
+  /** See GameState.zoneOpenForPlacement. */
+  zoneOpenForPlacement: boolean;
   /** See GameState.zoneClosed. */
   zoneClosed: boolean;
   /** See GameState.zonePurge. Public information — it's on the table. */
