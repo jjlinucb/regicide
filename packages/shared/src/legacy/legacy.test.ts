@@ -132,6 +132,20 @@ describe('legacy: mission setup', () => {
     );
   });
 
+  it('mission 3 is a 6-enemy exact-kill-only gauntlet escalating in three stat tiers', () => {
+    const mission3 = getMission(3)!;
+    expect(mission3.enemies).toHaveLength(6);
+    expect(mission3.exactKillOnly).toBe(true);
+    expect(mission3.enemies.map((e) => [e.health, e.attack])).toEqual([
+      [30, 10],
+      [30, 10],
+      [30, 10],
+      [40, 15],
+      [40, 15],
+      [60, 20],
+    ]);
+  });
+
   it('mission 4 buffs enemy attack from the discard pile, seals exact kills to the reserve deck, requeues defeats corrupted, and rewards Beast Companions + the Scarlet Whistle relic', () => {
     const mission4 = getMission(4)!;
     expect(mission4.discardTopBuffsAttack).toBe(true);
