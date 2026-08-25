@@ -258,8 +258,7 @@ export function GamePage({
         {state.currentEnemy && (
           <EnemyDisplay
             enemy={state.currentEnemy}
-            discardPile={state.discardPile}
-            discardTopBuffsAttack={state.discardTopBuffsAttack}
+            liveAttack={state.liveEnemyAttack ?? 0}
             zoneImmuneSuits={state.zoneImmuneSuits}
           />
         )}

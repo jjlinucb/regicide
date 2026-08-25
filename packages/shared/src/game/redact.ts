@@ -1,4 +1,5 @@
 import type { ClientGameState, GameState } from './types.js';
+import { resolvedEnemyAttack } from './engine.js';
 
 /** Produces the per-player view of state: every hand except the viewer's own is collapsed to a count. */
 export function redactStateFor(state: GameState, viewerPlayerId: string): ClientGameState {
@@ -16,6 +17,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     turnPhase: state.turnPhase,
     pendingDamage: state.pendingDamage,
     currentEnemy: state.currentEnemy,
+    liveEnemyAttack: state.currentEnemy ? resolvedEnemyAttack(state) : null,
     castleDeckCount: state.castleDeck.length,
     tavernDeckCount: state.tavernDeck.length,
     discardPile: state.discardPile,

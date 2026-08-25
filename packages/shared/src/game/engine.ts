@@ -652,7 +652,8 @@ function upgradeDefeatedRank(rank: 'J' | 'Q' | 'K', loop: number): { rank: 'J' |
  * The current enemy's attack, live — folds in Mission 4's discard-pile buff (see GameState.discardTopBuffsAttack)
  * and/or Mission 8's ascending-zone buff (see GameState.ascendingZone) when active.
  */
-function resolvedEnemyAttack(state: GameState): number {
+/** Exported for the client: the single source of truth for the current enemy's live attack, so the UI never re-derives per-mission buff math and drifts out of sync with it (see redact.ts's liveEnemyAttack). */
+export function resolvedEnemyAttack(state: GameState): number {
   const enemy = state.currentEnemy!;
   if (state.ruleset !== 'legacy') return currentEnemyAttack(enemy);
   if (state.corruptedPartyEnemies) {

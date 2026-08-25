@@ -1,5 +1,5 @@
-import type { Card, EnemyState, Suit } from '@regicide/shared';
-import { discardPileTopValue, SUIT_TO_CLASS } from '@regicide/shared';
+import type { EnemyState, Suit } from '@regicide/shared';
+import { SUIT_TO_CLASS } from '@regicide/shared';
 import { PlayingCard } from './PlayingCard';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
@@ -29,22 +29,21 @@ function StrengthTerm({ label, value }: { label: string; value: number }) {
 
 export function EnemyDisplay({
   enemy,
-  discardPile,
-  discardTopBuffsAttack,
+  liveAttack,
   zoneImmuneSuits,
 }: {
   enemy: EnemyState;
-  /** Only needed when discardTopBuffsAttack is set (Mission 4). */
-  discardPile?: Card[];
-  discardTopBuffsAttack?: boolean;
+  /** See ClientGameState.liveEnemyAttack — the engine's own resolved total, every mission's buff formula already folded in (Mission 10's multiply-before-shield included, which no flat ledger term could otherwise represent). */
+  liveAttack: number;
   /** Extra classes stacked on from mission-zone flips (Mission 3 and others), on top of the enemy's own suit(s). */
   zoneImmuneSuits?: Suit[];
 }) {
   const healthRemaining = Math.max(0, enemy.maxHealth - enemy.damageTaken);
   const healthPct = Math.round((healthRemaining / enemy.maxHealth) * 100);
-  const discardBuff = discardTopBuffsAttack ? discardPileTopValue(discardPile ?? []) : 0;
-  const currentAttack = enemy.baseAttack - enemy.spadesShield + discardBuff;
-  const displayAttack = Math.max(0, currentAttack);
+  const displayAttack = Math.max(0, liveAttack);
+  // The engine's total already accounts for every mission's buff/multiplier; what's left to explain is the gap
+  // between that total and (base - shield) — always accurate regardless of which mission mechanic produced it.
+  const missionBuff = liveAttack - (enemy.baseAttack - enemy.spadesShield);
   // Only Legacy enemies carry a `name` — use its presence as the display-mode signal (same trick as PlayingCard).
   const isLegacy = Boolean(enemy.name);
   const red = !isLegacy && RED_SUITS.has(enemy.suit);
@@ -78,12 +77,12 @@ export function EnemyDisplay({
         </span>
         <span className="enemy-stat-block">
           <strong>Attack</strong> {displayAttack}
-          {currentAttack < 0 && ' (negative!)'}
-          {(enemy.spadesShield > 0 || discardBuff !== 0) && (
+          {liveAttack < 0 && ' (negative!)'}
+          {(enemy.spadesShield > 0 || missionBuff !== 0) && (
             <span className="strength-ledger">
               <span className="strength-term base">{enemy.baseAttack} base</span>
               <StrengthTerm label="shield" value={-enemy.spadesShield} />
-              <StrengthTerm label="discard" value={discardBuff} />
+              <StrengthTerm label="mission zone" value={missionBuff} />
             </span>
           )}
         </span>

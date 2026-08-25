@@ -627,6 +627,8 @@ export interface ClientGameState {
   turnPhase: TurnPhase;
   pendingDamage: number;
   currentEnemy: EnemyState | null;
+  /** See engine.ts's resolvedEnemyAttack — the enemy's true current attack after every mission-specific buff/shield is folded in. Null when there's no current enemy. */
+  liveEnemyAttack: number | null;
   castleDeckCount: number;
   tavernDeckCount: number;
   discardPile: Card[];
