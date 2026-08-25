@@ -1,18 +1,19 @@
 :root {
-  --bg: #f1e2c6;
-  --bg-elevated: #fffaef;
-  --bg-card: #fffaef;
-  --ink: #4a3222;
-  --ink-dim: #8a7156;
-  --accent: #c1651d;
-  --accent-ink: #fff6e9;
-  --danger: #b83227;
-  --heart: #b83227;
-  --diamond: #b83227;
-  --club: #4a3222;
-  --spade: #4a3222;
-  --border: #dcc19b;
-  --success: #5a8f3c;
+  /* Palette inspired by regicidelegacy.com's deep royal purple + sage-green mountains. */
+  --bg: #eef2e2;
+  --bg-elevated: #fdfdf9;
+  --bg-card: #fdfdf9;
+  --ink: #25134d;
+  --ink-dim: #6b5f85;
+  --accent: #4a7d38;
+  --accent-ink: #fdfaf0;
+  --danger: #a8314c;
+  --heart: #a8314c;
+  --diamond: #a8314c;
+  --club: #25134d;
+  --spade: #25134d;
+  --border: #d7ddc7;
+  --success: #3f8f52;
   color-scheme: light;
 }
 
@@ -84,7 +85,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  box-shadow: 0 8px 24px rgba(193, 101, 29, 0.15);
+  box-shadow: 0 8px 24px rgba(37, 19, 77, 0.12);
 }
 
 .panel input {
@@ -104,13 +105,13 @@ button {
   padding: 12px 16px;
   font-weight: 700;
   font-size: 1rem;
-  box-shadow: 0 4px 0 #8a4413;
+  box-shadow: 0 4px 0 #345f27;
   transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
 
 .btn:active {
   transform: translateY(2px);
-  box-shadow: 0 2px 0 #8a4413;
+  box-shadow: 0 2px 0 #345f27;
 }
 
 .btn:disabled {
@@ -120,7 +121,7 @@ button {
 }
 
 .btn-secondary {
-  background: #fffaf1;
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   color: var(--ink);
   box-shadow: none;
@@ -129,7 +130,7 @@ button {
 .btn-danger {
   background: var(--danger);
   color: white;
-  box-shadow: 0 4px 0 #8a271f;
+  box-shadow: 0 4px 0 #7a2038;
 }
 
 .room-code {
@@ -165,7 +166,7 @@ button {
 }
 
 .dot.offline {
-  background: #d8c9b8;
+  background: #cdd3c0;
 }
 
 .error-banner {
@@ -204,7 +205,7 @@ button {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  box-shadow: 0 8px 24px rgba(193, 101, 29, 0.15);
+  box-shadow: 0 8px 24px rgba(37, 19, 77, 0.12);
 }
 
 .boss-playing-card {
@@ -480,10 +481,10 @@ button {
   width: 82px;
   height: 114px;
   background: var(--bg-card);
-  color: #2c2530;
+  color: #241539;
   border-radius: 12px;
   border: 2px solid var(--border);
-  box-shadow: 0 3px 8px rgba(58, 46, 57, 0.1);
+  box-shadow: 0 3px 8px rgba(37, 19, 77, 0.12);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -496,7 +497,7 @@ button {
 .playing-card.selected {
   transform: translateY(-10px);
   border-color: var(--accent);
-  box-shadow: 0 6px 14px rgba(193, 101, 29, 0.35);
+  box-shadow: 0 6px 14px rgba(74, 125, 56, 0.35);
 }
 
 .playing-card .rank {
@@ -572,7 +573,7 @@ button {
 
 .playing-card.special {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 3px 10px rgba(193, 101, 29, 0.3);
+  box-shadow: 0 0 0 1px var(--accent), 0 3px 10px rgba(74, 125, 56, 0.3);
 }
 
 .special-badge {
@@ -816,14 +817,14 @@ button {
 /* ---------- Rules page ---------- */
 
 .rules-page {
-  --rules-maroon-dark: #2b1e22;
-  --rules-maroon: #3d2a30;
-  --rules-cream: #f4ede0;
-  --rules-cream-elevated: #fffdf8;
-  --rules-ink: #2b1e22;
-  --rules-ink-dim: #6b5d5f;
-  --rules-gold: #c9a24a;
-  --rules-border: #e3d7c2;
+  --rules-maroon-dark: #25134d;
+  --rules-maroon: #3d2664;
+  --rules-cream: #eef2e2;
+  --rules-cream-elevated: #fdfdf9;
+  --rules-ink: #25134d;
+  --rules-ink-dim: #6b5f85;
+  --rules-gold: #4a7d38;
+  --rules-border: #d7ddc7;
   flex: 1;
   min-height: 100%;
   background: var(--rules-cream);
