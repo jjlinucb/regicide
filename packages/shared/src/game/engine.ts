@@ -1,5 +1,6 @@
 import type { Card, CapturedPile, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit } from './types.js';
 import {
+  buildBeastDeck,
   buildCapturedPiles,
   buildCastleDeck,
   buildCorruptedPartyEnemies,
@@ -14,6 +15,7 @@ import {
 } from './deck.js';
 import {
   ascendingZoneAttackBuff,
+  banishPileTopValue,
   cardSuits,
   cardValue,
   currentEnemyAttack,
@@ -22,6 +24,7 @@ import {
   isCompanionCard,
   isSuitBlockedByImmunity,
   MAX_SOLO_JESTERS,
+  pileTopImmuneSuits,
   validatePlayShape,
 } from './rules.js';
 import { classForSuit } from '../legacy/classes.js';
@@ -128,6 +131,7 @@ function advanceToNextPlayer(state: GameState): void {
   rollMissionZoneBonusCard(state);
   flipPilgrimCard(state);
   flipStartOfTurnZoneCard(state);
+  flipBeastDeckCard(state);
   // Mission 8's placement window only ever covers the turn a kill happened on (or the continued turn right
   // after it) — once play moves on to a fresh turn with no kill behind it, close the window back up.
   state.zoneOpenForPlacement = false;
@@ -287,6 +291,85 @@ function applyEnemyPaladinDamageReduction(state: GameState, damage: number): num
   return Math.max(0, damage - state.currentEnemy.baseAttack);
 }
 
+/**
+ * Mission 11 ("Descent into Darkness") only: at the start of every turn, flip the top card of the beast deck
+ * (see GameState.beastDeck / deck.ts's buildBeastDeck) for a one-shot effect keyed to its class — Warrior
+ * banishes the discard pile's top card, Paladin discards the reserve deck's top card, Cleric has the current
+ * player discard from hand, Bard has the current player banish from hand (skipped entirely if their hand is
+ * empty). Which card the current player gives up isn't specified by the transcript for Cleric/Bard — same
+ * judgment call as Mission 10's enemy-Bard forced move (see resolveCorruptedEnemyEndOfTurnEffect) — so this
+ * always picks their lowest-value card. Once the deck runs dry it reshuffles from its own used-card pile
+ * (GameState.beastDeckDiscard) and the cycle continues; skipped entirely for the turn right after an exact kill
+ * (see GameState.skipNextBeastDeckFlip, consumed here). Called both once at mission start (the first player's
+ * first turn) and from advanceToNextPlayer, same as every other start-of-turn flip in this file.
+ */
+function flipBeastDeckCard(state: GameState): void {
+  if (!state.beastDeckMechanic) return;
+  if (state.skipNextBeastDeckFlip) {
+    state.skipNextBeastDeckFlip = false;
+    log(state, 'The beast deck holds still this turn — the exact kill spared it a flip.');
+    return;
+  }
+  if (state.beastDeck.length === 0) {
+    if (state.beastDeckDiscard.length === 0) return; // nothing left to flip or reshuffle from
+    state.beastDeck = shuffleWithState(state.beastDeckDiscard, state);
+    state.beastDeckDiscard = [];
+    log(state, 'The beast deck runs dry and reshuffles.');
+  }
+  const card = state.beastDeck.shift()!;
+  state.beastDeckDiscard.push(card);
+  if (card.kind !== 'suited') return; // the beast pool is always suited cards — guarded defensively
+  const label = card.name ?? `the ${card.rank}`;
+  const cls = classForSuit(card.suit).id;
+
+  if (cls === 'WARRIOR') {
+    const banished = state.discardPile.pop();
+    if (banished) {
+      state.banishPile.push(banished);
+      log(state, `${label} flips (Warrior) — the top of the discard pile is banished.`);
+    } else {
+      log(state, `${label} flips (Warrior) — the discard pile is empty, nothing to banish.`);
+    }
+    return;
+  }
+  if (cls === 'PALADIN') {
+    const discarded = state.tavernDeck.shift();
+    if (discarded) {
+      state.discardPile.push(discarded);
+      log(state, `${label} flips (Paladin) — the top of the reserve deck is discarded.`);
+    } else {
+      log(state, `${label} flips (Paladin) — the reserve deck is empty, nothing to discard.`);
+    }
+    return;
+  }
+  const player = currentPlayer(state);
+  if (cls === 'CLERIC') {
+    if (player.hand.length === 0) {
+      log(state, `${label} flips (Cleric) — ${player.name} has no cards to discard.`);
+      return;
+    }
+    let idx = 0;
+    for (let i = 1; i < player.hand.length; i++) {
+      if (cardValue(player.hand[i]) < cardValue(player.hand[idx])) idx = i;
+    }
+    const [discarded] = player.hand.splice(idx, 1);
+    state.discardPile.push(discarded);
+    log(state, `${label} flips (Cleric) — ${player.name} discards a card from hand.`);
+  } else if (cls === 'BARD') {
+    if (player.hand.length === 0) {
+      log(state, `${label} flips (Bard) — ${player.name} has no cards to banish, skipped.`);
+      return;
+    }
+    let idx = 0;
+    for (let i = 1; i < player.hand.length; i++) {
+      if (cardValue(player.hand[i]) < cardValue(player.hand[idx])) idx = i;
+    }
+    const [banished] = player.hand.splice(idx, 1);
+    state.banishPile.push(banished);
+    log(state, `${label} flips (Bard) — ${player.name} banishes a card from hand.`);
+  }
+}
+
 function drawOneCard(state: GameState, player: PlayerState): boolean {
   if (state.tavernDeck.length === 0) return false;
   if (player.hand.length >= state.maxHandSize) return false;
@@ -409,11 +492,15 @@ function resolveSuitPowers(
   corruptedSuits: Suit[] = [],
 ): number {
   const enemy = state.currentEnemy!;
+  // Mission 11: the current enemy is also immune to whatever class(es) sit on top of the discard pile and the
+  // banish pile right now — recomputed live rather than stored, since both piles keep changing across the fight
+  // (see GameState.pileTopEnemyBonus / rules.ts's pileTopImmuneSuits).
+  const pileImmuneSuits = state.pileTopEnemyBonus ? pileTopImmuneSuits(state.discardPile, state.banishPile) : [];
   const blocked = (s: 'H' | 'D' | 'C' | 'S') =>
     !ignoreImmunity &&
     !enemy.immunityBroken &&
     !corruptedSuits.includes(s) &&
-    (isSuitBlockedByImmunity(s, enemy) || state.zoneImmuneSuits.includes(s));
+    (isSuitBlockedByImmunity(s, enemy) || state.zoneImmuneSuits.includes(s) || pileImmuneSuits.includes(s));
   const immuneNoun = state.ruleset === 'legacy' ? 'class' : 'suit';
 
   if (suits.includes('H')) {
@@ -489,6 +576,9 @@ function resolvedEnemyAttack(state: GameState): number {
   if (state.discardTopBuffsAttack) buff += discardPileTopValue(state.discardPile);
   if (state.ascendingZone) buff += ascendingZoneAttackBuff(state.missionZone);
   if (state.rollingZoneBonus && state.rollingZoneCard) buff += cardValue(state.rollingZoneCard);
+  // Mission 11: bonus strength from the discard pile's AND banish pile's top cards combined (see
+  // GameState.pileTopEnemyBonus / rules.ts's banishPileTopValue).
+  if (state.pileTopEnemyBonus) buff += discardPileTopValue(state.discardPile) + banishPileTopValue(state.banishPile);
   return buff !== 0 ? currentEnemyAttackWithDiscardBuff(enemy, buff) : currentEnemyAttack(enemy);
 }
 
@@ -635,6 +725,12 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
         }
       }
     }
+    if (state.beastDeckMechanic && remaining === 0) {
+      // Mission 11: an exact hit rattles the machine — the beast deck skips its very next flip (see
+      // GameState.skipNextBeastDeckFlip / flipBeastDeckCard).
+      state.skipNextBeastDeckFlip = true;
+      log(state, 'The exact hit rattles the machine — the beast deck skips its next flip.');
+    }
     if (state.corruptedReturnQueue && !enemy.corrupted) {
       // Mission 4: this defeat wasn't the last of it — the enemy rejoins the back of the fight queue, wounds
       // healed and immunity intact, but corrupted (see EnemyState.corrupted / resolveCommittedPlay's
@@ -674,9 +770,29 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       log(state, `${enemyLabel(enemy)} defeated${upgradeNote || '!'}`);
     }
   }
-  state.discardPile.push(...enemy.tableCards);
+  if (state.ruleset === 'legacy' && state.pileTopEnemyBonus) {
+    // Mission 11: "defeating the enemy always banishes it" — its played cards go to the banish pile instead of
+    // the discard pile, directly feeding the very pile-top bonus/immunity mechanic this flag names (see
+    // resolvedEnemyAttack / resolveSuitPowers's blocked check).
+    state.banishPile.push(...enemy.tableCards);
+  } else {
+    state.discardPile.push(...enemy.tableCards);
+  }
 
   if (state.castleDeck.length === 0) {
+    if (state.ruleset === 'legacy' && state.beastDeckMechanic) {
+      const beastRewardPool = [...state.beastDeck, ...state.beastDeckDiscard];
+      if (beastRewardPool.length > 0) {
+        // Mission 11's reward: the party picks ONE of the beast-deck cards to carry into Mission 12 — modeled as
+        // a genuine pending choice (see CHOOSE_BEAST_REWARD / chooseBeastReward) instead of resolving
+        // automatically, the closest existing precedent being Mission 9's AWAIT_RESCUE_CHOICE window. The
+        // mission doesn't actually complete (phase -> WON) until the party resolves it.
+        state.currentEnemy = null;
+        state.turnPhase = 'AWAIT_BEAST_REWARD_CHOICE';
+        log(state, `All enemies defeated! The party may choose one of the ${beastRewardPool.length} beast card(s) to carry forward.`);
+        return true;
+      }
+    }
     state.phase = 'WON';
     state.currentEnemy = null;
     if (state.ruleset === 'regicide' && state.players.length === 1) {
@@ -811,6 +927,11 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.corruptedPartyEnemies = false;
   state.startOfTurnZoneFlip = false;
   state.restoredPartyCards = [];
+  state.beastDeckMechanic = false;
+  state.beastDeck = [];
+  state.beastDeckDiscard = [];
+  state.skipNextBeastDeckFlip = false;
+  state.pileTopEnemyBonus = false;
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -840,7 +961,14 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
     : corruptedEnemyBuild
       ? corruptedEnemyBuild.enemies
       : action.enemies.map(makeLegacyEnemy);
-  const partyForReserve = corruptedEnemyBuild ? corruptedEnemyBuild.leftoverParty : action.party;
+  let partyForReserve = corruptedEnemyBuild ? corruptedEnemyBuild.leftoverParty : action.party;
+  // Mission 11: every Beast Companion card (Mission 4's reward pool) is pulled out of the party and shuffled
+  // into its own face-down deck sitting in the mission zone for this fight only — none of them are available to
+  // draw or play this mission (see deck.ts's buildBeastDeck). Chained after the Mission 10 pull above so the two
+  // mechanics could in principle compose, even though no mission currently uses both.
+  const beastDeckMechanic = action.beastDeckMechanic ?? false;
+  const beastBuild = beastDeckMechanic ? buildBeastDeck(partyForReserve, buildRng) : null;
+  if (beastBuild) partyForReserve = beastBuild.leftoverParty;
   const capturedPilesActive = action.capturedPilesActive ?? false;
   // Mission 9: 30 cards are split out of the party into 3 captured piles before anything is dealt — the reserve
   // deck for the mission is built from whatever's left of the party, plus any mission-only extras (e.g. a fresh
@@ -924,10 +1052,16 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.corruptedPartyEnemies = corruptedPartyEnemies;
   state.startOfTurnZoneFlip = action.startOfTurnZoneFlip ?? false;
   state.restoredPartyCards = [];
+  state.beastDeckMechanic = beastDeckMechanic;
+  state.beastDeck = beastBuild ? beastBuild.beastDeck : [];
+  state.beastDeckDiscard = [];
+  state.skipNextBeastDeckFlip = false;
+  state.pileTopEnemyBonus = action.pileTopEnemyBonus ?? false;
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
   flipPilgrimCard(state); // the first player's turn is starting right now, so the Mission 7 flip applies here too
   flipStartOfTurnZoneCard(state); // Mission 10: same reasoning — the first turn's start-of-turn flip fires here too
+  flipBeastDeckCard(state); // Mission 11: same reasoning — the first turn's beast-deck flip fires here too
   return ok(state);
 }
 
@@ -1652,6 +1786,35 @@ function chooseExactKillRescue(state: GameState, action: Extract<GameAction, { t
   return ok(state);
 }
 
+/**
+ * Mission 11 only: resolves the AWAIT_BEAST_REWARD_CHOICE window opened once the mission's last enemy falls (see
+ * dealDamageAndCheckDefeat). Validated against the window being open, not turn ownership — any player may make
+ * the pick for the party, same as CLAIM_JESTER. The chosen card is fed into GameState.restoredPartyCards, reusing
+ * the same mission-end fold Mission 10's "deck rehabilitation" reward already uses (see party.ts's
+ * applyBeastCardChoice / RoomManager's completeLegacyMission) — the mission only actually completes (phase ->
+ * WON) once this resolves.
+ */
+function chooseBeastReward(state: GameState, action: Extract<GameAction, { type: 'CHOOSE_BEAST_REWARD' }>): EngineResult {
+  if (state.phase !== 'IN_PROGRESS' || state.turnPhase !== 'AWAIT_BEAST_REWARD_CHOICE') {
+    return fail('There is no open beast-card reward to choose right now.');
+  }
+  const player = findPlayer(state, action.playerId);
+  if (!player) return fail('Unknown player.');
+  const pool = [...state.beastDeck, ...state.beastDeckDiscard];
+  const chosen = pool.find((c) => c.id === action.cardId);
+  if (!chosen) return fail('That card is not part of the beast-card reward pool.');
+
+  state.restoredPartyCards.push(chosen);
+  state.beastDeck = [];
+  state.beastDeckDiscard = [];
+  log(state, `${player.name} chooses ${chosen.kind === 'suited' ? chosen.name ?? `the ${chosen.rank}` : 'a Jester'} to carry into the next mission.`);
+
+  state.phase = 'WON';
+  state.currentEnemy = null;
+  log(state, 'All enemies defeated — the mission is complete!');
+  return ok(state);
+}
+
 export function createLobbyState(): GameState {
   return {
     phase: 'LOBBY',
@@ -1702,6 +1865,11 @@ export function createLobbyState(): GameState {
     corruptedPartyEnemies: false,
     startOfTurnZoneFlip: false,
     restoredPartyCards: [],
+    beastDeckMechanic: false,
+    beastDeck: [],
+    beastDeckDiscard: [],
+    skipNextBeastDeckFlip: false,
+    pileTopEnemyBonus: false,
   };
 }
 
@@ -1744,6 +1912,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return declineRescue(draft, action);
     case 'CHOOSE_EXACT_KILL_RESCUE':
       return chooseExactKillRescue(draft, action);
+    case 'CHOOSE_BEAST_REWARD':
+      return chooseBeastReward(draft, action);
     case 'START_ENDLESS_ROUND':
       return startEndlessRound(draft);
     default:

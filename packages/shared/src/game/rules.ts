@@ -141,3 +141,24 @@ export function currentEnemyHealthRemaining(enemy: EnemyState): number {
 export function ascendingZoneAttackBuff(missionZone: Card[]): number {
   return missionZone.reduce((sum, c) => (c.kind === 'suited' && !c.pilgrim ? sum + cardValue(c) : sum), 0);
 }
+
+/** Legacy-only (Mission 11): the value of the card currently on top of the banish pile (the most recently banished card), or 0 if the pile is empty. Mirrors discardPileTopValue. */
+export function banishPileTopValue(banishPile: Card[]): number {
+  if (banishPile.length === 0) return 0;
+  return cardValue(banishPile[banishPile.length - 1]);
+}
+
+/**
+ * Legacy-only (Mission 11): the class(es) the current enemy is immune to from whatever cards currently sit on top
+ * of the discard pile AND the banish pile — recomputed live on every check (see GameState.pileTopEnemyBonus),
+ * never stored/frozen the way missionZone's other suit-immunity modes are. A Jester on top of either pile
+ * contributes nothing.
+ */
+export function pileTopImmuneSuits(discardPile: Card[], banishPile: Card[]): Suit[] {
+  const suits = new Set<Suit>();
+  const discardTop = discardPile[discardPile.length - 1];
+  const banishTop = banishPile[banishPile.length - 1];
+  if (discardTop?.kind === 'suited') for (const s of cardSuits(discardTop)) suits.add(s);
+  if (banishTop?.kind === 'suited') for (const s of cardSuits(banishTop)) suits.add(s);
+  return Array.from(suits);
+}

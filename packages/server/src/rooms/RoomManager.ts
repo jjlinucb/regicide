@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { applyAction, createLobbyState } from '@regicide/shared';
 import type { Card, GameAction, GameState, LegacySavePayload } from '@regicide/shared';
 import {
+  applyBeastCardChoice,
   applyRestoredPartyCards,
   applyReward,
   buildInitialParty,
@@ -290,7 +291,12 @@ export class RoomManager {
     restoredPartyCards: Card[] = [],
   ): void {
     legacy.party = applyReward(legacy.party, mission.reward);
-    legacy.party = applyRestoredPartyCards(legacy.party, restoredPartyCards);
+    // Mission 11's beast-card choice REPLACES the party's whole beast-card slate rather than just adding to it
+    // (see party.ts's applyBeastCardChoice) — every other mission's restoredPartyCards (currently just Mission
+    // 10's "deck rehabilitation") is a plain additive fold instead.
+    legacy.party = mission.beastDeckMechanic
+      ? applyBeastCardChoice(legacy.party, restoredPartyCards)
+      : applyRestoredPartyCards(legacy.party, restoredPartyCards);
     if (mission.reward.relics?.length) {
       legacy.permanentRules = [...legacy.permanentRules, ...mission.reward.relics];
     }
@@ -357,6 +363,8 @@ export class RoomManager {
       extraReserveCards: mission.extraReserveCards,
       corruptedPartyEnemies: mission.corruptedPartyEnemies,
       startOfTurnZoneFlip: mission.startOfTurnZoneFlip,
+      beastDeckMechanic: mission.beastDeckMechanic,
+      pileTopEnemyBonus: mission.pileTopEnemyBonus,
       relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };

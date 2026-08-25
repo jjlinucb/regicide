@@ -189,7 +189,9 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * What the current player must do next. AWAIT_JESTER_CLAIM, AWAIT_COMBO_ASSIST, and AWAIT_AZURE_EMBLEM are
  * Legacy-only. AWAIT_ZONE_PURGE and AWAIT_CHANT_TRIM are Mission 8-only (see GameState.zonePurge / chanterWindow).
  * AWAIT_END_OF_TURN and AWAIT_RESCUE_CHOICE are Mission 9's captured-piles mechanic only (see
- * GameState.capturedPilesActive).
+ * GameState.capturedPilesActive). AWAIT_BEAST_REWARD_CHOICE is Mission 11 only (see GameState.beastDeckMechanic) —
+ * opened once the mission's last enemy falls, resolved via CHOOSE_BEAST_REWARD; the mission only actually
+ * completes (phase -> WON) once it's resolved.
  */
 export type TurnPhase =
   | 'AWAIT_PLAY'
@@ -200,7 +202,8 @@ export type TurnPhase =
   | 'AWAIT_ZONE_PURGE'
   | 'AWAIT_CHANT_TRIM'
   | 'AWAIT_END_OF_TURN'
-  | 'AWAIT_RESCUE_CHOICE';
+  | 'AWAIT_RESCUE_CHOICE'
+  | 'AWAIT_BEAST_REWARD_CHOICE';
 
 /**
  * Legacy-only (Mission 9): one of the 3 captured piles seeding GameState.capturedPiles. `faceDown[0]` is the
@@ -424,6 +427,35 @@ export interface GameState {
    * its own card still goes to the discard pile like any other Legacy enemy, just with no restoration bonus.
    */
   restoredPartyCards: Card[];
+  /**
+   * Legacy-only (Mission 11, "Descent into Darkness"): when true, gates the mission's whole beast-deck mechanic —
+   * the start-of-turn class-keyed flip (see engine.ts's flipBeastDeckCard), the exact-kill-skips-next-flip rule
+   * (see skipNextBeastDeckFlip), and the end-of-mission AWAIT_BEAST_REWARD_CHOICE window.
+   */
+  beastDeckMechanic: boolean;
+  /**
+   * Legacy-only (Mission 11): the face-down deck built from every Beast Companion card in the campaign party
+   * (Mission 4's reward pool, see SuitedCard.beast / deck.ts's buildBeastDeck) — pulled out of circulation and
+   * seeded here at mission start instead of joining the reserve deck, so no Beast card is available to draw or
+   * play this mission. Its top card flips for a one-shot effect at the start of every turn (see
+   * flipBeastDeckCard), moving to `beastDeckDiscard`; once empty, it reshuffles from there and the cycle
+   * continues. At mission end, `beastDeck` and `beastDeckDiscard` together are the pool CHOOSE_BEAST_REWARD picks
+   * from (see GameState.restoredPartyCards / party.ts's applyBeastCardChoice).
+   */
+  beastDeck: Card[];
+  /** Legacy-only (Mission 11): beast-deck cards already flipped this mission — reshuffled back into `beastDeck` once it runs dry (see flipBeastDeckCard). */
+  beastDeckDiscard: Card[];
+  /** Legacy-only (Mission 11): true for the one turn right after an exact-damage kill — consumed by flipBeastDeckCard to skip that turn's flip, per the mission's own rule. */
+  skipNextBeastDeckFlip: boolean;
+  /**
+   * Legacy-only (Mission 11): when true, the current enemy draws bonus strength AND class-immunity from whatever
+   * cards currently sit on top of the discard pile and the banish pile — both piles recomputed live every check
+   * (see rules.ts's pileTopImmuneSuits / resolvedEnemyAttack), not stored once and frozen like missionZone's
+   * suit-immunity modes. Also changes how a defeated enemy's played cards are cleared away: they go to the
+   * banish pile instead of the discard pile ("defeating the enemy always banishes it" — see
+   * dealDamageAndCheckDefeat), which is what keeps feeding this same mechanic forward through the fight.
+   */
+  pileTopEnemyBonus: boolean;
 }
 
 export interface GameEvent {
@@ -490,6 +522,10 @@ export type GameAction =
       corruptedPartyEnemies?: boolean;
       /** See GameState.startOfTurnZoneFlip. */
       startOfTurnZoneFlip?: boolean;
+      /** See GameState.beastDeckMechanic. */
+      beastDeckMechanic?: boolean;
+      /** See GameState.pileTopEnemyBonus. */
+      pileTopEnemyBonus?: boolean;
     }
   | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
   | { type: 'YIELD'; playerId: string }
@@ -529,6 +565,12 @@ export type GameAction =
   | { type: 'DECLINE_RESCUE'; playerId: string }
   /** Legacy-only (Mission 9), from AWAIT_RESCUE_CHOICE: an exact kill's bonus — sends `pileIndex`'s face-up captured card straight to the top of the reserve deck. */
   | { type: 'CHOOSE_EXACT_KILL_RESCUE'; playerId: string; pileIndex: number }
+  /**
+   * Legacy-only (Mission 11), from AWAIT_BEAST_REWARD_CHOICE: picks `cardId` (one of the beast-deck cards, see
+   * GameState.beastDeck/beastDeckDiscard) to carry into Mission 12. Validated against the window being open, not
+   * turn ownership — any player may make the pick for the party, same as CLAIM_JESTER.
+   */
+  | { type: 'CHOOSE_BEAST_REWARD'; playerId: string; cardId: string }
   /** Classic Regicide only, from WON: continues into another round with Kings shuffled into the Tavern deck and enemies scaled up. */
   | { type: 'START_ENDLESS_ROUND' };
 

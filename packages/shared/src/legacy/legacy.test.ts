@@ -4,6 +4,7 @@ import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from 
 import { CLASS_THEME } from './classes.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs } from './missions.js';
 import {
+  applyBeastCardChoice,
   applyDualClassStickers,
   applyMageSticker,
   applyReward,
@@ -66,7 +67,7 @@ describe('legacy: mission setup', () => {
   });
 
   it('every non-standard-castle, non-corrupted-party-enemies mission has at least one enemy and converts cleanly to engine specs', () => {
-    expect(MISSIONS.length).toBe(10);
+    expect(MISSIONS.length).toBe(11);
     for (const mission of MISSIONS) {
       // Mission 10's enemies aren't a static list either — like standardCastle, its queue is built at mission
       // start instead (see GameState.corruptedPartyEnemies), so `enemies` is deliberately left empty.
@@ -2237,5 +2238,313 @@ describe('legacy: mission 10 reward (applyRestoredPartyCards — "deck rehabilit
   it('is a no-op (same reference) for an empty restored list', () => {
     const party = buildInitialParty();
     expect(applyRestoredPartyCards(party, [])).toBe(party);
+  });
+});
+
+/** Mission 4's Beast Companion reward pool, freshly built (mirrors how RoomManager grants it via applyReward). */
+function mission4BeastCards(): SuitedCard[] {
+  return getMission(4)!.reward.recruits.map((r) => buildRecruitCard(r) as SuitedCard);
+}
+
+function startMission11(n: number, opts: { party?: Card[] } = {}): GameState {
+  const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+  const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+  const mission11 = getMission(11)!;
+  const res = applyAction(createLobbyState(), {
+    type: 'START_LEGACY_MISSION',
+    playerIds: ids,
+    playerNames: names,
+    seed: 'mission-11-test',
+    party: opts.party ?? [...buildInitialParty(), ...mission4BeastCards()],
+    enemies: missionEnemiesToSpecs(mission11.enemies),
+    jesterCount: 0,
+    beastDeckMechanic: mission11.beastDeckMechanic,
+    pileTopEnemyBonus: mission11.pileTopEnemyBonus,
+  });
+  if (!res.ok) throw new Error(res.error);
+  return res.state;
+}
+
+describe('legacy: mission 11 setup (Descent into Darkness)', () => {
+  it('the mission entry has 4 elite enemies (one per base class), the beast-deck and pile-top-bonus flags, and no separate recruit reward', () => {
+    const mission11 = getMission(11)!;
+    expect(mission11.title).toBe('Descent into Darkness');
+    expect(mission11.enemies.length).toBe(4);
+    expect(new Set(mission11.enemies.map((e) => e.class))).toEqual(new Set(['WARRIOR', 'BARD', 'CLERIC', 'PALADIN']));
+    expect(mission11.beastDeckMechanic).toBe(true);
+    expect(mission11.pileTopEnemyBonus).toBe(true);
+    expect(mission11.reward.recruits).toEqual([]);
+  });
+
+  it('builds the beast deck from the mission-4 beast cards in the party, and none of them are available to draw or play this mission', () => {
+    const beasts = mission4BeastCards();
+    const party = [...buildInitialParty(), ...beasts];
+    const state = startMission11(1, { party });
+
+    // All 4 beast cards are accounted for between the face-down deck and its used-card pile (one's already been
+    // flipped for the first turn's start-of-turn effect).
+    const pool = [...state.beastDeck, ...state.beastDeckDiscard];
+    expect(pool.length).toBe(4);
+    const poolIds = new Set(pool.map((c) => c.id));
+    expect(poolIds).toEqual(new Set(beasts.map((c) => c.id)));
+    expect(pool.every((c) => c.kind === 'suited' && (c as SuitedCard).beast)).toBe(true);
+
+    // None of the beast cards ended up in a hand or the reserve deck — unavailable to the active party this mission.
+    const inCirculation = [...state.players.flatMap((p) => p.hand), ...state.tavernDeck];
+    expect(inCirculation.some((c) => poolIds.has(c.id))).toBe(false);
+  });
+
+  it('is a no-op beast deck (empty) when the party has no beast cards at all', () => {
+    const state = startMission11(1, { party: buildInitialParty() });
+    expect(state.beastDeck.length).toBe(0);
+    expect(state.beastDeckDiscard.length).toBe(0);
+  });
+});
+
+describe('legacy: mission 11 beast-deck start-of-turn flip', () => {
+  function classSpec(cls: 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN') {
+    return getMission(4)!.reward.recruits.find((r) => r.class === cls)!;
+  }
+
+  it('Warrior-flip banishes the top of the discard pile', () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.beastDeck = [buildRecruitCard(classSpec('WARRIOR'))];
+    state.beastDeckDiscard = [];
+    const discardTop = suited('H', '4');
+    state.discardPile = [discardTop];
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    expect(res.state.discardPile.length).toBe(0);
+    expect(res.state.banishPile.some((c) => c.id === discardTop.id)).toBe(true);
+  });
+
+  it('Paladin-flip discards the top of the reserve deck', () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.beastDeck = [buildRecruitCard(classSpec('PALADIN'))];
+    state.beastDeckDiscard = [];
+    const reserveTop = suited('D', '3');
+    state.tavernDeck = [reserveTop, ...state.tavernDeck];
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    expect(res.state.tavernDeck.some((c) => c.id === reserveTop.id)).toBe(false);
+    expect(res.state.discardPile.some((c) => c.id === reserveTop.id)).toBe(true);
+  });
+
+  it('Cleric-flip has the current player discard a card from hand', () => {
+    let state = startMission11(1);
+    const low = suited('C', '2');
+    const high = suited('H', '9');
+    state = rig(state, [high, low], { baseAttack: 0, spadesShield: 999 });
+    state.beastDeck = [buildRecruitCard(classSpec('CLERIC'))];
+    state.beastDeckDiscard = [];
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    expect(res.state.players[0].hand.map((c) => c.id)).toEqual([high.id]);
+    expect(res.state.discardPile.some((c) => c.id === low.id)).toBe(true);
+  });
+
+  it('Bard-flip has the current player banish a card from hand', () => {
+    let state = startMission11(1);
+    const low = suited('S', '3');
+    const high = suited('D', '8');
+    state = rig(state, [high, low], { baseAttack: 0, spadesShield: 999 });
+    state.beastDeck = [buildRecruitCard(classSpec('BARD'))];
+    state.beastDeckDiscard = [];
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    expect(res.state.players[0].hand.map((c) => c.id)).toEqual([high.id]);
+    expect(res.state.banishPile.some((c) => c.id === low.id)).toBe(true);
+  });
+
+  it("Bard-flip is skipped entirely when the current player's hand is empty", () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.beastDeck = [buildRecruitCard(classSpec('BARD'))];
+    state.beastDeckDiscard = [];
+    const banishPileBefore = state.banishPile.length;
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    expect(res.state.players[0].hand.length).toBe(0);
+    expect(res.state.banishPile.length).toBe(banishPileBefore);
+    expect(res.state.log.some((e) => e.message.includes('no cards to banish'))).toBe(true);
+  });
+
+  it('reshuffles the beast deck from its own used-card pile once it runs dry, then keeps flipping', () => {
+    let state = startMission11(1);
+    const used = [suited('C', '2'), suited('D', '3')];
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.beastDeck = [];
+    state.beastDeckDiscard = used;
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    const poolIds = new Set([...res.state.beastDeck, ...res.state.beastDeckDiscard].map((c) => c.id));
+    expect(poolIds).toEqual(new Set(used.map((c) => c.id)));
+    expect(res.state.beastDeck.length).toBe(1); // reshuffled 2, then immediately flipped 1 back into beastDeckDiscard
+    expect(res.state.beastDeckDiscard.length).toBe(1);
+    expect(res.state.log.some((e) => e.message.includes('reshuffles'))).toBe(true);
+  });
+
+  it('an exact kill skips the beast-deck flip on the very next turn', () => {
+    let state = startMission11(1);
+    // Exact-kill the current (first) enemy: Diamonds doesn't multiply, 5 damage on 5 health.
+    state = rig(state, [suited('D', '5')], { suit: 'S', baseAttack: 0, maxHealth: 5, damageTaken: 0, spadesShield: 0 });
+
+    const res1 = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    expect(res1.state.skipNextBeastDeckFlip).toBe(true);
+    expect(res1.state.turnPhase).toBe('AWAIT_PLAY'); // same player continues against the next of the 4 enemies
+
+    const state2 = rig(res1.state, [], { baseAttack: 0, spadesShield: 999 });
+    const beastDeckBefore = state2.beastDeck.map((c) => c.id);
+    const beastDiscardBefore = state2.beastDeckDiscard.map((c) => c.id);
+
+    const res2 = ensureOk(applyAction(state2, { type: 'YIELD', playerId: state2.players[0].id }));
+
+    expect(res2.state.beastDeck.map((c) => c.id)).toEqual(beastDeckBefore);
+    expect(res2.state.beastDeckDiscard.map((c) => c.id)).toEqual(beastDiscardBefore);
+    expect(res2.state.skipNextBeastDeckFlip).toBe(false);
+    expect(res2.state.log.some((e) => e.message.includes('spared it a flip'))).toBe(true);
+  });
+});
+
+describe('legacy: mission 11 pile-top bonus strength & immunity, and banish-on-defeat', () => {
+  it("the current enemy draws bonus strength from the discard pile's AND banish pile's top cards combined", () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 5, spadesShield: 0 });
+    state.discardPile = [suited('H', '3')];
+    state.banishPile = [suited('D', '4')];
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    // 5 base + 3 (discard top) + 4 (banish top) = 12.
+    expect(res.state.pendingDamage).toBe(12);
+    expect(res.state.turnPhase).toBe('AWAIT_DEFEND');
+  });
+
+  it('the current enemy is also immune to whatever class sits on top of the discard pile, even if unrelated to its own suit', () => {
+    let state = startMission11(1);
+    const heartsCard: SuitedCard = suited('H', '5');
+    state = rig(state, [heartsCard], { suit: 'C', baseAttack: 0, spadesShield: 0, maxHealth: 100, damageTaken: 0 }); // Warrior suit, not Hearts
+    state.discardPile = [suited('H', '9')]; // top of discard is Hearts-suited
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [heartsCard.id] }),
+    );
+
+    expect(res.state.log.some((e) => e.message.includes('blocked'))).toBe(true);
+  });
+
+  it('the current enemy is also immune to whatever class sits on top of the banish pile', () => {
+    let state = startMission11(1);
+    const diamondsCard: SuitedCard = suited('D', '5');
+    state = rig(state, [diamondsCard], { suit: 'C', baseAttack: 0, spadesShield: 0, maxHealth: 100, damageTaken: 0 }); // Warrior suit, not Bard
+    state.banishPile = [suited('D', '9')]; // top of the banish pile is Diamonds-suited
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [diamondsCard.id] }),
+    );
+
+    expect(res.state.log.some((e) => e.message.includes('blocked'))).toBe(true);
+  });
+
+  it('defeating an enemy always banishes its played cards — never sent to the discard pile, never recycled back into the queue', () => {
+    let state = startMission11(1);
+    state = rig(state, [suited('C', '10')], { suit: 'H', baseAttack: 0, maxHealth: 10, damageTaken: 0, spadesShield: 0 }); // Clubs doubles: 20 dmg, overkill
+    const castleDeckSizeBefore = state.castleDeck.length;
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '10')).toBe(false);
+    expect(res.state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '10')).toBe(true);
+    // One enemy fell off the queue for good — not requeued (castleDeck shrank by exactly 1, never regrew).
+    expect(res.state.castleDeck.length).toBe(castleDeckSizeBefore - 1);
+  });
+});
+
+describe('legacy: mission 11 reward (pick one beast card to carry forward)', () => {
+  it("opens AWAIT_BEAST_REWARD_CHOICE (not an immediate WON) when the mission's last enemy falls", () => {
+    const beasts = mission4BeastCards();
+    let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
+    state = structuredClone(state);
+    state.castleDeck = []; // the current enemy is the last of the 4
+    state = rig(state, [suited('D', '9')], { suit: 'S', baseAttack: 0, maxHealth: 9, damageTaken: 0, spadesShield: 0 });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.phase).toBe('IN_PROGRESS'); // not WON yet — the party still has to choose
+    expect(res.state.turnPhase).toBe('AWAIT_BEAST_REWARD_CHOICE');
+    const pool = [...res.state.beastDeck, ...res.state.beastDeckDiscard];
+    expect(pool.length).toBe(4);
+  });
+
+  it('CHOOSE_BEAST_REWARD resolves the choice into restoredPartyCards and completes the mission', () => {
+    const beasts = mission4BeastCards();
+    let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
+    state = structuredClone(state);
+    state.castleDeck = [];
+    state = rig(state, [suited('D', '9')], { suit: 'S', baseAttack: 0, maxHealth: 9, damageTaken: 0, spadesShield: 0 });
+    const killRes = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    const pool = [...killRes.state.beastDeck, ...killRes.state.beastDeckDiscard];
+    const chosen = pool[0];
+
+    const res = ensureOk(
+      applyAction(killRes.state, { type: 'CHOOSE_BEAST_REWARD', playerId: killRes.state.players[0].id, cardId: chosen.id }),
+    );
+
+    expect(res.state.phase).toBe('WON');
+    expect(res.state.restoredPartyCards.map((c) => c.id)).toEqual([chosen.id]);
+    expect(res.state.beastDeck.length).toBe(0);
+    expect(res.state.beastDeckDiscard.length).toBe(0);
+  });
+
+  it('rejects CHOOSE_BEAST_REWARD when no window is open, and rejects a card id outside the pool', () => {
+    let state = startMission11(1);
+    const notOpen = applyAction(state, { type: 'CHOOSE_BEAST_REWARD', playerId: state.players[0].id, cardId: 'whatever' });
+    expect(notOpen.ok).toBe(false);
+
+    state = structuredClone(state);
+    state.castleDeck = [];
+    state = rig(state, [suited('D', '9')], { suit: 'S', baseAttack: 0, maxHealth: 9, damageTaken: 0, spadesShield: 0 });
+    const killRes = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    const badPick = applyAction(killRes.state, {
+      type: 'CHOOSE_BEAST_REWARD',
+      playerId: killRes.state.players[0].id,
+      cardId: 'not-in-the-pool',
+    });
+    expect(badPick.ok).toBe(false);
+  });
+
+  it('applyBeastCardChoice replaces the whole beast-card slate with just the chosen card', () => {
+    const beasts = mission4BeastCards();
+    const party = [...buildInitialParty(), ...beasts];
+    const chosen = beasts[0];
+
+    const next = applyBeastCardChoice(party, [chosen]);
+
+    const beastIdsInNext = next.filter((c) => c.kind === 'suited' && (c as SuitedCard).beast).map((c) => c.id);
+    expect(beastIdsInNext).toEqual([chosen.id]);
+    expect(next.length).toBe(party.length - 3); // the other 3 beast cards are pruned; the chosen one was already present
+  });
+
+  it('applyBeastCardChoice is a no-op (same reference) when nothing was restored', () => {
+    const party = [...buildInitialParty(), ...mission4BeastCards()];
+    expect(applyBeastCardChoice(party, [])).toBe(party);
   });
 });

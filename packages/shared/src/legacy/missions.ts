@@ -56,6 +56,10 @@ export interface Mission {
   corruptedPartyEnemies?: boolean;
   /** See GameState.startOfTurnZoneFlip. */
   startOfTurnZoneFlip?: boolean;
+  /** See GameState.beastDeckMechanic. */
+  beastDeckMechanic?: boolean;
+  /** See GameState.pileTopEnemyBonus. */
+  pileTopEnemyBonus?: boolean;
 }
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
@@ -109,9 +113,9 @@ export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemyS
 
 /**
  * Regicide Legacy's campaign — original content built on the same rules skeleton as the physical game, not its
- * proprietary mission text. Currently the first ten missions of a longer arc: the party's early fights against
+ * proprietary mission text. Currently the first eleven missions of a longer arc: the party's early fights against
  * a corrupted syndicate, on through the Well of Tears' Druids, Heaven's Edge's Chanters, the Twin Seed Temple,
- * and the mastermind's own corrupted-hero ambush at Mission 10.
+ * the mastermind's own corrupted-hero ambush at Mission 10, and the underground pursuit into Mission 11.
  */
 export const MISSIONS: Mission[] = [
   {
@@ -560,6 +564,49 @@ export const MISSIONS: Mission[] = [
     //    dealDamageAndCheckDefeat on every exact kill and folded into the campaign party by party.ts's
     //    applyRestoredPartyCards at mission end (see RoomManager.completeLegacyMission). Marked uncertain the
     //    same way the flavor beats above are — community research, not transcript-confirmed.
+    reward: {
+      recruits: [],
+    },
+  },
+  {
+    id: 11,
+    title: 'Descent into Darkness',
+    story:
+      "The party's underground pursuit leads to a cavern where their old ally is found bound to a corrupting " +
+      'machine, guarded by four elite enemies.',
+    // Four elite guardians, one per base class — the transcript names no stats for this mission at all, so these
+    // are an invented judgment call (like every other mission's raw numbers), pitched one tier past Mission 8's
+    // Wyverns (50/25) to match how deep into the campaign this fight sits.
+    enemies: [
+      enemy('Warden of the Depths: Ashclad', 'WARRIOR', 60, 30),
+      enemy('Warden of the Depths: Bellsong', 'BARD', 60, 30),
+      enemy('Warden of the Depths: Hollowmourn', 'CLERIC', 60, 30),
+      enemy('Warden of the Depths: Ironvow', 'PALADIN', 60, 30),
+    ],
+    // Mission 4's Beast Companion cards are pulled out of the campaign party and shuffled into a face-down deck
+    // that sits in the mission zone for this fight only — no Beast card is available to draw or play this
+    // mission (an unrelated Mage-aligned party member is still usable as normal; see deck.ts's buildBeastDeck).
+    // At the start of every turn its top card flips for a one-shot effect keyed to its class (see engine.ts's
+    // flipBeastDeckCard — Mission 10's flipStartOfTurnZoneCard is the closest precedent for this shape); once it
+    // runs out it reshuffles from its own used-card pile and the cycle continues. An exact kill spares the very
+    // next turn's flip (see GameState.skipNextBeastDeckFlip).
+    beastDeckMechanic: true,
+    // The current enemy draws bonus strength AND class-immunity from whatever cards currently sit on top of the
+    // discard pile and the banish pile — both recomputed live, so a Cleric heal reshuffling the discard pile (or
+    // a Druid's Regrowth pulling from the banish pile) mid-turn changes the enemy's toolkit before the next play
+    // even resolves (see rules.ts's pileTopImmuneSuits/banishPileTopValue, engine.ts's resolvedEnemyAttack). This
+    // also changes how a defeated enemy's played cards are cleared away: per the transcript ("defeating the enemy
+    // always banishes it, never recycled or discarded"), they go to the banish pile instead of the discard pile —
+    // which is exactly what keeps feeding this same mechanic forward through the rest of the fight.
+    pileTopEnemyBonus: true,
+    // Reward: the party picks ONE of the four Beast Companion cards that spent this whole fight locked in the
+    // mission-zone beast deck to carry into Mission 12 — the other three don't return to the party. Modeled as a
+    // genuine pending choice (AWAIT_BEAST_REWARD_CHOICE / CHOOSE_BEAST_REWARD) instead of resolving automatically,
+    // the closest existing precedent being Mission 9's AWAIT_RESCUE_CHOICE window; the pick is folded into the
+    // campaign roster via the same GameState.restoredPartyCards field Mission 10's "deck rehabilitation" reward
+    // already threads through to RoomManager.completeLegacyMission, just with pruning logic of its own (see
+    // party.ts's applyBeastCardChoice) since Mission 11's choice REPLACES the party's beast-card slate rather than
+    // just adding to it.
     reward: {
       recruits: [],
     },

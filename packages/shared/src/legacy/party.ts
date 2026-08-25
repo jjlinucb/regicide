@@ -193,3 +193,22 @@ export function applyRestoredPartyCards(party: Card[], restored: Card[]): Card[]
   const toRestore = restored.filter((c) => !existingIds.has(c.id));
   return [...party, ...toRestore];
 }
+
+/**
+ * Mission 11's reward mechanic ("Descent into Darkness"): replaces the campaign party's WHOLE beast-card slate
+ * (Mission 4's reward pool, see SuitedCard.beast) with just the single card the party chose to carry forward —
+ * `restored` here is GameState.restoredPartyCards, populated by engine.ts's chooseBeastReward. The other three,
+ * having spent the whole mission locked in the mission-zone beast deck, don't return. Deliberately NOT just
+ * applyRestoredPartyCards: that function only ever adds cards missing by id, but every beast card (including the
+ * chosen one) is already sitting in `party` the whole time — Mission 11 only pulls them out of the mission's own
+ * reserve deck at setup (see deck.ts's buildBeastDeck), never out of the persisted campaign roster — so the
+ * chosen card's id is always already present and a plain add would be a no-op. This prunes every beast card out
+ * first, then re-adds only the chosen one(s). A no-op if `restored` is empty (the choice was never made, or this
+ * mission has no beast cards to begin with).
+ */
+export function applyBeastCardChoice(party: Card[], restored: Card[]): Card[] {
+  if (restored.length === 0) return party;
+  const chosenIds = new Set(restored.map((c) => c.id));
+  const pruned = party.filter((c) => !(c.kind === 'suited' && c.beast) || chosenIds.has(c.id));
+  return applyRestoredPartyCards(pruned, restored);
+}

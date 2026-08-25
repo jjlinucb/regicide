@@ -220,3 +220,17 @@ export function buildCorruptedPartyEnemies(
   });
   return { enemies, leftoverParty };
 }
+
+/**
+ * Legacy-only (Mission 11, "Descent into Darkness"): pulls every Beast Companion card (Mission 4's reward pool,
+ * see SuitedCard.beast) out of the campaign party and shuffles them into a face-down deck that sits in the
+ * mission zone for this fight only — none of them are available to draw or play this mission (see
+ * GameState.beastDeck). Returns the deck plus whatever's left of the party for the caller to build the mission's
+ * reserve deck from — same "pull cards out, return the leftover" shape as buildCorruptedPartyEnemies above.
+ */
+export function buildBeastDeck(party: Card[], rng: () => number): { beastDeck: Card[]; leftoverParty: Card[] } {
+  const beastCards = party.filter((c) => c.kind === 'suited' && c.beast);
+  const beastIds = new Set(beastCards.map((c) => c.id));
+  const leftoverParty = party.filter((c) => !beastIds.has(c.id));
+  return { beastDeck: shuffle(beastCards, rng), leftoverParty };
+}
