@@ -365,6 +365,7 @@ export class RoomManager {
       startOfTurnZoneFlip: mission.startOfTurnZoneFlip,
       beastDeckMechanic: mission.beastDeckMechanic,
       pileTopEnemyBonus: mission.pileTopEnemyBonus,
+      restoredCardMechanic: mission.restoredCardMechanic,
       relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };

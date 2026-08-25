@@ -60,6 +60,8 @@ export interface Mission {
   beastDeckMechanic?: boolean;
   /** See GameState.pileTopEnemyBonus. */
   pileTopEnemyBonus?: boolean;
+  /** See GameState.restoredCardMechanic. */
+  restoredCardMechanic?: boolean;
 }
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
@@ -100,6 +102,24 @@ function pilgrim(name: string, suit: Suit, rank: Rank): Card {
   return { id: `pilgrim-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, pilgrim: true };
 }
 
+/**
+ * Mission 12's own flavor pair, seeded into its extraReserveCards: heroes the antagonist's corruption reached
+ * along the campaign's road. `restoredHero` carries SuitedCard.restored — the relic upgrade's beneficiaries,
+ * healing the banish pile back into the game whenever they're played (see engine.ts's applyRestoredHeal).
+ * `corruptedHero` carries the plain SuitedCard.corrupted the rest of the campaign already uses (Mission 1's full
+ * corrupted court, Mission 4's corruptedReturnQueue) — the relic didn't reach these few in time, so they still pay
+ * the ordinary immunity-ignoring cost, redirected to the bottom of the banish pile instead of the reserve deck
+ * this mission (see engine.ts's toReserveDeck). Named separately from zoneCompanion/pilgrim above since neither
+ * fits: these aren't mission-zone fixtures or Pilgrim-style rescues, just ordinary reserve-deck cards carrying one
+ * of the two flags this mission's whole mechanic is built around.
+ */
+function restoredHero(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `restored-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, restored: true };
+}
+function corruptedHero(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `corrupted-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, corrupted: true };
+}
+
 /** Converts a mission's enemy specs into the engine's LegacyEnemySpec shape (suit-keyed). Mage enemies aren't used yet — the class only exists as a party reward so far. */
 export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemySpec[] {
   return enemies.map((e) => ({
@@ -113,9 +133,10 @@ export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemyS
 
 /**
  * Regicide Legacy's campaign — original content built on the same rules skeleton as the physical game, not its
- * proprietary mission text. Currently the first eleven missions of a longer arc: the party's early fights against
- * a corrupted syndicate, on through the Well of Tears' Druids, Heaven's Edge's Chanters, the Twin Seed Temple,
- * the mastermind's own corrupted-hero ambush at Mission 10, and the underground pursuit into Mission 11.
+ * proprietary mission text. All twelve missions of the full arc: the party's early fights against a corrupted
+ * syndicate, on through the Well of Tears' Druids, Heaven's Edge's Chanters, the Twin Seed Temple, the
+ * mastermind's own corrupted-hero ambush at Mission 10, the underground pursuit into Mission 11, and the
+ * campaign's finale in the mastermind's own throne room at Mission 12.
  */
 export const MISSIONS: Mission[] = [
   {
@@ -607,6 +628,64 @@ export const MISSIONS: Mission[] = [
     // already threads through to RoomManager.completeLegacyMission, just with pruning logic of its own (see
     // party.ts's applyBeastCardChoice) since Mission 11's choice REPLACES the party's beast-card slate rather than
     // just adding to it.
+    reward: {
+      recruits: [],
+    },
+  },
+  {
+    id: 12,
+    title: 'Decay to Growth',
+    story:
+      "The ally freed from the corrupting machine in the depths hands the party a gift before they press on: a " +
+      "way to upgrade one of their own relics, turning its corruption-craft inside out. They carry it into the " +
+      "mastermind's own underground throne room, where he unleashes his corrupted royalty — Queens, Kings, and " +
+      "finally the Hierarch himself — as a last line of defense between the party and the campaign's end.",
+    // Queen/King/Hierarch, reusing classic Regicide's own royalty stat table (Q: 30 health / 15 attack, K: 40/20 —
+    // see deck.ts's ENEMY_STATS) for the first eight, one of each base class per tier, then a final boss standing
+    // a clear step past Mission 11's 60/30 elites and dual-immune like Mission 9's Myla — a title above King
+    // fitting the campaign's true mastermind, only unmasked at the very end.
+    enemies: [
+      enemy('Queen of Ash', 'WARRIOR', 30, 15),
+      enemy('Queen of Silence', 'BARD', 30, 15),
+      enemy('Queen of Ruin', 'CLERIC', 30, 15),
+      enemy('Queen of Thorns', 'PALADIN', 30, 15),
+      enemy('King of Ash', 'WARRIOR', 40, 20),
+      enemy('King of Silence', 'BARD', 40, 20),
+      enemy('King of Ruin', 'CLERIC', 40, 20),
+      enemy('King of Thorns', 'PALADIN', 40, 20),
+      enemy('The Hierarch', 'CLERIC', 120, 30, 'PALADIN'),
+    ],
+    // The mission's whole mechanic, gating the restored/corrupted-card bundle (see GameState.restoredCardMechanic):
+    // a previous relic gets swapped for an upgraded version this mission — restored cards ignore enemy immunity
+    // like a corrupted card does, but instead of banishing a reserve card when played, they HEAL the banish
+    // pile's top card back into the game, returned under the reserve deck (see engine.ts's applyRestoredHeal); a
+    // restored card can never itself end up in the banish pile — anywhere that would send one there redirects it
+    // to the bottom of the reserve deck instead (see engine.ts's banishCards). Corrupted cards get a rule of their
+    // own too: anywhere that would put one into the reserve deck instead sends it to the bottom of the banish
+    // pile (see engine.ts's toReserveDeck). Every start of turn, the top card of the banish pile moves into the
+    // mission zone, adding both strength AND immunity to the current enemy (see engine.ts's
+    // flipBanishPileZoneCard); defeating an enemy triggers a three-step cleanup — banish the whole mission zone,
+    // then the enemy, then the entire discard pile, order preserved (see dealDamageAndCheckDefeat) — and an exact
+    // kill skips the very next turn's flip (see GameState.skipNextBanishZoneFlip), mirroring Mission 11's
+    // skipNextBeastDeckFlip.
+    restoredCardMechanic: true,
+    // The relic's beneficiaries and the few it didn't reach in time — named heroes seeded straight into this
+    // mission's reserve deck (not the persisted campaign party, same as Mission 8/9's own flavor extras), giving
+    // the restored/corrupted-card mechanic real cards to exercise from turn one instead of waiting on a source
+    // that doesn't otherwise exist yet in this digital campaign (see missions.ts's restoredHero/corruptedHero and
+    // their doc comment for the full reasoning).
+    extraReserveCards: [
+      restoredHero('Aldric Rootbound', 'H', '6'),
+      restoredHero('Senna Brightloom', 'D', '7'),
+      restoredHero('Torvin Ashendale', 'C', '5'),
+      restoredHero('Wren Hollowmere', 'S', '8'),
+      corruptedHero('Maren the Fallen', 'C', '9'),
+      corruptedHero('Dask Emberwane', 'S', '6'),
+    ],
+    // No reward: the campaign's final mission — completing it ends the story, nothing further to grant. Some
+    // pasted community research describes an un-banishable restored-card "immunity shield" and a Paladin power
+    // that bypasses enemy immunity outright; neither appears anywhere in the transcript, so neither was used —
+    // same standard this file has held to reward-by-reward since Mission 1.
     reward: {
       recruits: [],
     },

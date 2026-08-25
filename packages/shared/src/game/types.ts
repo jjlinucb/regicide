@@ -113,6 +113,16 @@ export interface SuitedCard {
    */
   beast?: boolean;
   /**
+   * Legacy-only (Mission 12, "Decay to Growth"): a restored card — the campaign's final-mission upgrade of a
+   * corrupted card (see `corrupted` above), from the same relic swapping to a new form. Its class power(s) always
+   * ignore enemy immunity, exactly like a corrupted card's — but instead of banishing the reserve deck's top card
+   * as the cost, playing it *heals* the banish pile's top card back into the game, returned to the bottom of the
+   * reserve deck (see engine.ts's applyRestoredHeal). A restored card can never itself end up in the banish pile —
+   * anywhere the engine would send one there redirects it to the bottom of the reserve deck instead (see
+   * engine.ts's banishCards). Mutually exclusive with `corrupted`: a card is either one or the other, never both.
+   */
+  restored?: boolean;
+  /**
    * Classic Regicide Endless Mode only: how many steps past King this card has been upgraded, from being the
    * card of an enemy defeated during an endless round (see engine.ts's upgradeDefeatedRank). A Jack or Queen
    * defeated during endless rounds has its `rank` itself promoted up the J→Q→K chain instead (no tier needed);
@@ -456,6 +466,26 @@ export interface GameState {
    * dealDamageAndCheckDefeat), which is what keeps feeding this same mechanic forward through the fight.
    */
   pileTopEnemyBonus: boolean;
+  /**
+   * Legacy-only (Mission 12, "Decay to Growth", the campaign's final mission): the master gate for the mission's
+   * whole restored/corrupted-card bundle — unlike Mission 11's live pile-top peek above, this ACTUALLY MOVES the
+   * banish pile's top card into `missionZone` at the start of every turn (see engine.ts's flipBanishPileZoneCard),
+   * where it accumulates (never cleared except by a kill) buffing the current enemy's attack by the zone's
+   * combined value (see rules.ts's missionZoneValueSum / resolvedEnemyAttack) and — reusing the existing
+   * `zoneImmuneSuits` accumulation every earlier zone-immunity mission already populates — granting immunity to
+   * every class sitting there. Also gates: a restored card's heal-instead-of-banish cost (see SuitedCard.restored
+   * / applyRestoredHeal), a corrupted card's redirect away from the reserve deck to the bottom of the banish pile
+   * (see SuitedCard.corrupted / engine.ts's toReserveDeck), and the three-step cleanup on defeat — banish the
+   * whole mission zone, then the enemy's own table cards, then the ENTIRE discard pile, order preserved (see
+   * dealDamageAndCheckDefeat) — a much bigger sweep than any earlier mission's zone-only cleanup, deliberately
+   * feeding fresh material to next turn's flip.
+   */
+  restoredCardMechanic: boolean;
+  /**
+   * Legacy-only (Mission 12): true for the one turn right after an exact-damage kill — consumed by
+   * flipBanishPileZoneCard to skip that turn's flip, mirroring Mission 11's skipNextBeastDeckFlip.
+   */
+  skipNextBanishZoneFlip: boolean;
 }
 
 export interface GameEvent {
@@ -526,6 +556,8 @@ export type GameAction =
       beastDeckMechanic?: boolean;
       /** See GameState.pileTopEnemyBonus. */
       pileTopEnemyBonus?: boolean;
+      /** See GameState.restoredCardMechanic. */
+      restoredCardMechanic?: boolean;
     }
   | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
   | { type: 'YIELD'; playerId: string }

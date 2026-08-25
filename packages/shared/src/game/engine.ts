@@ -24,6 +24,7 @@ import {
   isCompanionCard,
   isSuitBlockedByImmunity,
   MAX_SOLO_JESTERS,
+  missionZoneValueSum,
   pileTopImmuneSuits,
   validatePlayShape,
 } from './rules.js';
@@ -132,6 +133,7 @@ function advanceToNextPlayer(state: GameState): void {
   flipPilgrimCard(state);
   flipStartOfTurnZoneCard(state);
   flipBeastDeckCard(state);
+  flipBanishPileZoneCard(state);
   // Mission 8's placement window only ever covers the turn a kill happened on (or the continued turn right
   // after it) — once play moves on to a fresh turn with no kill behind it, close the window back up.
   state.zoneOpenForPlacement = false;
@@ -187,7 +189,7 @@ function flipMissionZoneCard(state: GameState): void {
 function rollMissionZoneBonusCard(state: GameState): void {
   if (!state.rollingZoneBonus) return;
   if (state.rollingZoneCard) {
-    state.banishPile.push(state.rollingZoneCard);
+    banishCards(state, [state.rollingZoneCard]);
   }
   const card = state.tavernDeck.shift();
   state.rollingZoneCard = card ?? null;
@@ -222,7 +224,7 @@ function checkPilgrimRescue(state: GameState, totalValue: number): void {
   const idx = state.pilgrimZone.findIndex((c) => cardValue(c) === totalValue);
   if (idx === -1) return;
   const [rescued] = state.pilgrimZone.splice(idx, 1);
-  state.banishPile.push(rescued);
+  banishCards(state, [rescued]);
   log(state, `${rescued.kind === 'suited' ? rescued.name ?? `the ${rescued.rank}` : 'A Jester'} is rescued from the mission zone — banished safely, for good.`);
 }
 
@@ -325,7 +327,7 @@ function flipBeastDeckCard(state: GameState): void {
   if (cls === 'WARRIOR') {
     const banished = state.discardPile.pop();
     if (banished) {
-      state.banishPile.push(banished);
+      banishCards(state, [banished]);
       log(state, `${label} flips (Warrior) — the top of the discard pile is banished.`);
     } else {
       log(state, `${label} flips (Warrior) — the discard pile is empty, nothing to banish.`);
@@ -365,9 +367,42 @@ function flipBeastDeckCard(state: GameState): void {
       if (cardValue(player.hand[i]) < cardValue(player.hand[idx])) idx = i;
     }
     const [banished] = player.hand.splice(idx, 1);
-    state.banishPile.push(banished);
+    banishCards(state, [banished]);
     log(state, `${label} flips (Bard) — ${player.name} banishes a card from hand.`);
   }
+}
+
+/**
+ * Mission 12 ("Decay to Growth") only: at the start of every turn, the top card of the BANISH pile (not the
+ * reserve deck, unlike every earlier zone-flip mission) moves into the shared mission zone, where it accumulates
+ * (never cleared except by the mission's own three-step cleanup on defeat — see dealDamageAndCheckDefeat) —
+ * buffing the current enemy's attack by the zone's combined value (see rules.ts's missionZoneValueSum /
+ * resolvedEnemyAttack) and granting it immunity to every class sitting there, by reusing the same
+ * `zoneImmuneSuits` accumulation Mission 3's flipMissionZoneCard already populates (the immunity check in
+ * resolveSuitPowers isn't gated per mission — it just reads whatever's in zoneImmuneSuits). This is a closer
+ * cousin to Mission 11's flipBeastDeckCard (a start-of-turn flip with its own skip-on-exact-kill flag) than to
+ * Mission 11's OWN pileTopEnemyBonus (which peeks the banish pile's top live, in place, without moving anything) —
+ * the mission zone actually removing the card from the banish pile is exactly why this needs its own function
+ * rather than reusing pileTopImmuneSuits/banishPileTopValue directly. Called both once at mission start (the first
+ * player's first turn) and from advanceToNextPlayer, same as every other start-of-turn flip in this file.
+ */
+function flipBanishPileZoneCard(state: GameState): void {
+  if (!state.restoredCardMechanic || !state.currentEnemy) return;
+  if (state.skipNextBanishZoneFlip) {
+    state.skipNextBanishZoneFlip = false;
+    log(state, 'The mission zone holds still this turn — the exact kill spared it a flip.');
+    return;
+  }
+  const card = state.banishPile.pop(); // top of the banish pile
+  if (!card) return;
+  state.missionZone.push(card);
+  if (card.kind === 'suited') {
+    for (const s of cardSuits(card)) {
+      if (!state.zoneImmuneSuits.includes(s)) state.zoneImmuneSuits.push(s);
+    }
+  }
+  const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester';
+  log(state, `The mission zone pulls ${label} from the top of the banish pile — the enemy grows bolder and gains its immunity.`);
 }
 
 function drawOneCard(state: GameState, player: PlayerState): boolean {
@@ -417,7 +452,7 @@ function resolveHearts(state: GameState, attackValue: number, bonus = 0): void {
   const healCount = Math.min(attackValue + bonus, shuffled.length);
   const healed = shuffled.slice(0, healCount);
   const remaining = shuffled.slice(healCount);
-  state.tavernDeck.push(...healed); // "under the tavern deck" = bottom
+  toReserveDeck(state, healed, 'bottom'); // "under the tavern deck" = bottom
   state.discardPile = remaining;
   if (healCount > 0) log(state, `${powerLabel(state, 'H')}: ${healCount} card(s) shuffled back under the Tavern deck${bonus > 0 ? ' (Revive)' : ''}.`);
 }
@@ -425,6 +460,47 @@ function resolveHearts(state: GameState, attackValue: number, bonus = 0): void {
 /** True if any played card carries the given signature ability (Legacy-only; see types.SpecialAbilityId). */
 function hasSpecial(cards: Card[], ability: SpecialAbilityId): boolean {
   return cards.some((c) => c.kind === 'suited' && c.special === ability);
+}
+
+/**
+ * Legacy-only (Mission 12, "Decay to Growth"): sends `cards` to the banish pile, honoring the restored-card
+ * redirect (see SuitedCard.restored) first — a restored card can never land in the banish pile itself; it's sent
+ * to the bottom of the reserve deck instead. A no-op wrapper (behaves exactly like `state.banishPile.push(...)`)
+ * whenever this mission's mechanic isn't active, so it's safe to use at every banish-pile call site across the
+ * whole engine, no matter which mission-specific mechanic (Reaver's tear, a corrupted card's own cost, mission-zone
+ * cleanup, etc.) is doing the banishing.
+ */
+function banishCards(state: GameState, cards: Card[]): void {
+  if (cards.length === 0) return;
+  if (!state.restoredCardMechanic) {
+    state.banishPile.push(...cards);
+    return;
+  }
+  for (const c of cards) {
+    if (c.kind === 'suited' && c.restored) state.tavernDeck.push(c); // bottom of the reserve deck
+    else state.banishPile.push(c);
+  }
+}
+
+/**
+ * Legacy-only (Mission 12): sends `cards` into the reserve deck at `position`, honoring the corrupted-card
+ * redirect (see SuitedCard.corrupted) first — a corrupted card sent to the reserve deck, top OR bottom, instead
+ * goes to the bottom of the banish pile. Mirrors banishCards' redirect in the opposite direction, and is likewise
+ * a no-op wrapper (behaves exactly like a plain push/unshift onto `state.tavernDeck`) whenever this mission's
+ * mechanic isn't active.
+ */
+function toReserveDeck(state: GameState, cards: Card[], position: 'top' | 'bottom'): void {
+  if (cards.length === 0) return;
+  if (!state.restoredCardMechanic) {
+    if (position === 'top') state.tavernDeck.unshift(...cards);
+    else state.tavernDeck.push(...cards);
+    return;
+  }
+  for (const c of cards) {
+    if (c.kind === 'suited' && c.corrupted) state.banishPile.unshift(c); // bottom of the banish pile
+    else if (position === 'top') state.tavernDeck.unshift(c);
+    else state.tavernDeck.push(c);
+  }
 }
 
 /**
@@ -446,14 +522,32 @@ function applyCorruptedCost(state: GameState, player: PlayerState, label: string
     const victim = eligible[Math.floor(nextRandom(state) * eligible.length)];
     const idx = Math.floor(nextRandom(state) * victim.hand.length);
     const [lost] = victim.hand.splice(idx, 1);
-    state.banishPile.push(lost);
+    banishCards(state, [lost]);
     log(state, `${label} ignores immunity — the Evergreen Mother banishes a card from ${victim.name}'s hand as the cost.`);
     return;
   }
   const banished = state.tavernDeck.shift();
   if (banished) {
-    state.banishPile.push(banished);
+    banishCards(state, [banished]);
     log(state, `${label} ignores immunity — the reserve deck's top card is banished as the cost.`);
+  }
+}
+
+/**
+ * Legacy-only (Mission 12): a restored card's own cost, mirroring applyCorruptedCost in the opposite direction —
+ * instead of banishing the reserve deck's top card, it HEALS the banish pile's top card back into the game,
+ * returned to the bottom of the reserve deck (routed through toReserveDeck so a healed card that itself happens to
+ * be corrupted redirects right back to the bottom of the banish pile instead — see SuitedCard.corrupted). No
+ * Evergreen Mother-style relic variant exists for this — the transcript names no alternate cost.
+ */
+function applyRestoredHeal(state: GameState, label: string): void {
+  const healed = state.banishPile.pop(); // top of the banish pile
+  if (healed) {
+    toReserveDeck(state, [healed], 'bottom');
+    const healedLabel = healed.kind === 'suited' ? healed.name ?? `the ${healed.rank}` : 'the Jester';
+    log(state, `${label} ignores immunity — heals ${healedLabel} from the banish pile back under the reserve deck.`);
+  } else {
+    log(state, `${label} ignores immunity — the banish pile is empty, nothing to heal.`);
   }
 }
 
@@ -579,6 +673,10 @@ function resolvedEnemyAttack(state: GameState): number {
   // Mission 11: bonus strength from the discard pile's AND banish pile's top cards combined (see
   // GameState.pileTopEnemyBonus / rules.ts's banishPileTopValue).
   if (state.pileTopEnemyBonus) buff += discardPileTopValue(state.discardPile) + banishPileTopValue(state.banishPile);
+  // Mission 12: bonus strength from the mission zone's combined value — cards that flipped in off the top of the
+  // banish pile (see GameState.restoredCardMechanic / flipBanishPileZoneCard / rules.ts's missionZoneValueSum),
+  // accumulating every turn instead of being recomputed live off an untouched pile.
+  if (state.restoredCardMechanic) buff += missionZoneValueSum(state.missionZone);
   return buff !== 0 ? currentEnemyAttackWithDiscardBuff(enemy, buff) : currentEnemyAttack(enemy);
 }
 
@@ -662,10 +760,10 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
         // Exact kill: save the most recently flipped zone card to the discard pile, banish the rest.
         const saved = state.missionZone.pop()!;
         state.discardPile.push(saved);
-        state.banishPile.push(...state.missionZone);
+        banishCards(state, state.missionZone);
         log(state, `An exact hit saves ${saved.kind === 'suited' ? saved.name ?? `the ${saved.rank}` : 'the Jester'} from the mission zone — the rest is banished.`);
       } else {
-        state.banishPile.push(...state.missionZone);
+        banishCards(state, state.missionZone);
         log(state, 'The mission zone is banished.');
       }
       state.missionZone = [];
@@ -681,7 +779,7 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
           state.discardPile.push(...state.missionZone);
           log(state, 'An exact hit saves the whole mission zone — sent to the discard pile instead of banished.');
         } else {
-          state.banishPile.push(...state.missionZone);
+          banishCards(state, state.missionZone);
           log(state, 'The mission zone is banished.');
         }
         state.missionZone = [];
@@ -748,6 +846,26 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       state.castleDeck.push(requeued);
       log(state, `${enemyLabel(enemy)} rejoins the fight queue, corrupted!`);
     }
+    if (state.restoredCardMechanic) {
+      // Mission 12 ("Decay to Growth"): a much bigger cleanup than any earlier mission's zone-only sweep — banish
+      // the WHOLE mission zone (no exact-kill exception, unlike Mission 3/10's zone flips saving one card — the
+      // transcript names no such carve-out here), THEN the enemy's own table cards (handled just below, by
+      // folding this flag into the pileTopEnemyBonus branch's condition), THEN the entire discard pile (handled
+      // right after that) — order preserved throughout, feeding fresh material to next turn's banish-pile-top
+      // flip (see flipBanishPileZoneCard).
+      if (state.missionZone.length > 0) {
+        banishCards(state, state.missionZone);
+        state.missionZone = [];
+        state.zoneImmuneSuits = [];
+        log(state, 'The mission zone is banished.');
+      }
+      if (remaining === 0) {
+        // An exact hit rattles the machine — the mission zone skips its very next flip (mirrors Mission 11's
+        // skipNextBeastDeckFlip).
+        state.skipNextBanishZoneFlip = true;
+        log(state, 'The exact hit rattles the machine — the mission zone skips its next flip.');
+      }
+    }
   } else {
     const exact = remaining === 0;
     const upgrade = upgradeDefeatedRank(enemy.rank, state.endlessLoop);
@@ -770,13 +888,20 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       log(state, `${enemyLabel(enemy)} defeated${upgradeNote || '!'}`);
     }
   }
-  if (state.ruleset === 'legacy' && state.pileTopEnemyBonus) {
+  if (state.ruleset === 'legacy' && (state.pileTopEnemyBonus || state.restoredCardMechanic)) {
     // Mission 11: "defeating the enemy always banishes it" — its played cards go to the banish pile instead of
     // the discard pile, directly feeding the very pile-top bonus/immunity mechanic this flag names (see
-    // resolvedEnemyAttack / resolveSuitPowers's blocked check).
-    state.banishPile.push(...enemy.tableCards);
+    // resolvedEnemyAttack / resolveSuitPowers's blocked check). Mission 12 reuses the same rule as step two of its
+    // own three-step cleanup (see the restoredCardMechanic block above for step one, and just below for step three).
+    banishCards(state, enemy.tableCards);
   } else {
     state.discardPile.push(...enemy.tableCards);
+  }
+  if (state.ruleset === 'legacy' && state.restoredCardMechanic) {
+    // Mission 12's cleanup, step three: banish the ENTIRE discard pile too — order preserved, right after the
+    // mission zone and the enemy's own table cards above.
+    banishCards(state, state.discardPile);
+    state.discardPile = [];
   }
 
   if (state.castleDeck.length === 0) {
@@ -932,6 +1057,8 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.beastDeckDiscard = [];
   state.skipNextBeastDeckFlip = false;
   state.pileTopEnemyBonus = false;
+  state.restoredCardMechanic = false;
+  state.skipNextBanishZoneFlip = false;
 
   log(state, `Game started with ${n} player(s). First enemy: ${state.currentEnemy.rank} of ${state.currentEnemy.suit}.`);
   return ok(state);
@@ -1057,11 +1184,14 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.beastDeckDiscard = [];
   state.skipNextBeastDeckFlip = false;
   state.pileTopEnemyBonus = action.pileTopEnemyBonus ?? false;
+  state.restoredCardMechanic = action.restoredCardMechanic ?? false;
+  state.skipNextBanishZoneFlip = false;
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
   flipPilgrimCard(state); // the first player's turn is starting right now, so the Mission 7 flip applies here too
   flipStartOfTurnZoneCard(state); // Mission 10: same reasoning — the first turn's start-of-turn flip fires here too
   flipBeastDeckCard(state); // Mission 11: same reasoning — the first turn's beast-deck flip fires here too
+  flipBanishPileZoneCard(state); // Mission 12: same reasoning — the first turn's flip fires here too (a no-op, the banish pile starts empty)
   return ok(state);
 }
 
@@ -1148,6 +1278,15 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     applyCorruptedCost(state, player, c.name ?? 'A corrupted card');
   }
 
+  // Restored cards (Mission 12, "Decay to Growth"): the campaign-finale upgrade of a corrupted card — same
+  // immunity-ignoring class power, but instead of banishing the reserve deck's top card as the cost, it heals the
+  // banish pile's top card back into the game, returned to the bottom of the reserve deck (see applyRestoredHeal).
+  const restoredCards = nonArcaneCards.filter((c) => c.restored);
+  const restoredSuits = Array.from(new Set(restoredCards.flatMap(cardSuits)));
+  for (const c of restoredCards) {
+    applyRestoredHeal(state, c.name ?? 'A restored card');
+  }
+
   // Corrupted enemy (Mission 4's corruptedReturnQueue): a defeated enemy that's rejoined the fight queue
   // corrupted follows the same rule as a corrupted card — every play against it ignores its class immunity, at
   // the cost of one applyCorruptedCost payment per play (not per card, since the corruption belongs to the
@@ -1172,7 +1311,7 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     }
     if (revealed.length > 0) {
       reaverBonus = Math.max(...revealed.map(cardValue));
-      state.banishPile.push(...revealed);
+      banishCards(state, revealed);
       const revealedLabel = revealed
         .map((c) => (c.kind === 'suited' ? c.name ?? `a ${c.rank}` : 'a Jester'))
         .join(' and ');
@@ -1212,7 +1351,7 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
       if (card) salvaged.push(card);
     }
     if (salvaged.length > 0) {
-      state.tavernDeck.push(...salvaged);
+      toReserveDeck(state, salvaged, 'bottom');
       const salvagedLabel = salvaged
         .map((c) => (c.kind === 'suited' ? c.name ?? `a ${c.rank}` : 'a Jester'))
         .join(' and ');
@@ -1247,7 +1386,10 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   const effectiveSuits: Suit[] = evergreenActive ? Array.from(new Set([...nonArcaneSuits, 'H', 'D', 'C', 'S'])) : nonArcaneSuits;
   const ignoreImmunityForPlay = Boolean(claimedJester) || evergreenActive || enemyCorrupted;
 
-  const clubsMultiplier = resolveSuitPowers(state, cards, effectiveSuits, shape.totalValue, ignoreImmunityForPlay, corruptedSuits);
+  // Both corrupted and restored cards ignore immunity, per-suit only (not the whole play) — see
+  // SuitedCard.corrupted / SuitedCard.restored.
+  const immunityIgnoringSuits = Array.from(new Set([...corruptedSuits, ...restoredSuits]));
+  const clubsMultiplier = resolveSuitPowers(state, cards, effectiveSuits, shape.totalValue, ignoreImmunityForPlay, immunityIgnoringSuits);
   const rawDamage = (shape.totalValue + reaverBonus) * clubsMultiplier + arcaneBonus;
   // Mission 10: an enemy Paladin's extra power reduces the damage it takes by its own base strength (see
   // applyEnemyPaladinDamageReduction) — a no-op for every other mission/enemy.
@@ -1563,7 +1705,7 @@ function banishForRescue(state: GameState, action: Extract<GameAction, { type: '
   if (!pile || !pile.faceUp) return fail('That captured pile has no face-up card to rescue.');
 
   player.hand = player.hand.filter((c) => c.id !== card.id);
-  state.banishPile.push(card);
+  banishCards(state, [card]);
   state.discardPile.push(pile.faceUp);
   log(
     state,
@@ -1636,9 +1778,9 @@ function resolveZonePurge(state: GameState, action: Extract<GameAction, { type: 
   const banishIds = new Set(action.banishCardIds);
   const toBanish = state.discardPile.filter((c) => banishIds.has(c.id));
   const remaining = state.discardPile.filter((c) => !banishIds.has(c.id));
-  state.banishPile.push(...toBanish);
+  banishCards(state, toBanish);
   const shuffled = shuffleWithState(remaining, state);
-  state.tavernDeck.push(...shuffled); // bottom of the reserve deck
+  toReserveDeck(state, shuffled, 'bottom'); // bottom of the reserve deck
   state.discardPile = [];
   state.zonePurge = null;
   state.turnPhase = 'AWAIT_PLAY';
@@ -1738,7 +1880,7 @@ function resolveAzureEmblem(state: GameState, action: Extract<GameAction, { type
     const card = player.hand.find((c) => c.id === action.cardId);
     if (!card) return fail('That card is not in your hand.');
     player.hand = player.hand.filter((c) => c.id !== card.id);
-    state.tavernDeck.unshift(card);
+    toReserveDeck(state, [card], 'top');
     log(state, `${player.name} silently places a card atop the reserve deck (Azure Emblem).`);
   }
 
@@ -1777,7 +1919,7 @@ function chooseExactKillRescue(state: GameState, action: Extract<GameAction, { t
   if (!pile || !pile.faceUp) return fail('That captured pile has no face-up card to rescue.');
 
   const rescued = pile.faceUp;
-  state.tavernDeck.unshift(rescued);
+  toReserveDeck(state, [rescued], 'top');
   pile.faceUp = pile.faceDown.shift() ?? null;
   log(state, `${rescued.kind === 'suited' ? rescued.name ?? `the ${rescued.rank}` : 'The Jester'} is rescued straight to the top of the reserve deck!`);
   state.turnPhase = 'AWAIT_PLAY';
@@ -1870,6 +2012,8 @@ export function createLobbyState(): GameState {
     beastDeckDiscard: [],
     skipNextBeastDeckFlip: false,
     pileTopEnemyBonus: false,
+    restoredCardMechanic: false,
+    skipNextBanishZoneFlip: false,
   };
 }
 

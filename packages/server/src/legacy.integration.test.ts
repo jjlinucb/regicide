@@ -166,7 +166,7 @@ describe('legacy campaign integration', () => {
     const client = ioClient(`http://localhost:${port}`);
     await waitFor(client, 'connect');
     const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Yuki' });
-    const result = rooms.startLegacyMission(created.code, created.playerId, 12);
+    const result = rooms.startLegacyMission(created.code, created.playerId, 13);
     expect('error' in result).toBe(true);
     client.close();
   });

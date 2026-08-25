@@ -162,3 +162,14 @@ export function pileTopImmuneSuits(discardPile: Card[], banishPile: Card[]): Sui
   if (banishTop?.kind === 'suited') for (const s of cardSuits(banishTop)) suits.add(s);
   return Array.from(suits);
 }
+
+/**
+ * Legacy-only (Mission 12, "Decay to Growth"): the combined value of every card currently sitting in the mission
+ * zone — buffs the current enemy's attack for as long as they sit there (see GameState.restoredCardMechanic /
+ * engine.ts's resolvedEnemyAttack), climbing every turn a fresh card flips in off the top of the banish pile (see
+ * engine.ts's flipBanishPileZoneCard). Unlike Mission 8's ascendingZoneAttackBuff, every card counts equally —
+ * there's no Pilgrim-style exclusion here.
+ */
+export function missionZoneValueSum(missionZone: Card[]): number {
+  return missionZone.reduce((sum, c) => sum + cardValue(c), 0);
+}

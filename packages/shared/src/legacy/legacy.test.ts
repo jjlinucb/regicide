@@ -67,7 +67,7 @@ describe('legacy: mission setup', () => {
   });
 
   it('every non-standard-castle, non-corrupted-party-enemies mission has at least one enemy and converts cleanly to engine specs', () => {
-    expect(MISSIONS.length).toBe(11);
+    expect(MISSIONS.length).toBe(12);
     for (const mission of MISSIONS) {
       // Mission 10's enemies aren't a static list either — like standardCastle, its queue is built at mission
       // start instead (see GameState.corruptedPartyEnemies), so `enemies` is deliberately left empty.
@@ -2546,5 +2546,314 @@ describe('legacy: mission 11 reward (pick one beast card to carry forward)', () 
   it('applyBeastCardChoice is a no-op (same reference) when nothing was restored', () => {
     const party = [...buildInitialParty(), ...mission4BeastCards()];
     expect(applyBeastCardChoice(party, [])).toBe(party);
+  });
+});
+
+function restoredCard(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
+  return { ...suited(suit, rank), restored: true };
+}
+function corruptedCard(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
+  return { ...suited(suit, rank), corrupted: true };
+}
+
+function startMission12(n: number, opts: { party?: Card[] } = {}): GameState {
+  const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+  const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+  const mission12 = getMission(12)!;
+  const res = applyAction(createLobbyState(), {
+    type: 'START_LEGACY_MISSION',
+    playerIds: ids,
+    playerNames: names,
+    seed: 'mission-12-test',
+    party: opts.party ?? buildInitialParty(),
+    enemies: missionEnemiesToSpecs(mission12.enemies),
+    jesterCount: 0,
+    extraReserveCards: mission12.extraReserveCards,
+    restoredCardMechanic: mission12.restoredCardMechanic,
+  });
+  if (!res.ok) throw new Error(res.error);
+  return res.state;
+}
+
+describe('legacy: mission 12 setup (Decay to Growth)', () => {
+  it('is a 9-enemy Queen/King/Hierarch gauntlet, restoredCardMechanic enabled, no reward', () => {
+    const mission12 = getMission(12)!;
+    expect(mission12.title).toBe('Decay to Growth');
+    expect(mission12.enemies.length).toBe(9);
+    expect(new Set(mission12.enemies.slice(0, 8).map((e) => e.class))).toEqual(new Set(['WARRIOR', 'BARD', 'CLERIC', 'PALADIN']));
+    expect(mission12.enemies[8].secondClass).toBeDefined(); // the Hierarch is dual-immune
+    expect(mission12.restoredCardMechanic).toBe(true);
+    expect(mission12.reward.recruits).toEqual([]);
+    expect(mission12.reward.relics ?? []).toEqual([]);
+  });
+
+  it('seeds restored and corrupted flavor heroes into the reserve deck (not the persisted party)', () => {
+    const state = startMission12(1);
+    const inCirculation = [...state.players.flatMap((p) => p.hand), ...state.tavernDeck];
+    const restoredCount = inCirculation.filter((c) => c.kind === 'suited' && (c as SuitedCard).restored).length;
+    const corruptedCount = inCirculation.filter((c) => c.kind === 'suited' && (c as SuitedCard).corrupted).length;
+    expect(restoredCount).toBe(4);
+    expect(corruptedCount).toBe(2);
+  });
+
+  it("doesn't crash on the first turn's flip when the banish pile starts empty", () => {
+    const state = startMission12(1);
+    expect(state.missionZone).toEqual([]);
+    expect(state.banishPile).toEqual([]);
+  });
+});
+
+describe('legacy: mission 12 restored-card mechanic (ignores immunity, heals instead of banishing)', () => {
+  it("a restored card's class power ignores enemy immunity to its own suit", () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'H', health: 200, attack: 10 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    state.banishPile = []; // isolate: no heal side-effect to worry about
+    state.discardPile = [suited('C', '2')];
+    state = rig(state, [restoredCard('H', '3')]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.log.some((e) => e.message.includes('blocked'))).toBe(false);
+    expect(res.state.discardPile.length).toBe(0); // Hearts healed the lone discard card, unblocked
+  });
+
+  it('heals the banish pile\'s top card to the bottom of the reserve deck, instead of banishing the reserve deck\'s top card as a corrupted card would', () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'S', health: 200, attack: 10 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    const toHeal = suited('D', '4');
+    const reserveTop = suited('C', '9');
+    state.banishPile = [toHeal];
+    state.tavernDeck = [reserveTop, ...state.tavernDeck];
+    state = rig(state, [restoredCard('H', '3')]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.banishPile.some((c) => c.id === toHeal.id)).toBe(false);
+    expect(res.state.tavernDeck[res.state.tavernDeck.length - 1]?.id).toBe(toHeal.id); // returned under the reserve deck
+    expect(res.state.tavernDeck.some((c) => c.id === reserveTop.id)).toBe(true); // NOT banished as a cost
+    expect(res.state.log.some((e) => e.message.includes('heals'))).toBe(true);
+  });
+
+  it('does nothing (no crash) when the banish pile is empty', () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'S', health: 200, attack: 10 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    state.banishPile = [];
+    state = rig(state, [restoredCard('H', '3')]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    expect(res.state.log.some((e) => e.message.includes('nothing to heal'))).toBe(true);
+  });
+});
+
+describe('legacy: mission 12 corrupted-card redirect (into the reserve deck redirects to the bottom of the banish pile)', () => {
+  it("a Hearts heal that would shuffle a corrupted card back under the reserve deck redirects it to the banish pile instead", () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'S', health: 200, attack: 10 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    const corrupted = corruptedCard('D', '9');
+    state.discardPile = [corrupted];
+    state = rig(state, [suited('H', '5')]); // Hearts, value 5 — heals the lone discard card
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.tavernDeck.some((c) => c.id === corrupted.id)).toBe(false);
+    expect(res.state.banishPile.some((c) => c.id === corrupted.id)).toBe(true);
+  });
+
+  it('healing a corrupted card off the top of the banish pile (via a restored card) redirects it right back to the bottom of the banish pile, never into the reserve deck', () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'S', health: 200, attack: 10 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    const corrupted = corruptedCard('D', '9');
+    state.banishPile = [corrupted];
+    state = rig(state, [restoredCard('H', '3')]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.tavernDeck.some((c) => c.id === corrupted.id)).toBe(false);
+    expect(res.state.banishPile.some((c) => c.id === corrupted.id)).toBe(true);
+  });
+});
+
+describe('legacy: mission 12 restored-card redirect (can never land in the banish pile)', () => {
+  function reaverRecruitCard(): SuitedCard {
+    const spec = getMission(5)!.reward.recruits.find((r) => r.class === 'REAVER')!;
+    return buildRecruitCard(spec) as SuitedCard;
+  }
+
+  it("a Reaver's tear revealing a restored card off the reserve deck redirects it to the bottom of the reserve deck instead of the banish pile", () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'S', health: 200, attack: 10 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    const toReveal = restoredCard('D', '4');
+    state.tavernDeck = [toReveal, ...state.tavernDeck];
+    state = rig(state, [reaverRecruitCard()]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.banishPile.some((c) => c.id === toReveal.id)).toBe(false);
+    expect(res.state.tavernDeck[res.state.tavernDeck.length - 1]?.id).toBe(toReveal.id);
+  });
+
+  it("a corrupted card's own cost (banishing the reserve deck's top card) redirects a restored top card to the bottom of the reserve deck instead of the banish pile", () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 200, attack: 10 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    const reserveTop = restoredCard('D', '3');
+    state.tavernDeck = [reserveTop, ...state.tavernDeck];
+    state = rig(state, [corruptedCard('H', '4')]); // an unrelated corrupted card, its own cost is what banishes
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.banishPile.some((c) => c.id === reserveTop.id)).toBe(false);
+    expect(res.state.tavernDeck[res.state.tavernDeck.length - 1]?.id).toBe(reserveTop.id);
+  });
+});
+
+describe('legacy: mission 12 start-of-turn banish-pile zone flip', () => {
+  it('moves the top of the banish pile into the mission zone, buffing the current enemy\'s attack and granting immunity to its class', () => {
+    let state = startMission12(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    const bottomOfPile = suited('D', '3');
+    const topOfPile = suited('H', '7');
+    state.banishPile = [bottomOfPile, topOfPile];
+
+    const flipRes = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    expect(flipRes.state.missionZone.some((c) => c.id === topOfPile.id)).toBe(true);
+    expect(flipRes.state.banishPile.some((c) => c.id === topOfPile.id)).toBe(false);
+    expect(flipRes.state.banishPile.some((c) => c.id === bottomOfPile.id)).toBe(true); // only the top card moved
+    expect(flipRes.state.zoneImmuneSuits).toContain('H');
+
+    // The zone's value now buffs the enemy's attack: base 5 + the flipped Hearts 7 = 12.
+    const buffedState = rig(flipRes.state, [], { baseAttack: 5, spadesShield: 0 });
+    const attackRes = ensureOk(applyAction(buffedState, { type: 'YIELD', playerId: buffedState.players[0].id }));
+    expect(attackRes.state.pendingDamage).toBe(12);
+  });
+
+  it("grants the enemy immunity to the flipped card's class, blocking a matching play", () => {
+    let state = startMission12(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.banishPile = [suited('D', '9')]; // Diamonds (Bard) on top
+
+    const flipRes = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    const attackerState = rig(flipRes.state, [suited('D', '4')], { suit: 'C', baseAttack: 0, spadesShield: 0, maxHealth: 100, damageTaken: 0 });
+
+    const res = ensureOk(
+      applyAction(attackerState, { type: 'PLAY_CARDS', playerId: attackerState.players[0].id, cardIds: [attackerState.players[0].hand[0].id] }),
+    );
+    expect(res.state.log.some((e) => e.message.includes('blocked'))).toBe(true);
+  });
+
+  it('an exact kill skips the flip on the very next turn', () => {
+    let state = startMission12(1);
+    state = rig(state, [suited('D', '5')], { suit: 'S', baseAttack: 0, maxHealth: 5, damageTaken: 0, spadesShield: 0 });
+
+    const killRes = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    expect(killRes.state.skipNextBanishZoneFlip).toBe(true);
+    expect(killRes.state.turnPhase).toBe('AWAIT_PLAY'); // same player continues against the next enemy
+
+    let state2 = rig(killRes.state, [], { baseAttack: 0, spadesShield: 999 });
+    state2.banishPile = [suited('H', '6')];
+    const yieldRes = ensureOk(applyAction(state2, { type: 'YIELD', playerId: state2.players[0].id }));
+
+    expect(yieldRes.state.missionZone.length).toBe(0);
+    expect(yieldRes.state.banishPile.length).toBe(1); // untouched — the flip was skipped
+    expect(yieldRes.state.skipNextBanishZoneFlip).toBe(false);
+    expect(yieldRes.state.log.some((e) => e.message.includes('spared it a flip'))).toBe(true);
+  });
+
+  it('does nothing when the banish pile is empty', () => {
+    let state = startMission12(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.banishPile = [];
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    expect(res.state.missionZone.length).toBe(0);
+  });
+});
+
+describe('legacy: mission 12 defeat cleanup (banish the mission zone, then the enemy, then the entire discard pile — order preserved)', () => {
+  it('banishes all three groups in order and empties both the mission zone and the discard pile', () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 10, attack: 0 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    const zoneA = suited('H', '2');
+    const zoneB = suited('C', '3');
+    const discA = suited('S', '4');
+    const discB = suited('H', '5');
+    state.missionZone = [zoneA, zoneB];
+    state.discardPile = [discA, discB];
+    const killCard = suited('D', '10'); // Diamonds doesn't multiply — exact 10 damage on 10 health
+    state = rig(state, [killCard], { suit: 'D', baseAttack: 0, maxHealth: 10, damageTaken: 0, spadesShield: 0 });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.missionZone).toEqual([]);
+    expect(res.state.discardPile).toEqual([]);
+    const orderedIds = res.state.banishPile.map((c) => c.id);
+    // zone cards first (own order preserved), then the enemy's own table card (the killing play), then the
+    // discard pile (own order preserved) — no other kill effects intervene since this mission has no other
+    // per-kill mechanic active.
+    expect(orderedIds).toEqual([zoneA.id, zoneB.id, killCard.id, discA.id, discB.id]);
+    expect(res.state.skipNextBanishZoneFlip).toBe(true); // exact kill
+  });
+
+  it('applies the same three-step cleanup on an overkill (no exact-kill exception, unlike Mission 3/10)', () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 5, attack: 0 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    state.missionZone = [suited('H', '2')];
+    state.discardPile = [suited('S', '4')];
+    const killCard = suited('D', '10'); // overkill: 10 damage on 5 health
+    state = rig(state, [killCard], { suit: 'D', baseAttack: 0, maxHealth: 5, damageTaken: 0, spadesShield: 0 });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.missionZone).toEqual([]);
+    expect(res.state.discardPile).toEqual([]);
+    expect(res.state.banishPile.length).toBe(3); // zone card + kill card + discard card, all banished
+    expect(res.state.skipNextBanishZoneFlip).toBe(false); // not an exact kill
+  });
+
+  it('redirects a restored card caught up in the cleanup to the bottom of the reserve deck instead of the banish pile', () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 10, attack: 0 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    const restoredInZone = restoredCard('H', '2');
+    state.missionZone = [restoredInZone];
+    state.discardPile = [];
+    const killCard = suited('D', '10');
+    state = rig(state, [killCard], { suit: 'D', baseAttack: 0, maxHealth: 10, damageTaken: 0, spadesShield: 0 });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    expect(res.state.banishPile.some((c) => c.id === restoredInZone.id)).toBe(false);
+    expect(res.state.tavernDeck.some((c) => c.id === restoredInZone.id)).toBe(true);
+    expect(res.state.banishPile.some((c) => c.id === killCard.id)).toBe(true); // the plain kill card banishes normally
   });
 });
