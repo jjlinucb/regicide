@@ -114,7 +114,18 @@ function allOtherPlayersYieldedLastTurn(state: GameState): boolean {
 function checkForStuckLoss(state: GameState): void {
   if (state.phase !== 'IN_PROGRESS') return;
   const p = currentPlayer(state);
-  if (p.hand.length === 0 && allOtherPlayersYieldedLastTurn(state)) {
+  if (p.hand.length !== 0) return;
+  // Solo play has no "other players" for allOtherPlayersYieldedLastTurn to ever be true about (it hard-returns
+  // false below player count 2, which is also the correct answer for yieldTurn's own unrelated use of the same
+  // helper — yielding alone is always legitimate). An empty hand alone isn't fatal there either: a play that
+  // spends the last card to defeat an enemy, feign death, or place a card still deserves its shot at whatever
+  // that action set up next. What's genuinely terminal is a *forced* yield — the only legal move once the hand
+  // is empty — that changes nothing: with no one else at the table, that's the solo equivalent of every other
+  // player having already yielded. Without this, a solo game can wedge forever: an empty hand plus a
+  // fully-shielded (0-attack) enemy lets YIELD keep advancing the turn indefinitely with no way to ever draw
+  // another card (every other action handler resets lastActionWasYield to false on completion — see defend()).
+  const stuck = state.players.length <= 1 ? state.lastActionWasYield[state.currentPlayerIndex] : allOtherPlayersYieldedLastTurn(state);
+  if (stuck) {
     state.phase = 'LOST';
     state.lossReason = `${p.name} has no cards left and cannot yield — the party has fallen.`;
     log(state, state.lossReason);
@@ -756,6 +767,18 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
     state.castleDeck.push(enemy);
     state.currentEnemy = state.castleDeck.shift()!;
     log(state, `A new enemy is revealed: ${enemyLabel(state.currentEnemy)}.`);
+    if (state.endOfTurnZoneFlip && state.missionZone.length > 0) {
+      // Mission 3: without this, a run of overkills lets the escalating immunity zone snowball indefinitely across
+      // the whole gauntlet (the zone otherwise only ever clears on an exact kill, at the bottom of this function) —
+      // stacking with each recycled enemy until immunity walls off most of the party's usable classes before a
+      // single kill lands. Clearing it here bounds the worst case to "however many turns spent on the current
+      // enemy," same as an exact kill would. No source describes this specific edge case; it's a defensive fix for
+      // an interaction the physical single-enemy mission likely never has to handle.
+      banishCards(state, state.missionZone);
+      state.missionZone = [];
+      state.zoneImmuneSuits = [];
+      log(state, 'The mission zone is banished as the fight resets.');
+    }
     state.turnPhase = 'AWAIT_PLAY';
     state.pendingDamage = 0;
     checkForStuckLoss(state);
@@ -1730,6 +1753,13 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
 
   if (feignDeath && discardTotal < state.pendingDamage) {
     log(state, `${player.name} feigns death — discards their whole hand (${discardTotal}) despite ${state.pendingDamage} damage owed!`);
+    // Feigning death is a deliberate rescue, not a no-op — it earns a fresh chance rather than reading as an
+    // extension of the yield that opened this defend window (see checkForStuckLoss's solo-play condition, which
+    // would otherwise treat "hand now empty" plus "last action was a yield" as an immediate, undeserved loss).
+    // A normal defend leaves the flag alone on purpose: completing the SAME yield-opened turn without feigning
+    // death shouldn't erase that the turn started as a yield (see the "cannot yield if everyone else just
+    // yielded" rule, which reads this same flag on the *other* player(s) after their yield-then-defend turn).
+    state.lastActionWasYield[state.currentPlayerIndex] = false;
   } else {
     log(state, `${player.name} discards ${cards.length} card(s) to cover ${state.pendingDamage} damage.`);
   }

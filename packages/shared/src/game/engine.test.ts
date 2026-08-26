@@ -323,6 +323,18 @@ describe('losing', () => {
     // — player 0 can neither play nor yield, so the game must already be lost.
     expect(newState.phase).toBe('LOST');
   });
+
+  it('loses a solo game once the hand empties, instead of yielding forever with no way to draw', () => {
+    // allOtherPlayersYieldedLastTurn has no "other players" to ever be true about in solo play — but a lone
+    // player with an empty hand IS already the whole table with nothing left to do, so checkForStuckLoss must
+    // treat that case as its own trigger rather than silently staying inert (see checkForStuckLoss).
+    let state = startGame('solo-stuck', 1);
+    state = rig(state, [], { spadesShield: 999 }); // no cards, and the enemy's resolved attack is clamped to 0
+    const res = applyAction(state, { type: 'YIELD', playerId: state.players[0].id });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    expect(newState.phase).toBe('LOST');
+  });
 });
 
 describe('winning', () => {

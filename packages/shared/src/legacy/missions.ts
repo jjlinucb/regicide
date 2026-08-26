@@ -208,14 +208,25 @@ export const MISSIONS: Mission[] = [
     // 40/15 x2, 60/20 x1) — mirrors the base game's own J/Q/K stat table, tripled into a mission-specific lineup.
     // Names are a placeholder invention (no verified source for them); the stat tiers and gauntlet shape came from
     // the user's own research into the physical Regicide Legacy campaign, not the tutorial transcript, which only
-    // ever refers to "the enemy" singular.
+    // ever refers to "the enemy" singular. A fan box-inventory (talkingshelfspace.com) actually lists 7 enemy
+    // cards here (4/2/1 across the same three tiers, one more bottom-tier enemy than shipped) — left as-is rather
+    // than made harder, since the reported problem is this mission playing too hard, not too easy.
+    //
+    // These enemies used to also carry a permanent secondClass immunity (e.g. The Grand Mage immune to Bard AND
+    // Paladin from turn one) on top of endOfTurnZoneFlip's own escalating immunity below — removed per two BGG
+    // strategy threads (boardgamegeek.com/thread/3590127, /thread/3569333) that describe immunity as something
+    // the enemy "gains... midway" through the fight, language consistent only with the zone as the sole immunity
+    // source, plus no source anywhere corroborating a fixed dual immunity. Stacking a permanent second immunity
+    // on top of an unbounded, only-clears-on-a-kill zone (see engine.ts's dealDamageAndCheckDefeat) was the main
+    // driver of this mission being disproportionately harder than its neighbors — Mission 12's final boss had the
+    // identical bug (see that mission's comment).
     enemies: [
-      enemy('Midnight the Cat', 'CLERIC', 30, 10, 'BARD'),
-      enemy('Japat', 'BARD', 30, 10, 'WARRIOR'),
-      enemy('Blast', 'WARRIOR', 30, 10, 'PALADIN'),
-      enemy('Senior Instructor Vail', 'PALADIN', 40, 15, 'CLERIC'),
-      enemy('Senior Instructor Rowe', 'CLERIC', 40, 15, 'WARRIOR'),
-      enemy('The Grand Mage', 'BARD', 60, 20, 'PALADIN'),
+      enemy('Midnight the Cat', 'CLERIC', 30, 10),
+      enemy('Japat', 'BARD', 30, 10),
+      enemy('Blast', 'WARRIOR', 30, 10),
+      enemy('Senior Instructor Vail', 'PALADIN', 40, 15),
+      enemy('Senior Instructor Rowe', 'CLERIC', 40, 15),
+      enemy('The Grand Mage', 'BARD', 60, 20),
     ],
     // Only an exact-damage kill actually removes an enemy from the gauntlet — an overkill just recycles it to the
     // back of the line, wounds healed (same mechanic Mission 2 already uses; see GameState.exactKillOnly).

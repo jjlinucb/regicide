@@ -649,6 +649,34 @@ describe('legacy: mission 3 mechanics (end-of-turn mission zone)', () => {
     expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '4')).toBe(true);
   });
 
+  it('an overkill under exactKillOnly also banishes the escalating mission zone, not just an exact kill', () => {
+    const boss: LegacyEnemySpec = { name: 'Archive Boss', suit: 'S', health: 20, attack: 1 };
+    const startRes = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'zone-overkill-test',
+      party: buildInitialParty(),
+      enemies: [boss, { name: 'Second Boss', suit: 'C', health: 15, attack: 5 }],
+      jesterCount: 0,
+      endOfTurnZoneFlip: true,
+      exactKillOnly: true,
+    });
+    let state = ensureOk(startRes).state;
+    state = structuredClone(state);
+    state.missionZone = [suited('H', '3'), suited('D', '4')];
+    state.zoneImmuneSuits = ['H', 'D'];
+    state = rig(state, [suited('C', '10')], { damageTaken: 15 }); // 15 already taken, +10 overkills a 20-health boss
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
+    state = res.state;
+
+    expect(state.currentEnemy?.name).toBe('Second Boss'); // recycled and moved on, not an exact kill
+    expect(state.missionZone.length).toBe(0);
+    expect(state.zoneImmuneSuits.length).toBe(0);
+    expect(state.banishPile.length).toBe(2); // both zone cards banished — no exact kill, so nothing saved to discard
+  });
+
   it('a corrupted card ignores mission-zone immunity for its own class, at the cost of banishing the top reserve card', () => {
     const boss: LegacyEnemySpec = { name: 'Archive Boss', suit: 'S', health: 100, attack: 1 };
     let state = startZoneMission(1, [boss]);
@@ -2744,7 +2772,9 @@ describe('legacy: mission 12 restored-card redirect (can never land in the banis
 describe('legacy: mission 12 start-of-turn banish-pile zone flip', () => {
   it('moves the top of the banish pile into the mission zone, buffing the current enemy\'s attack and granting immunity to its class', () => {
     let state = startMission12(1);
-    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    // A throwaway card the player never plays — just enough that yielding with a 0-damage attack doesn't read as
+    // a genuinely stuck solo player (see checkForStuckLoss's solo-play condition).
+    state = rig(state, [suited('C', '2')], { baseAttack: 0, spadesShield: 999 });
     const bottomOfPile = suited('D', '3');
     const topOfPile = suited('H', '7');
     state.banishPile = [bottomOfPile, topOfPile];
@@ -2763,7 +2793,8 @@ describe('legacy: mission 12 start-of-turn banish-pile zone flip', () => {
 
   it("grants the enemy immunity to the flipped card's class, blocking a matching play", () => {
     let state = startMission12(1);
-    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    // Same throwaway-card reasoning as the test above.
+    state = rig(state, [suited('C', '2')], { baseAttack: 0, spadesShield: 999 });
     state.banishPile = [suited('D', '9')]; // Diamonds (Bard) on top
 
     const flipRes = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
