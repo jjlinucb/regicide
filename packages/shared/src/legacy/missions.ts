@@ -46,7 +46,7 @@ export interface Mission {
   zoneVengeanceOnKill?: boolean;
   /** See GameState.pilgrimMechanic. */
   pilgrimMechanic?: boolean;
-  /** Unshuffled Pilgrim cards seeding GameState.pilgrimDeck (see GameState.pilgrimMechanic). */
+  /** Vestigial — Mission 7's Pilgrim cards are seeded via `extraReserveCards` now (see GameState.pilgrimMechanic). No mission sets this anymore. */
   pilgrimCards?: Card[];
   /** See GameState.ascendingZone. */
   ascendingZone?: boolean;
@@ -106,11 +106,12 @@ function reserveCompanion(name: string, suit: Suit, rank: Rank): Card {
 }
 
 /**
- * A named survivor card, shared by Mission 7's pilgrimCards (see GameState.pilgrimMechanic) and Mission 8's
+ * A named survivor card, shared by Mission 7's extraReserveCards (see GameState.pilgrimMechanic) and Mission 8's
  * ascending mission zone (see GameState.ascendingZone) — both missions independently reused "Pilgrim" as flavor
- * for stranded survivors. The `pilgrim` flag only matters to Mission 8 (placing one in its zone never buffs the
- * current enemy's attack the way an ordinary card bridging a gap does); Mission 7 never reads the flag, since it
- * tracks its own Pilgrims through the separate pilgrimDeck/pilgrimZone state instead.
+ * for stranded survivors, and both read the `pilgrim` flag, gated by their own separate mission flag so the two
+ * never collide: Mission 7 turns it into a permanent hand-trap once drawn (see SuitedCard.pilgrim); Mission 8
+ * only cares that one placed in its zone never buffs the current enemy's attack the way an ordinary card
+ * bridging a gap does.
  */
 function pilgrim(name: string, suit: Suit, rank: Rank): Card {
   return { id: `pilgrim-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, pilgrim: true };
@@ -469,12 +470,13 @@ export const MISSIONS: Mission[] = [
       enemy('Abyssal: Hollowfang', 'CLERIC', 40, 20),
       enemy('Abyssal: Leadmaw', 'PALADIN', 40, 20),
     ],
-    // The Pilgrim mechanic: a survivor flips face-up into the mission zone at the start of every turn. Playing
-    // an attack whose total value exactly matches a waiting Pilgrim rescues them (banished for good); every
-    // enemy kill instead burns cards off the top of the reserve deck equal to whatever's still left unrescued
-    // (see GameState.pilgrimMechanic).
+    // The Pilgrim mechanic (sourced from the official compendium FAQ — see GameState.pilgrimMechanic): 8 survivor
+    // cards shuffled into the reserve deck alongside the party, drawn normally like any other card. Once one
+    // lands in a hand it's a permanent hand-trap for the rest of the mission — dead weight that can't be played
+    // or discarded for any purpose, and blocks Feign Death while held — until an exact-damage kill frees one for
+    // free.
     pilgrimMechanic: true,
-    pilgrimCards: [
+    extraReserveCards: [
       pilgrim('Old Fenwick', 'H', '2'),
       pilgrim('Little Sae', 'D', '3'),
       pilgrim('Bettina the Ferrywoman', 'C', '4'),

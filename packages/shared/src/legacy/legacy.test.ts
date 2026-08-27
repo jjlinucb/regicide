@@ -1607,8 +1607,43 @@ describe('legacy: Guardian class power (absolute shield, one attack at a time)',
   });
 });
 
-describe('legacy: mission 7 mechanics (Pilgrim zone)', () => {
-  function startWellMission(n: number, enemies: LegacyEnemySpec[], pilgrimCards: Card[]): GameState {
+describe('legacy: mission 7 setup (Tales of Rebirth Pilgrim hand-trap)', () => {
+  it('is a 12-enemy 3-wave gauntlet with 8 Pilgrim cards seeded via extraReserveCards, gated by pilgrimMechanic', () => {
+    const mission7 = getMission(7)!;
+    expect(mission7.enemies.length).toBe(12);
+    expect(mission7.pilgrimMechanic).toBe(true);
+    // Sourced rework: Pilgrims are ordinary reserve-deck cards now, not a separate face-down deck/zone.
+    expect(mission7.pilgrimCards).toBeUndefined();
+    expect(mission7.extraReserveCards?.length).toBe(8);
+    expect(mission7.extraReserveCards?.every((c) => c.kind === 'suited' && c.pilgrim)).toBe(true);
+  });
+
+  it('shuffles the 8 Pilgrim cards into the reserve deck alongside the party at mission start (no separate deck/zone populated)', () => {
+    const mission7 = getMission(7)!;
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'well-setup-test',
+      party: buildInitialParty(),
+      enemies: missionEnemiesToSpecs(mission7.enemies),
+      jesterCount: 0,
+      pilgrimMechanic: mission7.pilgrimMechanic,
+      extraReserveCards: mission7.extraReserveCards,
+    });
+    const state = ensureOk(res).state;
+    expect(state.pilgrimMechanic).toBe(true);
+    // Vestigial fields from the old shared-zone economy — always empty under the new hand-trap rule.
+    expect(state.pilgrimZone.length).toBe(0);
+    expect(state.pilgrimDeck.length).toBe(0);
+    const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
+    // 40 party + 8 Pilgrims = 48 total in circulation (hands + reserve deck).
+    expect(handCount + state.tavernDeck.length).toBe(48);
+  });
+});
+
+describe('legacy: mission 7 mechanics (Pilgrim hand-trap)', () => {
+  function startWellMission(n: number, enemies: LegacyEnemySpec[]): GameState {
     const ids = Array.from({ length: n }, (_, i) => `p${i}`);
     const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
     const res = applyAction(createLobbyState(), {
@@ -1620,71 +1655,189 @@ describe('legacy: mission 7 mechanics (Pilgrim zone)', () => {
       enemies,
       jesterCount: 0,
       pilgrimMechanic: true,
-      pilgrimCards,
     });
     if (!res.ok) throw new Error(res.error);
     return res.state;
   }
 
-  const fenwick: Card = { id: 'fenwick', kind: 'suited', suit: 'H', rank: '2', name: 'Old Fenwick' };
-  const sae: Card = { id: 'sae', kind: 'suited', suit: 'D', rank: '3', name: 'Little Sae' };
+  const fenwick: Card = { id: 'fenwick', kind: 'suited', suit: 'H', rank: '2', name: 'Old Fenwick', pilgrim: true };
 
-  it('flips the top Pilgrim into the zone right at mission start, before anyone has played', () => {
+  it('rejects PLAY_CARDS outright when a Pilgrim card is played alone', () => {
     const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 20, attack: 10 };
-    const state = startWellMission(1, [boss], [fenwick, sae]);
-    expect(state.pilgrimZone.length).toBe(1);
-    expect(state.pilgrimZone[0].id).toBe('fenwick');
-    expect(state.pilgrimDeck.length).toBe(1);
+    let state = startWellMission(1, [boss]);
+    state = rig(state, [fenwick]);
+
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [fenwick.id] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/dead weight|cannot be played/i);
   });
 
-  it('flips another Pilgrim at the start of the next turn', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 };
-    let state = startWellMission(1, [boss], [fenwick, sae]);
+  it('rejects a combo play if any one of its cards is a Pilgrim, even paired with an ordinary card', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 20, attack: 10 };
+    let state = startWellMission(1, [boss]);
+    const ordinary = suited('H', '2'); // same rank as fenwick, would otherwise form a valid combo
+    state = rig(state, [fenwick, ordinary]);
+
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [fenwick.id, ordinary.id] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/dead weight|cannot be played/i);
+  });
+
+  it('still allows an ordinary (non-Pilgrim) card in the same hand to be played normally', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 20, attack: 10 };
+    let state = startWellMission(1, [boss]);
+    const ordinary = suited('D', '4');
+    state = rig(state, [fenwick, ordinary]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [ordinary.id] }));
+    state = res.state;
+    expect(state.currentEnemy?.damageTaken).toBe(4);
+    // The Pilgrim is untouched — still stuck in hand.
+    expect(state.players[0].hand.some((c) => c.id === 'fenwick')).toBe(true);
+  });
+
+  it('rejects a Kinfolk Flute silent assist when the offered card is a Pilgrim', () => {
+    const target: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
+    const res0 = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0', 'p1'],
+      playerNames: ['Player 0', 'Player 1'],
+      seed: 'flute-pilgrim-test',
+      party: buildInitialParty(),
+      enemies: [target],
+      jesterCount: 0,
+      relics: ['KINFOLK_FLUTE'],
+      pilgrimMechanic: true,
+    });
+    let state = ensureOk(res0).state;
+    state = rig(state, [suited('H', '3')]);
+    const attackerId = state.players[0].id;
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_COMBO_ASSIST');
+
+    state = structuredClone(state);
+    const pilgrimAssist: Card = { id: 'assist-pilgrim', kind: 'suited', suit: 'H', rank: '3', pilgrim: true };
+    state.players[1].hand = [pilgrimAssist];
+    const badAssist = applyAction(state, { type: 'ASSIST_COMBO', playerId: state.players[1].id, cardId: pilgrimAssist.id });
+    expect(badAssist.ok).toBe(false);
+  });
+
+  it('rejects a DEFEND selection that includes a Pilgrim, even when its value would help cover the damage', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 5 };
+    let state = startWellMission(1, [boss]);
+    state = rig(state, [fenwick, suited('D', '6')]); // fenwick(2) + 6 = 8, would cover 5 damage if it were allowed
     const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
     state = res.state;
-    expect(state.pilgrimZone.length).toBe(2);
-    expect(state.pilgrimZone[1].id).toBe('sae');
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+
+    const bad = applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) });
+    expect(bad.ok).toBe(false);
+
+    // Covering with just the non-Pilgrim card is allowed and succeeds instead.
+    const nonPilgrimId = state.players[0].hand.find((c) => c.id !== 'fenwick')!.id;
+    const good = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [nonPilgrimId] }));
+    expect(good.state.phase).toBe('IN_PROGRESS');
+    expect(good.state.players[0].hand.some((c) => c.id === 'fenwick')).toBe(true); // still stuck, untouched
   });
 
-  it("rescues (banishes) a Pilgrim when an attack's total value exactly matches theirs", () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
-    let state = startWellMission(1, [boss], [fenwick]); // fenwick is worth 2
-    state = rig(state, [suited('D', '2')]);
-
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
-
-    expect(state.pilgrimZone.length).toBe(0);
-    expect(state.banishPile.some((c) => c.id === 'fenwick')).toBe(true);
-    expect(state.discardPile.some((c) => c.id === 'fenwick')).toBe(false);
-  });
-
-  it('leaves a waiting Pilgrim alone when the played value does not match', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
-    let state = startWellMission(1, [boss], [fenwick]); // worth 2
-    state = rig(state, [suited('D', '5')]);
-
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
-
-    expect(state.pilgrimZone.length).toBe(1);
-  });
-
-  it("burns reserve-deck cards on kill equal to the Pilgrim zone's combined unrescued value", () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
-    let state = startWellMission(1, [boss], [fenwick, sae]); // zone = [fenwick(2)] after the mission-start flip
+  it('blocks Feign Death entirely while holding a Pilgrim — the whole-hand discard is rejected outright, not silently allowed', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 20 };
+    let state = startWellMission(1, [boss]);
+    state = rig(state, [fenwick, suited('D', '2')]); // hand of 2, one is a Pilgrim
+    state.maxHandSize = 2; // "at hand limit" — the usual Feign Death precondition
     let res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
-    state = res.state; // zone = [fenwick(2), sae(3)] after the next turn's flip
-    expect(state.pilgrimZone.length).toBe(2);
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
 
-    const tavernBefore = state.tavernDeck.length;
-    // Spades matches the boss's own immunity (blocked, no Diamonds-style draw side effect) — isolates the burn.
-    state = rig(state, [suited('S', '8')]); // kills the boss outright, doesn't match either Pilgrim's value
-    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    const bad = applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) });
+    expect(bad.ok).toBe(false);
+    expect(state.phase).toBe('IN_PROGRESS'); // rejected outright, not resolved as a loss
+  });
+
+  it('still loses normally (no soft-lock) when the non-Pilgrim cards alone cannot cover the damage', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 20 };
+    let state = startWellMission(1, [boss]);
+    state = rig(state, [fenwick, suited('D', '3')]);
+    state.maxHandSize = 2;
+    let res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
     state = res.state;
 
-    expect(state.pilgrimZone.length).toBe(2); // neither rescued
-    expect(tavernBefore - state.tavernDeck.length).toBe(5); // burned 2 + 3 = 5 off the reserve deck's top
+    const nonPilgrimId = state.players[0].hand.find((c) => c.id !== 'fenwick')!.id;
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [nonPilgrimId] }));
+    state = res.state;
+    expect(state.phase).toBe('LOST'); // 3 < 20, not the whole hand (Pilgrim left behind) — no Feign Death exception
+  });
+});
+
+describe('legacy: mission 7 mechanic (exact-kill Pilgrim release)', () => {
+  function startWellMission(n: number, enemies: LegacyEnemySpec[]): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'well-exact-kill-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      pilgrimMechanic: true,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('an exact-damage kill banishes one Pilgrim stuck in the killer\'s own hand, for free', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
+    let state = startWellMission(1, [boss]);
+    const trapped: Card = { id: 'trapped-pilgrim', kind: 'suited', suit: 'H', rank: '2', name: 'Old Fenwick', pilgrim: true };
+    state = rig(state, [trapped, suited('S', '8')]); // 8 damage = exactly lethal
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[1].id] }));
+    state = res.state;
+
+    expect(state.currentEnemy).toBeNull(); // boss defeated, mission complete (only enemy)
+    expect(state.players[0].hand.some((c) => c.id === 'trapped-pilgrim')).toBe(false);
+    expect(state.banishPile.some((c) => c.id === 'trapped-pilgrim')).toBe(true);
+    expect(state.discardPile.some((c) => c.id === 'trapped-pilgrim')).toBe(false);
+  });
+
+  it("frees a Pilgrim from another player's hand (scanned in turn order) when the killer holds none", () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
+    let state = startWellMission(2, [boss]);
+    const trapped: Card = { id: 'trapped-other', kind: 'suited', suit: 'H', rank: '2', pilgrim: true };
+    state = structuredClone(state);
+    state.players[0].hand = [suited('S', '8')]; // current player: no Pilgrim
+    state.players[1].hand = [trapped]; // teammate: holding one
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.players[1].hand.some((c) => c.id === 'trapped-other')).toBe(false);
+    expect(state.banishPile.some((c) => c.id === 'trapped-other')).toBe(true);
+  });
+
+  it('does nothing extra on an exact kill when nobody is holding a Pilgrim', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
+    let state = startWellMission(1, [boss]);
+    state = rig(state, [suited('S', '8')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    expect(res.state.banishPile.length).toBe(0);
+  });
+
+  it('does NOT release a Pilgrim on an overkill (non-exact) hit', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 5, attack: 0 };
+    let state = startWellMission(1, [boss]);
+    const trapped: Card = { id: 'trapped-pilgrim-2', kind: 'suited', suit: 'H', rank: '2', pilgrim: true };
+    state = rig(state, [trapped, suited('S', '8')]); // 8 damage vs 5 health — overkill, not exact
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[1].id] }));
+    state = res.state;
+
+    expect(state.players[0].hand.some((c) => c.id === 'trapped-pilgrim-2')).toBe(true); // still stuck
+    expect(state.banishPile.some((c) => c.id === 'trapped-pilgrim-2')).toBe(false);
   });
 });
 

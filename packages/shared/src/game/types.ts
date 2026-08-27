@@ -83,12 +83,18 @@ export interface SuitedCard {
    */
   chanter?: boolean;
   /**
-   * Legacy-only (Mission 8): marks a Pilgrim survivor card seeded into that mission's own reserve deck —
-   * unrelated to Mission 7's separate pilgrimDeck/pilgrimZone mechanic (see GameState.pilgrimZone), despite the
-   * shared name; both missions independently reused "Pilgrim" as flavor for stranded survivors. Otherwise an
-   * entirely ordinary card — playable and discardable like any other — except when placed into Mission 8's
-   * ascending mission zone: a Pilgrim card placed there never buffs the current enemy's attack the way a
-   * non-Pilgrim card bridging a gap does (see GameState.ascendingZone / rules.ts's ascendingZoneAttackBuff).
+   * Legacy-only: marks a Pilgrim survivor card. Two missions independently reused "Pilgrim" as flavor for
+   * stranded survivors and share this one flag, each gated by its own separate GameState switch so the two never
+   * collide (no mission sets both):
+   * - Mission 7 ("Tales of Rebirth"), gated by GameState.pilgrimMechanic: shuffled into the reserve deck as an
+   *   ordinary card (see Mission.extraReserveCards) and drawn normally, but the instant one lands in a hand it
+   *   becomes a permanent hand-trap for the rest of the mission — dead weight that can never be played or
+   *   discarded for any purpose, including covering defend damage or Feign Death (see engine.ts's PLAY_CARDS /
+   *   ASSIST_COMBO / DEFEND rejection checks) — until an exact-damage kill frees one for free (see
+   *   dealDamageAndCheckDefeat's exact-kill Pilgrim release).
+   * - Mission 8 ("Winds of Chaos"), gated by GameState.ascendingZone: an entirely ordinary card — playable and
+   *   discardable like any other — except when placed into the ascending mission zone, where it never buffs the
+   *   current enemy's attack the way a non-Pilgrim card bridging a gap does (see rules.ts's ascendingZoneAttackBuff).
    */
   pilgrim?: boolean;
   /**
@@ -395,19 +401,22 @@ export interface GameState {
    */
   zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean } | null;
   /**
-   * Legacy-only (Mission 7): when true, gates the whole Pilgrim mechanic — the start-of-turn flip into
-   * `pilgrimZone`, the value-matching rescue on any attack play, and the deck-burn penalty on every enemy kill
-   * (see engine.ts's flipPilgrimCard / checkPilgrimRescue / dealDamageAndCheckDefeat).
+   * Legacy-only (Mission 7): when true, gates the whole Pilgrim hand-trap rule — Pilgrim cards (see
+   * SuitedCard.pilgrim), shuffled into the reserve deck via Mission.extraReserveCards like any other card, can
+   * never be played (PLAY_CARDS, ASSIST_COMBO) or discarded (DEFEND, including Feign Death) once drawn into a
+   * hand — dead weight sitting there for the rest of the mission — and an exact-damage kill frees one for free
+   * (see dealDamageAndCheckDefeat).
+   *
+   * Sourced from the official compendium FAQ, replacing an earlier, unsourced shared-zone rescue/burn-on-kill
+   * economy that drained the same reserve-deck pool both hand-refill (Diamonds) and defense depend on — confirmed
+   * unwinnable in simulated play (see legacy-mission-playtest-findings). `pilgrimDeck`/`pilgrimZone` below are
+   * inert leftovers from that old economy, kept only for type/client compatibility — no mission populates them
+   * anymore, so both are always empty.
    */
   pilgrimMechanic: boolean;
-  /** Legacy-only (Mission 7): the face-down Pilgrim deck, separate from the reserve deck — its top card flips into `pilgrimZone` at the start of every turn. */
+  /** Vestigial (see GameState.pilgrimMechanic) — no mission populates this anymore; always empty. Kept only so GameAction's pilgrimCards / ClientGameState's pilgrimDeckCount stay type-compatible for any future mission. */
   pilgrimDeck: Card[];
-  /**
-   * Legacy-only (Mission 7): Pilgrim cards flipped face-up into the shared mission zone, awaiting rescue.
-   * Playing an attack whose total value exactly matches a Pilgrim's value here banishes that Pilgrim (rescued
-   * for good). On every enemy kill, the reserve deck burns cards from its top equal to the combined value of
-   * every Pilgrim still waiting here — never cleared except by exact-value rescues.
-   */
+  /** Vestigial (see GameState.pilgrimMechanic) — no mission populates this anymore; always empty. Kept only so ClientGameState's pilgrimZone stays type-compatible for any future mission. */
   pilgrimZone: Card[];
   /**
    * Legacy-only (Mission 8): when true, the mission zone builds an ascending A-through-10 chain instead of any
@@ -590,7 +599,7 @@ export type GameAction =
       zoneVengeanceOnKill?: boolean;
       /** See GameState.pilgrimMechanic. */
       pilgrimMechanic?: boolean;
-      /** Unshuffled Pilgrim cards to seed GameState.pilgrimDeck with (shuffled at mission start). */
+      /** Vestigial (see GameState.pilgrimMechanic) — Pilgrim cards are seeded via extraReserveCards now, not this. No mission sets it anymore. */
       pilgrimCards?: Card[];
       /** See GameState.ascendingZone. */
       ascendingZone?: boolean;
@@ -721,9 +730,9 @@ export interface ClientGameState {
   zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean } | null;
   /** See GameState.pilgrimMechanic. */
   pilgrimMechanic: boolean;
-  /** See GameState.pilgrimZone. Public information — it's on the table. */
+  /** Vestigial (see GameState.pilgrimMechanic) — always empty now; a Pilgrim card sits in the owning player's own (redacted) hand instead of any shared zone. */
   pilgrimZone: Card[];
-  /** See GameState.pilgrimDeck — count only, it's face-down. */
+  /** Vestigial (see GameState.pilgrimMechanic) — always 0 now. */
   pilgrimDeckCount: number;
   /** See GameState.ascendingZone. */
   ascendingZone: boolean;
