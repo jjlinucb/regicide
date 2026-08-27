@@ -106,6 +106,14 @@ export interface SuitedCard {
    */
   secondClassArcane?: boolean;
   /**
+   * Legacy-only: marks a card that's picked up a bonus Guardian sticker (Mission 6's sourced reward — see
+   * legacy/party.ts's applyGuardianSticker / legacy/missions.ts's Mission 6 entry) on top of an existing class.
+   * Unlike a pure Guardian recruit's `guardian` flag (which replaces suit-power resolution entirely), this card
+   * keeps resolving its normal suit power AND raises the Guardian's absolute shield when played (see engine.ts's
+   * resolveCommittedPlay's guardianCards handling) — the same "second class" shape as secondClassArcane above.
+   */
+  secondClassGuardian?: boolean;
+  /**
    * Legacy-only: marks a Beast Companion (Mission 4's reward, x4, each tied to a specific character). Works like
    * an Animal Companion (see rules.ts's isAnimalCompanion) — playable alone, or paired with exactly one other
    * card — but instead of contributing its own printed value (an Ace's flat 1) to the pair's total, it copies
@@ -201,7 +209,9 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * AWAIT_END_OF_TURN and AWAIT_RESCUE_CHOICE are Mission 9's captured-piles mechanic only (see
  * GameState.capturedPilesActive). AWAIT_BEAST_REWARD_CHOICE is Mission 11 only (see GameState.beastDeckMechanic) —
  * opened once the mission's last enemy falls, resolved via CHOOSE_BEAST_REWARD; the mission only actually
- * completes (phase -> WON) once it's resolved.
+ * completes (phase -> WON) once it's resolved. AWAIT_ZONE_VENGEANCE_CHOICE is Mission 6 only (see
+ * GameState.zoneVengeanceChoice) — opened by a kill under zoneVengeanceOnKill, resolved via
+ * CHOOSE_ZONE_VENGEANCE_SACRIFICE.
  */
 export type TurnPhase =
   | 'AWAIT_PLAY'
@@ -209,6 +219,7 @@ export type TurnPhase =
   | 'AWAIT_JESTER_CLAIM'
   | 'AWAIT_COMBO_ASSIST'
   | 'AWAIT_AZURE_EMBLEM'
+  | 'AWAIT_ZONE_VENGEANCE_CHOICE'
   | 'AWAIT_ZONE_PURGE'
   | 'AWAIT_CHANT_TRIM'
   | 'AWAIT_END_OF_TURN'
@@ -285,12 +296,15 @@ export interface GameState {
    */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
   /**
-   * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic: the open Azure Emblem window — opened whenever
-   * a play includes a Mage card. Every other player, one at a time in turn order, may silently place a single
-   * card from hand atop the reserve deck via RESOLVE_AZURE_EMBLEM (or decline by omitting a card), stocking it
-   * for later. `blockNextAttack` mirrors a Guardian shield raised in the same play.
+   * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic, sourced fix (see legacy-missions-transcript-
+   * mismatches.md): the open Azure Emblem window — opened whenever a play includes a Mage card. The Mage's OWN
+   * player (`pendingPlayerIds` holds just that one attacker id, kept as an array for shape-compatibility with
+   * every other pending-player-queue field) may bank one of `eligibleCardIds` (this play's own Mage card(s),
+   * still sitting on the enemy's table) onto the reserve deck via RESOLVE_AZURE_EMBLEM instead of losing it to
+   * the discard pile later, or decline by omitting a card. `blockNextAttack` mirrors a Guardian shield raised in
+   * the same play.
    */
-  azureEmblemWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
+  azureEmblemWindow: { pendingPlayerIds: string[]; eligibleCardIds: string[]; blockNextAttack: boolean } | null;
   /**
    * Legacy-only: when true (Mission 3), the top of the reserve deck flips face-up into `missionZone` at the end
    * of every turn, and the current enemy becomes immune to that card's class(es) too (see zoneImmuneSuits).
@@ -358,15 +372,28 @@ export interface GameState {
   /** Legacy-only (Mission 5): the cards currently accumulated in the rolling zone slot, if any (see rollingZoneBonus). */
   rollingZoneCards: Card[];
   /**
-   * Legacy-only (Mission 6): when true, every enemy kill permanently grows `missionZone` — the lowest-value
-   * card left on the enemy's table is moved into the zone instead of the discard pile — and then Myla (the
-   * zone's permanent occupant, see presetMissionZone) strikes: pendingDamage is set to the live sum of every
-   * card's value in missionZone and turnPhase becomes AWAIT_DEFEND, reusing the normal defend/loss flow so an
-   * uncovered hit ends the mission exactly like any other undefended attack (see engine.ts's
-   * dealDamageAndCheckDefeat). An exact-damage kill excludes the single highest-value zone card from that
-   * one strike's total. The zone itself is never cleared for the rest of the mission.
+   * Legacy-only (Mission 6), sourced fix (see legacy-missions-transcript-mismatches.md — the official rules card
+   * and a fan digital-reimplementation's rules doc agree on this): when true, every enemy kill permanently grows
+   * `missionZone` — a PLAYER chooses one card from the play area just committed to the kill (the defeated
+   * enemy's own table, see GameState.zoneVengeanceChoice / engine.ts's chooseZoneVengeanceSacrifice) to move into
+   * the zone instead of the discard pile. The shipped version instead auto-picked the lowest-value card for the
+   * player, routinely dragging a second or third suit into Myla's permanent immunity on the very first kill.
+   * Once the zone grows, Myla (its permanent occupant, see presetMissionZone) strikes: pendingDamage is set to
+   * the live sum of every card's value in missionZone and turnPhase becomes AWAIT_DEFEND, reusing the normal
+   * defend/loss flow so an uncovered hit ends the mission exactly like any other undefended attack (see
+   * engine.ts's finishEnemyDefeatTail) — UNLESS the winning attack included a Guardian, which cancels this
+   * strike entirely (also sourced, previously unimplemented — see dealDamageAndCheckDefeat's
+   * attackIncludesGuardian). An exact-damage kill excludes the single highest-value zone card from that one
+   * strike's total. The zone itself is never cleared for the rest of the mission.
    */
   zoneVengeanceOnKill: boolean;
+  /**
+   * Legacy-only (Mission 6): the open AWAIT_ZONE_VENGEANCE_CHOICE window opened by a kill under
+   * zoneVengeanceOnKill above — non-null until CHOOSE_ZONE_VENGEANCE_SACRIFICE resolves it. `remaining` and
+   * `attackIncludesGuardian` are carried through from the kill so finishEnemyDefeatTail can resume the rest of
+   * the defeat resolution exactly as if zoneVengeanceOnKill's sacrifice had resolved inline.
+   */
+  zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean } | null;
   /**
    * Legacy-only (Mission 7): when true, gates the whole Pilgrim mechanic — the start-of-turn flip into
    * `pilgrimZone`, the value-matching rescue on any attack play, and the deck-burn penalty on every enemy kill
@@ -609,11 +636,17 @@ export type GameAction =
   /** Legacy-only, gated by the 'KINFOLK_FLUTE' relic: the attacker locks in and resolves the open combo-assist window. */
   | { type: 'RESOLVE_COMBO'; playerId: string }
   /**
-   * Legacy-only, gated by the 'AZURE_EMBLEM' relic: the front-of-queue player in an open Azure Emblem window
-   * (see GameState.azureEmblemWindow) either places `cardId` from their hand atop the reserve deck, or declines
-   * by omitting it.
+   * Legacy-only, gated by the 'AZURE_EMBLEM' relic: the attacking player in an open Azure Emblem window (see
+   * GameState.azureEmblemWindow) either banks `cardId` (one of this play's own Mage cards) onto the reserve
+   * deck, or declines by omitting it.
    */
   | { type: 'RESOLVE_AZURE_EMBLEM'; playerId: string; cardId?: string }
+  /**
+   * Legacy-only (Mission 6), sourced fix, from AWAIT_ZONE_VENGEANCE_CHOICE: the player who just landed the kill
+   * chooses `cardId`, from the defeated enemy's own table (see GameState.zoneVengeanceChoice), to sacrifice
+   * permanently into the mission zone.
+   */
+  | { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE'; playerId: string; cardId: string }
   | { type: 'DEFEND'; playerId: string; cardIds: string[] }
   | { type: 'USE_SOLO_JESTER'; playerId: string }
   /**
@@ -673,7 +706,7 @@ export interface ClientGameState {
   /** See GameState.comboAssist. */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
   /** See GameState.azureEmblemWindow. Public information — it's on the table. */
-  azureEmblemWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
+  azureEmblemWindow: { pendingPlayerIds: string[]; eligibleCardIds: string[]; blockNextAttack: boolean } | null;
   /** See GameState.discardTopBuffsAttack. */
   discardTopBuffsAttack: boolean;
   /** See GameState.missionZone. Public information — it's on the table. */
@@ -684,6 +717,8 @@ export interface ClientGameState {
   rollingZoneCards: Card[];
   /** See GameState.zoneVengeanceOnKill. */
   zoneVengeanceOnKill: boolean;
+  /** See GameState.zoneVengeanceChoice. Public information — the eligible cards are the enemy's own (public) table. */
+  zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean } | null;
   /** See GameState.pilgrimMechanic. */
   pilgrimMechanic: boolean;
   /** See GameState.pilgrimZone. Public information — it's on the table. */

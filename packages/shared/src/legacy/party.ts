@@ -120,6 +120,13 @@ export interface MissionReward {
    * power(s) ignore enemy immunity from then on, but every play banishes the reserve deck's top card as a cost.
    */
   corruptAnotherCard?: boolean;
+  /**
+   * Mission 6's sourced bonus (see legacy-missions-transcript-mismatches.md): gives one random eligible existing
+   * rank-8 party member a bonus Guardian sticker (see applyGuardianSticker) — replaces the shipped version's
+   * over-grant of all 4 Guardian recruits kept permanently; sourced material keeps only the rank-3 Guardian
+   * (`recruits` below carries just that one) and grants this bonus instead.
+   */
+  guardianSticker?: boolean;
 }
 
 /** The "Lucky 4" ranks Dual-class Stickers target — one sticker per rank, matching the physical game's 4-sticker sheets. */
@@ -193,13 +200,40 @@ export function applyCorruptAnotherCard(party: Card[], excludeIds: Set<string> =
   return party.map((c) => (c.id === pick.id ? { ...c, corrupted: true } : c));
 }
 
-/** Adds a mission's reward — recruits, any Dual-class Stickers, any Mage sticker, and any corrupt-another-card effect — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
+/**
+ * Mission 6's sourced bonus (see legacy-missions-transcript-mismatches.md, replacing the shipped over-grant of
+ * all 4 Guardian recruits): picks one random eligible existing rank-8 party member and gives it a bonus Guardian
+ * sticker — unlike a pure Guardian recruit's `guardian` flag (which replaces suit-power resolution entirely),
+ * the card keeps resolving its own suit power AND raises the Guardian's absolute shield when played (see
+ * SuitedCard.secondClassGuardian, engine.ts's resolveCommittedPlay's guardianCards handling). Mirrors
+ * applyMageSticker's eligibility/selection shape, narrowed to rank 8 per the sourced reward.
+ */
+export function applyGuardianSticker(party: Card[]): Card[] {
+  const eligible = party.filter(
+    (c) =>
+      c.kind === 'suited' &&
+      c.rank === '8' &&
+      !c.arcane &&
+      !c.reaver &&
+      !c.guardian &&
+      !c.druid &&
+      !c.chanter &&
+      !c.evergreen &&
+      !c.secondClassGuardian,
+  );
+  if (eligible.length === 0) return party;
+  const pick = eligible[Math.floor(Math.random() * eligible.length)];
+  return party.map((c) => (c.id === pick.id ? { ...c, secondClassGuardian: true } : c));
+}
+
+/** Adds a mission's reward — recruits, any Dual-class Stickers, any Mage sticker, any corrupt-another-card effect, and any Guardian sticker — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
 export function applyReward(party: Card[], reward: MissionReward): Card[] {
   const newRecruits = reward.recruits.map(buildRecruitCard);
   let next = [...party, ...newRecruits];
   if (reward.dualClassStickers) next = applyDualClassStickers(next, reward.dualClassStickers);
   if (reward.mageSticker) next = applyMageSticker(next);
   if (reward.corruptAnotherCard) next = applyCorruptAnotherCard(next, new Set(newRecruits.map((c) => c.id)));
+  if (reward.guardianSticker) next = applyGuardianSticker(next);
   return next;
 }
 

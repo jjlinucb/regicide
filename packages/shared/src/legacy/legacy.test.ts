@@ -7,6 +7,7 @@ import {
   applyBeastCardChoice,
   applyCorruptAnotherCard,
   applyDualClassStickers,
+  applyGuardianSticker,
   applyMageSticker,
   applyReward,
   applyRestoredPartyCards,
@@ -1215,7 +1216,12 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
 
   const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
 
-  it('sacrifices the lowest-value card left on the table into the mission zone on kill (never the discard pile)', () => {
+  /** Resolves an open AWAIT_ZONE_VENGEANCE_CHOICE window for the current player. */
+  function chooseSacrifice(state: GameState, cardId: string): GameState {
+    return ensureOk(applyAction(state, { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE', playerId: state.players[0].id, cardId })).state;
+  }
+
+  it('sourced fix: opens a player choice instead of auto-sacrificing — the card never falls to the mission zone until chosen', () => {
     const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 8, attack: 1 };
     let state = startGardenMission(1, [boss], [myla]);
     state = rig(state, [suited('D', '9')]);
@@ -1223,19 +1229,56 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
-    expect(state.missionZone.length).toBe(2); // Myla + the sacrificed 9
+    expect(state.turnPhase).toBe('AWAIT_ZONE_VENGEANCE_CHOICE');
+    expect(state.zoneVengeanceChoice).toEqual({ remaining: -1, attackIncludesGuardian: false });
+    expect(state.missionZone.length).toBe(1); // Myla only — nothing sacrificed yet
+    expect(state.currentEnemy?.tableCards.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')).toBe(true);
+
+    state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
+
+    expect(state.missionZone.length).toBe(2); // Myla + the chosen 9
     expect(state.missionZone.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')).toBe(true);
     expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')).toBe(false);
   });
 
-  it("Myla strikes for the zone's live sum right after it grows, routed through AWAIT_DEFEND", () => {
+  it('sourced fix: the player may sacrifice ANY card from the play area, not just the lowest-value one', () => {
+    // Three separate turns' worth of cards pile up on the boss's table before the killing blow — the shipped
+    // auto-sacrifice would always take the lowest (the 3). This proves the player can choose otherwise.
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 15, attack: 0 };
+    const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'C', health: 20, attack: 1 };
+    let state = startGardenMission(1, [boss, next], [myla]);
+
+    state = rig(state, [suited('D', '3')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.turnPhase).toBe('AWAIT_PLAY'); // enemy attack is 0 — turn just advances, no kill yet
+
+    state = rig(state, [suited('S', '4')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+
+    state = rig(state, [suited('H', '8')]); // 3 + 4 + 8 = 15 — exact kill
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.turnPhase).toBe('AWAIT_ZONE_VENGEANCE_CHOICE');
+    expect(state.currentEnemy?.tableCards.length).toBe(3);
+
+    // Deliberately sacrifice the middle-value card (4), not the lowest (3).
+    const chosen = state.currentEnemy!.tableCards.find((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '4')!;
+    state = chooseSacrifice(state, chosen.id);
+
+    expect(state.missionZone.some((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '4')).toBe(true);
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '3')).toBe(true);
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'H' && c.rank === '8')).toBe(true);
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '4')).toBe(false);
+  });
+
+  it("Myla strikes for the zone's live sum right after the chosen sacrifice lands, routed through AWAIT_DEFEND", () => {
     const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 8, attack: 1 };
     const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'D', health: 20, attack: 1 };
     let state = startGardenMission(1, [boss, next], [myla]);
     state = rig(state, [suited('D', '9')]);
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
 
     // Overkill (8 health, 9 damage) — not an exact kill, so no card is spared: 7 (Myla) + 9 = 16.
     expect(state.turnPhase).toBe('AWAIT_DEFEND');
@@ -1248,8 +1291,8 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     let state = startGardenMission(1, [boss, next], [myla]);
     state = rig(state, [suited('D', '9')]);
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
 
     // Exact kill: zone becomes [Myla(7), 9], but the 9 (highest) is spared from this strike — only 7 lands.
     expect(state.missionZone.length).toBe(2);
@@ -1257,13 +1300,45 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     expect(state.pendingDamage).toBe(7);
   });
 
+  it('sourced fix: a winning attack that includes a Guardian cancels the strike entirely (zone still grows)', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 5, attack: 1 };
+    const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'D', health: 20, attack: 1 };
+    let state = startGardenMission(1, [boss, next], [myla]);
+    const shield: SuitedCard = { ...suited('D', '5'), guardian: true };
+    state = rig(state, [shield]);
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.zoneVengeanceChoice).toEqual({ remaining: 0, attackIncludesGuardian: true });
+    state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
+
+    expect(state.missionZone.length).toBe(2); // the zone still grows — only the team-damage step is cancelled
+    expect(state.turnPhase).toBe('AWAIT_PLAY'); // no Myla strike — same player continues, no AWAIT_DEFEND
+    expect(state.pendingDamage).toBe(0);
+  });
+
+  it('rejects a sacrifice choice from the wrong player, wrong phase, or a card not on the table', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 8, attack: 1 };
+    let state = startGardenMission(2, [boss], [myla]);
+    state = rig(state, [suited('D', '9')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+
+    const cardId = state.currentEnemy!.tableCards[0].id;
+    expect(applyAction(state, { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE', playerId: state.players[1].id, cardId }).ok).toBe(false);
+    expect(applyAction(state, { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE', playerId: state.players[0].id, cardId: 'not-a-real-card' }).ok).toBe(false);
+
+    state = chooseSacrifice(state, cardId);
+    expect(
+      applyAction(state, { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE', playerId: state.players[0].id, cardId }).ok,
+    ).toBe(false); // window already closed
+  });
+
   it('leaves the mission zone permanently grown after a kill — nothing clears it', () => {
     const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 5, attack: 1 };
     let state = startGardenMission(1, [boss], [myla]);
     state = rig(state, [suited('H', '5')]);
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
 
     expect(state.missionZone.length).toBe(2); // Myla + the sacrificed 5, permanently
   });
@@ -1332,13 +1407,26 @@ describe('legacy: applyCorruptAnotherCard (mixed-bag reward primitive)', () => {
   });
 });
 
-describe('legacy: mission 6 reward (Guardian faction + Azure Emblem relic)', () => {
-  it('rewards 4 Guardian recruits, one carrying the Aegis special ability', () => {
+describe('legacy: mission 6 reward, sourced fix (only the rank-3 Guardian kept, plus a Guardian sticker)', () => {
+  it('keeps only the rank-3 Guardian (Ferro) as a permanent recruit — ranks 5/7/9 are not granted', () => {
     const mission6 = getMission(6)!;
+    expect(mission6.reward.recruits.length).toBe(1);
+    expect(mission6.reward.recruits[0]).toMatchObject({ name: 'Ferro', class: 'GUARDIAN', rank: '3' });
+
     const party = applyReward(buildInitialParty(), mission6.reward);
     const guardians = party.filter((c) => c.kind === 'suited' && c.guardian);
-    expect(guardians.length).toBe(4);
-    expect(guardians.filter((c) => c.kind === 'suited' && c.special === 'AEGIS').length).toBe(1);
+    expect(guardians.length).toBe(1);
+    expect(guardians[0].kind === 'suited' && guardians[0].name).toBe('Ferro');
+  });
+
+  it('grants a bonus Guardian sticker to one existing rank-8 party card instead of the other 3 Guardian recruits', () => {
+    const mission6 = getMission(6)!;
+    expect(mission6.reward.guardianSticker).toBe(true);
+
+    const party = applyReward(buildInitialParty(), mission6.reward);
+    const stickered = party.filter((c) => c.kind === 'suited' && c.secondClassGuardian);
+    expect(stickered.length).toBe(1);
+    expect(stickered[0].kind === 'suited' && stickered[0].rank).toBe('8');
   });
 
   it('a Guardian recruit takes its explicit suit (Guardian has none of its own) and is flagged guardian', () => {
@@ -1353,7 +1441,29 @@ describe('legacy: mission 6 reward (Guardian faction + Azure Emblem relic)', () 
   });
 });
 
-describe('legacy: Azure Emblem relic (mission 6) — Mage-attack assist window', () => {
+describe('legacy: bonus Guardian sticker (secondClassGuardian — keeps its own suit power AND raises the shield)', () => {
+  it('resolves both its printed suit power and the Guardian shield when played', () => {
+    const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 20 };
+    let state = startMission(1, [boss]);
+    const stickered: SuitedCard = { ...suited('C', '4'), secondClassGuardian: true }; // Warrior + bonus shield
+    state = rig(state, [stickered]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+
+    expect(res.state.currentEnemy?.damageTaken).toBe(8); // Clubs doubles the play's value (4*2=8)
+    expect(res.state.turnPhase).toBe('AWAIT_PLAY'); // the shield blocked the enemy's attack — no damage suffered
+  });
+
+  it('applyGuardianSticker gives one random eligible rank-8 party member secondClassGuardian', () => {
+    const party = buildInitialParty();
+    const next = applyGuardianSticker(party);
+    const stickered = next.filter((c) => c.kind === 'suited' && c.secondClassGuardian);
+    expect(stickered.length).toBe(1);
+    expect(stickered[0].kind === 'suited' && stickered[0].rank).toBe('8');
+  });
+});
+
+describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage's OWN player's card", () => {
   function mageCard(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
     return { ...suited(suit, rank), arcane: true };
   }
@@ -1375,59 +1485,71 @@ describe('legacy: Azure Emblem relic (mission 6) — Mage-attack assist window',
     return res.state;
   }
 
-  it('opens a window for every other player once a Mage card joins the attack, deferring the enemy retaliation', () => {
+  it("opens a window for the Mage's OWN player (not the others) once a Mage card joins the attack, deferring the enemy retaliation", () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     let state = startEmblemMission(3, [boss]);
     state = structuredClone(state);
     const player0Id = state.players[0].id;
-    state.players[0].hand = [mageCard('H', '4')];
+    const played = mageCard('H', '4');
+    state.players[0].hand = [played];
 
     const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
     expect(state.turnPhase).toBe('AWAIT_AZURE_EMBLEM');
-    expect(state.azureEmblemWindow).toEqual({ pendingPlayerIds: [state.players[1].id, state.players[2].id], blockNextAttack: false });
+    expect(state.azureEmblemWindow).toEqual({ pendingPlayerIds: [player0Id], eligibleCardIds: [played.id], blockNextAttack: false });
     expect(state.currentEnemy?.damageTaken).toBe(8); // 4 from the normal play + 4 from the arcane bolt, as usual
   });
 
-  it('lets each player in the queue silently place a card atop the reserve deck, or decline, in order', () => {
+  it("lets the Mage's own player bank that Mage card onto the reserve deck instead of losing it to the discard pile", () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     let state = startEmblemMission(3, [boss]);
     state = structuredClone(state);
     const player0Id = state.players[0].id;
-    state.players[0].hand = [mageCard('H', '4')];
-    const stashedCard = suited('D', '9');
-    state.players[1].hand = [stashedCard];
+    const played = mageCard('H', '4');
+    state.players[0].hand = [played];
 
     state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
-    const player1Id = state.players[1].id;
-    const player2Id = state.players[2].id;
 
-    // Player 1 stocks a card; player 2 declines.
-    let res = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player1Id, cardId: stashedCard.id }));
-    state = res.state;
-    expect(state.tavernDeck[0]).toEqual(stashedCard);
-    expect(state.players[1].hand.length).toBe(0);
-    expect(state.azureEmblemWindow?.pendingPlayerIds).toEqual([player2Id]);
-
-    res = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player2Id }));
+    const res = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id, cardId: played.id }));
     state = res.state;
 
+    expect(state.tavernDeck[0]).toEqual(played);
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === played.id)).toBe(false); // banked, not left on the table
     expect(state.azureEmblemWindow).toBeNull();
-    expect(state.turnPhase).toBe('AWAIT_DEFEND'); // deferred attack now resolves for the Mage's player
+    expect(state.turnPhase).toBe('AWAIT_DEFEND'); // deferred attack now resolves
     expect(state.pendingDamage).toBe(10);
   });
 
-  it('rejects a response from anyone but the front of the queue, and is inert without the relic', () => {
+  it('lets the Mage\'s own player decline — the card stays on the table (bound for the discard pile like any other)', () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     let state = startEmblemMission(2, [boss]);
     state = structuredClone(state);
     const player0Id = state.players[0].id;
-    state.players[0].hand = [mageCard('H', '4')];
+    const played = mageCard('H', '4');
+    state.players[0].hand = [played];
 
     state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
-    const bad = applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id });
-    expect(bad.ok).toBe(false); // player 0 isn't in the queue — they're the attacker
+    state = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id })).state;
+
+    expect(state.azureEmblemWindow).toBeNull();
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === played.id)).toBe(true); // left in place, declined
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+  });
+
+  it('rejects a response from anyone but the Mage\'s own player, rejects banking an ineligible card, and is inert without the relic', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startEmblemMission(2, [boss]);
+    state = structuredClone(state);
+    const player0Id = state.players[0].id;
+    const player1Id = state.players[1].id;
+    const played = mageCard('H', '4');
+    state.players[0].hand = [played];
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+
+    expect(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player1Id }).ok).toBe(false); // not their window
+    expect(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id, cardId: 'not-eligible' }).ok).toBe(false);
 
     // Without the relic, the same Mage play never opens the window at all.
     let plain = startMission(2, [boss]);

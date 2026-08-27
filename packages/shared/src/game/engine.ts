@@ -1,4 +1,4 @@
-import type { Card, CapturedPile, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit } from './types.js';
+import type { Card, CapturedPile, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit } from './types.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,
@@ -811,8 +811,15 @@ function finishDeferredAttackTurn(state: GameState, blockNextAttack: boolean): E
   return finishNonAttackTurn(state);
 }
 
-/** Returns true if the enemy was defeated by this hit (win or new enemy revealed either way). */
-function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
+/**
+ * Returns true if the enemy was defeated by this hit (win or new enemy revealed either way).
+ * `attackIncludesGuardian` is Legacy-only (Mission 6, sourced from the official rules card): true when the play
+ * that landed this kill included a Guardian card — cancels Myla's team-damage step entirely for this kill (see
+ * GameState.zoneVengeanceOnKill / finishEnemyDefeatTail). Absent for the recursive splash-damage self-call
+ * (Mission 5's exactKillSplashDamage — never combined with Mission 6's zoneVengeanceOnKill in practice, but
+ * threaded through anyway so a chained kill from the same play stays covered by the same shield).
+ */
+function dealDamageAndCheckDefeat(state: GameState, damage: number, attackIncludesGuardian = false): boolean {
   const enemy = state.currentEnemy!;
   enemy.damageTaken += damage;
   const remaining = enemy.maxHealth - enemy.damageTaken;
@@ -917,20 +924,24 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       }
     }
     if (state.zoneVengeanceOnKill) {
-      // Mission 6: whatever's left on the enemy's table after this kill doesn't just fall to the discard pile —
-      // its lowest-value card is sacrificed permanently into the (never-cleared) mission zone alongside Myla.
+      // Mission 6, sourced fix (regicidelegacy.com compendium + a fan digital-reimplementation's rules doc —
+      // see legacy-missions-transcript-mismatches.md): whatever's left on the enemy's table after this kill
+      // doesn't fall to the discard pile automatically — a PLAYER chooses which single card, from the play area
+      // just committed to this kill, is sacrificed permanently into the (never-cleared) mission zone alongside
+      // Myla. The shipped version instead auto-picked the lowest-value card, taking the choice away from the
+      // player entirely and routinely dragging a second or third suit into Myla's permanent immunity on the very
+      // first kill. Modeled as a genuine pending choice (see CHOOSE_ZONE_VENGEANCE_SACRIFICE /
+      // chooseZoneVengeanceSacrifice), the same shape as Mission 9's AWAIT_RESCUE_CHOICE / Mission 11's
+      // AWAIT_BEAST_REWARD_CHOICE — the rest of this kill's resolution (finishEnemyDefeatTail) waits for it.
       if (enemy.tableCards.length > 0) {
-        let lowestIdx = 0;
-        for (let i = 1; i < enemy.tableCards.length; i++) {
-          if (cardValue(enemy.tableCards[i]) < cardValue(enemy.tableCards[lowestIdx])) lowestIdx = i;
-        }
-        const [sacrificed] = enemy.tableCards.splice(lowestIdx, 1);
-        state.missionZone.push(sacrificed);
-        state.zoneImmuneSuits = Array.from(
-          new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))),
-        );
-        log(state, `${sacrificed.kind === 'suited' ? sacrificed.name ?? `the ${sacrificed.rank}` : 'the Jester'} is drawn permanently into the mission zone.`);
+        state.zoneVengeanceChoice = { remaining, attackIncludesGuardian };
+        state.turnPhase = 'AWAIT_ZONE_VENGEANCE_CHOICE';
+        log(state, 'Choose one card from the play area to sacrifice permanently into the mission zone.');
+        return true;
       }
+      // No card left on the enemy's table to sacrifice this kill (rare) — the zone doesn't grow, straight on to
+      // the rest of the defeat resolution.
+      return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian);
     }
     if (state.pilgrimMechanic) {
       // Mission 7: every kill burns cards off the top of the reserve deck straight into the discard pile, equal
@@ -1012,6 +1023,17 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       log(state, `${enemyLabel(enemy)} defeated${upgradeNote || '!'}`);
     }
   }
+  return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian);
+}
+
+/**
+ * The shared tail of a confirmed enemy defeat, once every ruleset/mission-specific inline effect above has run
+ * (or, for Mission 6's zoneVengeanceOnKill, once its AWAIT_ZONE_VENGEANCE_CHOICE has been resolved — see
+ * chooseZoneVengeanceSacrifice). Split out of dealDamageAndCheckDefeat so that choice can pause mid-resolution
+ * and resume here afterward, the same way CHOOSE_EXACT_KILL_RESCUE/CHOOSE_BEAST_REWARD resume their own
+ * mission's flow from a dedicated resolve function. `attackIncludesGuardian` — see dealDamageAndCheckDefeat.
+ */
+function finishEnemyDefeatTail(state: GameState, enemy: EnemyState, remaining: number, attackIncludesGuardian: boolean): boolean {
   if (state.ruleset === 'legacy' && (state.pileTopEnemyBonus || state.restoredCardMechanic)) {
     // Mission 11: "defeating the enemy always banishes it" — its played cards go to the banish pile instead of
     // the discard pile, directly feeding the very pile-top bonus/immunity mechanic this flag names (see
@@ -1059,27 +1081,35 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
     // kill (and its own effects) if it's strong enough.
     const splash = enemy.baseAttack;
     log(state, `${enemyLabel(enemy)}'s death throes burst outward — ${splash} splash damage crashes into ${enemyLabel(state.currentEnemy)}!`);
-    dealDamageAndCheckDefeat(state, splash);
+    dealDamageAndCheckDefeat(state, splash, attackIncludesGuardian);
     return true;
   }
 
   if (state.ruleset === 'legacy' && state.zoneVengeanceOnKill && state.missionZone.length > 0) {
-    // Mission 6: Myla, permanently seated in the mission zone, strikes right after it grows — team damage equal
-    // to the live sum of every card resting there (her own base value of 7 included). An exact-damage kill
-    // excludes the single highest-value zone card from this one strike's total. Routed through the existing
-    // AWAIT_DEFEND/defend() flow, so an uncovered hit ends the mission exactly like any other undefended attack.
-    const exact = remaining === 0;
-    const values = state.missionZone.map(cardValue);
-    let total = values.reduce((a, b) => a + b, 0);
-    if (exact) {
-      total -= Math.max(...values);
-      log(state, `An exact hit spares the mission zone's strongest card from Myla's wrath this time.`);
-    }
-    if (total > 0) {
-      log(state, `Myla lashes out for ${total} damage from the ${state.missionZone.length} card(s) haunting the mission zone!`);
-      state.pendingDamage = total;
-      state.turnPhase = 'AWAIT_DEFEND';
-      return true;
+    if (attackIncludesGuardian) {
+      // Mission 6, sourced fix (official rules card, per legacy-missions-transcript-mismatches.md): a winning
+      // attack that includes a Guardian cancels Myla's team-damage step entirely — the shield the Guardian
+      // raises against the enemy also holds against the garden's own retaliation this kill. Not implemented at
+      // all in the shipped version.
+      log(state, "A Guardian's shield holds against the garden itself — Myla's strike is cancelled this time.");
+    } else {
+      // Mission 6: Myla, permanently seated in the mission zone, strikes right after it grows — team damage equal
+      // to the live sum of every card resting there (her own base value of 7 included). An exact-damage kill
+      // excludes the single highest-value zone card from this one strike's total. Routed through the existing
+      // AWAIT_DEFEND/defend() flow, so an uncovered hit ends the mission exactly like any other undefended attack.
+      const exact = remaining === 0;
+      const values = state.missionZone.map(cardValue);
+      let total = values.reduce((a, b) => a + b, 0);
+      if (exact) {
+        total -= Math.max(...values);
+        log(state, `An exact hit spares the mission zone's strongest card from Myla's wrath this time.`);
+      }
+      if (total > 0) {
+        log(state, `Myla lashes out for ${total} damage from the ${state.missionZone.length} card(s) haunting the mission zone!`);
+        state.pendingDamage = total;
+        state.turnPhase = 'AWAIT_DEFEND';
+        return true;
+      }
     }
   }
 
@@ -1292,6 +1322,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.rollingZoneBonus = action.rollingZoneBonus ?? false;
   state.rollingZoneCards = [];
   state.zoneVengeanceOnKill = action.zoneVengeanceOnKill ?? false;
+  state.zoneVengeanceChoice = null;
   state.pilgrimMechanic = action.pilgrimMechanic ?? false;
   // A small, fixed set of named survivors (not shuffled) — they surface in the same narrative order every time,
   // like Mission 5/6's presetMissionZone.
@@ -1463,7 +1494,12 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   // entirely, regardless of the card's own value — spent the instant it's used, not a stacking reduction.
   // Aegis instead holds the shield permanently, zeroing the enemy's attack for the rest of the fight (same
   // final effect as Bulwark, but from a Guardian's suit-less card).
-  const guardianCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian));
+  // Mission 6 reward, sourced fix: a secondClassGuardian card (the Guardian sticker granted to an existing
+  // rank-8 party card, see party.ts's applyGuardianSticker) fires this same shield ability on top of its own
+  // suit power, exactly like a secondClassArcane card's bonus arcane bolt fires on top of its own suit power.
+  const guardianCards = cards.filter(
+    (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian || c.secondClassGuardian),
+  );
   let guardianBlocksNextAttack = false;
   if (state.ruleset === 'legacy' && guardianCards.length > 0) {
     const enemy = state.currentEnemy!;
@@ -1534,7 +1570,10 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   const damage = applyEnemyPaladinDamageReduction(state, rawDamage);
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
-  const defeated = dealDamageAndCheckDefeat(state, damage);
+  // Mission 6, sourced fix: a winning attack that includes a Guardian cancels Myla's zoneVengeanceOnKill
+  // team-damage step entirely (see finishEnemyDefeatTail) — a documented mechanic missing from the shipped
+  // version. Inert on every other mission, since guardianCards is always empty there.
+  const defeated = dealDamageAndCheckDefeat(state, damage, guardianCards.length > 0);
 
   if (state.phase !== 'IN_PROGRESS') return ok(state);
   if (defeated) return ok(state); // enemy was defeated, same player continues against the next one
@@ -1543,11 +1582,17 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     return beginChant(state, chantCount, guardianBlocksNextAttack);
   }
 
-  // Azure Emblem (Mission 6 relic): whenever a Mage joins the attack, every other player gets one chance to
-  // silently stock the reserve deck. Skipped if a Chanter also fired in the same play (see chantCount above) —
-  // the two mission-specific windows never need to stack in practice, since each faction's cards are unique.
-  if (state.ruleset === 'legacy' && state.relics.includes('AZURE_EMBLEM') && cards.some((c) => c.kind === 'suited' && c.arcane)) {
-    return beginAzureEmblem(state, player.id, guardianBlocksNextAttack);
+  // Azure Emblem (Mission 6 relic), sourced fix: whenever a Mage joins the attack, the Mage's OWN player gets
+  // one chance to bank one of this play's Mage card(s) onto the reserve deck instead of losing it to the
+  // discard pile whenever the enemy is eventually defeated — the shipped version had this backwards (every
+  // OTHER player silently placing a card from hand). Skipped if a Chanter also fired in the same play (see
+  // chantCount above) — the two mission-specific windows never need to stack in practice, since each faction's
+  // cards are unique.
+  const mageCardIds = state.ruleset === 'legacy' && state.relics.includes('AZURE_EMBLEM')
+    ? cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.arcane)).map((c) => c.id)
+    : [];
+  if (mageCardIds.length > 0) {
+    return beginAzureEmblem(state, player.id, mageCardIds, guardianBlocksNextAttack);
   }
 
   const enemyAttack = guardianBlocksNextAttack ? 0 : resolvedEnemyAttack(state);
@@ -1998,49 +2043,41 @@ function resolveChant(state: GameState, action: Extract<GameAction, { type: 'RES
 }
 
 /**
- * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic: opens (or immediately clears) the Azure Emblem
- * window after a play that included a Mage card — every other player, one at a time, may silently place a
- * single card from hand atop the reserve deck via RESOLVE_AZURE_EMBLEM. `blockNextAttack` mirrors a Guardian
- * shield raised in the same play.
+ * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic, sourced fix: opens the Azure Emblem window after a
+ * play that included a Mage card — the Mage's OWN player (the attacker, `attackerId`) may bank one of
+ * `eligibleCardIds` (this play's Mage card(s), still sitting on the enemy's table) onto the reserve deck via
+ * RESOLVE_AZURE_EMBLEM, instead of losing it to the discard pile whenever the enemy eventually falls. The
+ * shipped version instead opened this for every OTHER player to place a card from their own hand — backwards on
+ * both who benefits and what moves (per the official rules card, see legacy-missions-transcript-mismatches.md).
+ * `blockNextAttack` mirrors a Guardian shield raised in the same play.
  */
-function beginAzureEmblem(state: GameState, attackerId: string, blockNextAttack: boolean): EngineResult {
-  const pendingPlayerIds = state.players.filter((p) => p.id !== attackerId).map((p) => p.id);
-  if (pendingPlayerIds.length === 0) {
-    return finishDeferredAttackTurn(state, blockNextAttack);
-  }
-
-  state.azureEmblemWindow = { pendingPlayerIds, blockNextAttack };
+function beginAzureEmblem(state: GameState, attackerId: string, eligibleCardIds: string[], blockNextAttack: boolean): EngineResult {
+  state.azureEmblemWindow = { pendingPlayerIds: [attackerId], eligibleCardIds, blockNextAttack };
   state.turnPhase = 'AWAIT_AZURE_EMBLEM';
-  log(state, 'Azure Emblem: any other player may silently place a card atop the reserve deck.');
+  log(state, "Azure Emblem: the Mage's own player may bank one of this play's Mage card(s) onto the reserve deck instead of losing it to the discard pile.");
   return ok(state);
 }
 
-/** Legacy-only (Mission 6): the front-of-queue player in an open Azure Emblem window responds (see GameState.azureEmblemWindow). */
+/** Legacy-only (Mission 6): the attacking player resolves their own open Azure Emblem window (see GameState.azureEmblemWindow). */
 function resolveAzureEmblem(state: GameState, action: Extract<GameAction, { type: 'RESOLVE_AZURE_EMBLEM' }>): EngineResult {
   if (state.turnPhase !== 'AWAIT_AZURE_EMBLEM' || !state.azureEmblemWindow) return fail('There is no open Azure Emblem window to resolve.');
-  const [nextId, ...rest] = state.azureEmblemWindow.pendingPlayerIds;
-  if (action.playerId !== nextId) return fail("It's not your turn to respond to the Azure Emblem.");
-
-  const player = findPlayer(state, nextId);
-  if (!player) return fail('Unknown player.');
+  const { pendingPlayerIds, eligibleCardIds, blockNextAttack } = state.azureEmblemWindow;
+  const [attackerId] = pendingPlayerIds;
+  if (action.playerId !== attackerId) return fail("It's not your Azure Emblem window to resolve.");
 
   if (action.cardId) {
-    const card = player.hand.find((c) => c.id === action.cardId);
-    if (!card) return fail('That card is not in your hand.');
-    player.hand = player.hand.filter((c) => c.id !== card.id);
-    toReserveDeck(state, [card], 'top');
-    log(state, `${player.name} silently places a card atop the reserve deck (Azure Emblem).`);
+    if (!eligibleCardIds.includes(action.cardId)) return fail('That card is not eligible to bank via the Azure Emblem.');
+    const enemy = state.currentEnemy!;
+    const idx = enemy.tableCards.findIndex((c) => c.id === action.cardId);
+    if (idx === -1) return fail('That card is no longer available to bank.');
+    const [banked] = enemy.tableCards.splice(idx, 1);
+    toReserveDeck(state, [banked], 'top');
+    log(state, `${banked.kind === 'suited' ? banked.name ?? 'A Mage' : 'A Jester'} is banked onto the reserve deck instead of falling to the discard pile (Azure Emblem).`);
   }
 
-  const { blockNextAttack } = state.azureEmblemWindow;
-  if (rest.length === 0) {
-    state.azureEmblemWindow = null;
-    state.turnPhase = 'AWAIT_PLAY';
-    return finishDeferredAttackTurn(state, blockNextAttack);
-  }
-
-  state.azureEmblemWindow = { pendingPlayerIds: rest, blockNextAttack };
-  return ok(state);
+  state.azureEmblemWindow = null;
+  state.turnPhase = 'AWAIT_PLAY';
+  return finishDeferredAttackTurn(state, blockNextAttack);
 }
 
 /** Mission 9, from AWAIT_END_OF_TURN: declines to banish — every captured pile's face-up card cycles face-down to the bottom of its own pile and the next card flips up, then the turn advances. */
@@ -2073,6 +2110,38 @@ function chooseExactKillRescue(state: GameState, action: Extract<GameAction, { t
   state.turnPhase = 'AWAIT_PLAY';
   state.pendingDamage = 0;
   checkForStuckLoss(state);
+  return ok(state);
+}
+
+/**
+ * Mission 6 only, sourced fix: resolves the AWAIT_ZONE_VENGEANCE_CHOICE window opened by zoneVengeanceOnKill (see
+ * dealDamageAndCheckDefeat). The official rules card and a fan digital-reimplementation's rules doc agree a
+ * PLAYER chooses which single card, from the play area just committed to the kill (the defeated enemy's own
+ * table), is sacrificed permanently into the mission zone — the shipped version instead auto-picked the
+ * lowest-value card for them. Gated on turn ownership like CHOOSE_EXACT_KILL_RESCUE, since this opens mid-turn
+ * for the player who just landed the kill. Resuming the rest of the defeat resolution is delegated to
+ * finishEnemyDefeatTail, the same tail dealDamageAndCheckDefeat itself falls through to.
+ */
+function chooseZoneVengeanceSacrifice(
+  state: GameState,
+  action: Extract<GameAction, { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE' }>,
+): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_ZONE_VENGEANCE_CHOICE');
+  if (err) return fail(err);
+  const pending = state.zoneVengeanceChoice;
+  if (!pending) return fail('There is no open zone-vengeance choice to resolve.');
+
+  const enemy = state.currentEnemy!;
+  const idx = enemy.tableCards.findIndex((c) => c.id === action.cardId);
+  if (idx === -1) return fail('That card is not available to sacrifice into the mission zone.');
+
+  const [sacrificed] = enemy.tableCards.splice(idx, 1);
+  state.missionZone.push(sacrificed);
+  state.zoneImmuneSuits = Array.from(new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))));
+  log(state, `${sacrificed.kind === 'suited' ? sacrificed.name ?? `the ${sacrificed.rank}` : 'the Jester'} is drawn permanently into the mission zone.`);
+
+  state.zoneVengeanceChoice = null;
+  finishEnemyDefeatTail(state, enemy, pending.remaining, pending.attackIncludesGuardian);
   return ok(state);
 }
 
@@ -2144,6 +2213,7 @@ export function createLobbyState(): GameState {
     rollingZoneBonus: false,
     rollingZoneCards: [],
     zoneVengeanceOnKill: false,
+    zoneVengeanceChoice: null,
     pilgrimMechanic: false,
     pilgrimDeck: [],
     pilgrimZone: [],
@@ -2206,6 +2276,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return declineRescue(draft, action);
     case 'CHOOSE_EXACT_KILL_RESCUE':
       return chooseExactKillRescue(draft, action);
+    case 'CHOOSE_ZONE_VENGEANCE_SACRIFICE':
+      return chooseZoneVengeanceSacrifice(draft, action);
     case 'CHOOSE_BEAST_REWARD':
       return chooseBeastReward(draft, action);
     case 'START_ENDLESS_ROUND':

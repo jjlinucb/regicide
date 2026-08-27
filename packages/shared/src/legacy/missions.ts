@@ -425,23 +425,24 @@ export const MISSIONS: Mission[] = [
     // as Mission 5's presetMissionZone, but this time nothing keeps the zone fixed: zoneVengeanceOnKill grows
     // it permanently with every kill and has her strike the party for the zone's live total each time.
     presetMissionZone: [zoneCompanion('Myla', 'H', '7')],
-    // Every kill sacrifices the lowest-value card left on the enemy's table into the mission zone (never
-    // cleared for the rest of the mission), then Myla strikes for the zone's full value — exact kills spare
-    // the zone's single highest-value card from that one strike (see GameState.zoneVengeanceOnKill).
+    // Every kill lets a player choose one card from the play area just committed to the kill (the defeated
+    // enemy's own table) to sacrifice permanently into the mission zone, then Myla strikes for the zone's full
+    // value — exact kills spare the zone's single highest-value card from that one strike, and a winning attack
+    // that includes a Guardian cancels the strike entirely (see GameState.zoneVengeanceOnKill; both the
+    // player-choice shape and the Guardian cancellation are sourced fixes over the original shipped
+    // auto-sacrifice-with-no-Guardian-interaction — see legacy-missions-transcript-mismatches.md).
     zoneVengeanceOnKill: true,
-    // Reward: the Guardian faction — 4 permanent new recruits, statues themselves once, freed as the garden's
-    // stone cracks open around them. Playing one raises an absolute shield, blocking the enemy's very next
-    // attack entirely (spent instantly) — Dorna's Aegis holds it permanently instead, same final effect as
-    // Bulwark. Plus the Azure Emblem relic: whenever a Mage joins an attack from here on, every other player
-    // gets one chance to silently place a card from hand atop the reserve deck, stocking it for later.
+    // Reward, sourced fix (legacy-missions-transcript-mismatches.md): the Guardian faction, but only Ferro
+    // (rank 3) is kept as a permanent new recruit — the shipped version over-granted all 4 (Kesh, Ambrey, and
+    // Dorna's special Aegis are dropped). Playing a Guardian card raises an absolute shield, blocking the
+    // enemy's very next attack entirely (spent instantly). Plus a bonus Guardian sticker on one random existing
+    // rank-8 party card (see party.ts's applyGuardianSticker), and the Azure Emblem relic — sourced fix: whenever
+    // a Mage joins an attack from here on, the Mage's OWN player gets one chance to bank one of that play's Mage
+    // card(s) onto the reserve deck instead of losing it to the discard pile.
     reward: {
-      recruits: [
-        recruit('Ferro', 'GUARDIAN', '3', 'S'),
-        recruit('Kesh', 'GUARDIAN', '5', 'H'),
-        recruit('Ambrey', 'GUARDIAN', '7', 'D'),
-        specialRecruit('Dorna', 'GUARDIAN', '9', 'C'),
-      ],
+      recruits: [recruit('Ferro', 'GUARDIAN', '3', 'S')],
       relics: ['AZURE_EMBLEM'],
+      guardianSticker: true,
     },
   },
   {
