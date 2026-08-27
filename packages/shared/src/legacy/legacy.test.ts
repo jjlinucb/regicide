@@ -2852,6 +2852,7 @@ function startMission11(n: number, opts: { party?: Card[] } = {}): GameState {
     jesterCount: 0,
     beastDeckMechanic: mission11.beastDeckMechanic,
     pileTopEnemyBonus: mission11.pileTopEnemyBonus,
+    discardCleanupLowToHigh: mission11.discardCleanupLowToHigh,
   });
   if (!res.ok) throw new Error(res.error);
   return res.state;
@@ -2874,6 +2875,7 @@ describe('legacy: mission 11 setup (Descent into Darkness)', () => {
 
     expect(mission11.beastDeckMechanic).toBe(true);
     expect(mission11.pileTopEnemyBonus).toBe(true);
+    expect(mission11.discardCleanupLowToHigh).toBe(true);
     expect(mission11.sidelineIdentity).toEqual({ suit: 'C', rank: '6' });
     expect(mission11.reward.recruits).toEqual([]);
     expect(mission11.reward.upgradeSidelinedCard).toEqual({ suit: 'C', rank: '6' });
@@ -3077,6 +3079,85 @@ describe('legacy: mission 11 pile-top bonus strength & immunity, and banish-on-d
     expect(res.state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '10')).toBe(true);
     // One enemy fell off the queue for good — not requeued (castleDeck shrank by exactly 1, never regrew).
     expect(res.state.castleDeck.length).toBe(castleDeckSizeBefore - 1);
+  });
+});
+
+describe('legacy: mission 11 discard cleanup ordering fix (discardCleanupLowToHigh)', () => {
+  it('the mission enables discardCleanupLowToHigh — the only multi-card discard-pile push this mission has (pileTopEnemyBonus routes every enemy-defeat table-card batch to the BANISH pile instead)', () => {
+    const mission11 = getMission(11)!;
+    expect(mission11.discardCleanupLowToHigh).toBe(true);
+  });
+
+  it('a covered DEFEND with multiple cards leaves the LOWEST-value card on top of the discard pile, regardless of the order the player selected them in', () => {
+    const low = suited('H', '2');
+    const mid = suited('D', '5');
+    const high = suited('S', '9');
+
+    // No beast cards in the party — an empty beast deck is a guaranteed no-op (see the "no-op beast deck" setup
+    // test above), which isolates this assertion from Mission 11's OTHER mechanic (a start-of-turn beast flip
+    // could otherwise banish the very top-of-discard-pile card this test is checking, as a Warrior flip does).
+    let stateA = startMission11(1, { party: buildInitialParty() });
+    stateA = rig(stateA, [low, mid, high], { baseAttack: 3, spadesShield: 0 });
+    const yieldedA = ensureOk(applyAction(stateA, { type: 'YIELD', playerId: stateA.players[0].id }));
+    expect(yieldedA.state.turnPhase).toBe('AWAIT_DEFEND');
+    // Select in high, low, mid order — worst case for an unsorted push (the finishing card, mid, would land on top).
+    const defendedA = ensureOk(
+      applyAction(yieldedA.state, { type: 'DEFEND', playerId: yieldedA.state.players[0].id, cardIds: [high.id, low.id, mid.id] }),
+    );
+
+    let stateB = startMission11(1, { party: buildInitialParty() });
+    stateB = rig(stateB, [suited('H', '2'), suited('D', '5'), suited('S', '9')], { baseAttack: 3, spadesShield: 0 });
+    const [lowB, midB, highB] = stateB.players[0].hand;
+    const yieldedB = ensureOk(applyAction(stateB, { type: 'YIELD', playerId: stateB.players[0].id }));
+    // Select in the opposite order this time — low, mid, high.
+    const defendedB = ensureOk(
+      applyAction(yieldedB.state, { type: 'DEFEND', playerId: yieldedB.state.players[0].id, cardIds: [lowB.id, midB.id, highB.id] }),
+    );
+
+    for (const res of [defendedA, defendedB]) {
+      const top = res.state.discardPile[res.state.discardPile.length - 1];
+      expect(top.kind).toBe('suited');
+      if (top.kind === 'suited') expect(top.rank).toBe('2'); // the lowest-value card, no matter the selection order
+    }
+  });
+
+  it('without the flag, a covered DEFEND preserves whatever order the cards were selected in (proves the sort is gated by discardCleanupLowToHigh, not always-on)', () => {
+    const enemy: LegacyEnemySpec = { name: 'Ungoverned Foe', suit: 'H', health: 100, attack: 3 };
+    let state = startMission(1, [enemy]); // plain legacy mission, discardCleanupLowToHigh left unset
+    expect(state.discardCleanupLowToHigh).toBe(false);
+    const low = suited('D', '2');
+    const high = suited('S', '9');
+    state = rig(state, [high, low]); // enemy attack already 3, no rig override needed
+    const yielded = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    // Select high first, low second — an unsorted push leaves the LAST-selected card (low) on top.
+    const defended = ensureOk(
+      applyAction(yielded.state, { type: 'DEFEND', playerId: yielded.state.players[0].id, cardIds: [high.id, low.id] }),
+    );
+    expect(defended.state.discardPile.map((c) => c.id)).toEqual([high.id, low.id]); // pushed in selection order, unsorted
+  });
+
+  it('caps the following turn\'s pileTopEnemyBonus discard-pile-top component at the lowest defended card, not the highest one that actually covered the hit', () => {
+    // No beast cards — see the note on the previous test for why this isolates the assertion from the OTHER
+    // Mission 11 mechanic (a start-of-turn beast flip firing between the DEFEND and the next YIELD).
+    let state = startMission11(1, { party: buildInitialParty() });
+    const low = suited('H', '2');
+    const high = suited('S', '9');
+    state = rig(state, [high, low], { baseAttack: 3, spadesShield: 0 });
+    const yielded = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    // Select the high card first — the pre-fix bug would leave it landing last if selection order were reversed;
+    // either way, the fix guarantees the LOW card ends up on top regardless.
+    const defended = ensureOk(
+      applyAction(yielded.state, { type: 'DEFEND', playerId: yielded.state.players[0].id, cardIds: [high.id, low.id] }),
+    );
+    expect(defended.state.turnPhase).toBe('AWAIT_PLAY'); // turn advanced, ready for the next hit
+
+    // Force the next turn's attack to resolve immediately with a fresh (empty) hand and yield again.
+    const state2 = rig(defended.state, [], { baseAttack: 5, spadesShield: 0 });
+    const res2 = ensureOk(applyAction(state2, { type: 'YIELD', playerId: state2.players[0].id }));
+
+    // 5 base + 2 (the lowest defended card, now on top of the discard pile) + 0 (banish pile empty) = 7 — not
+    // 5 + 9 = 14, which is what the pre-fix arbitrary ordering could have handed back.
+    expect(res2.state.pendingDamage).toBe(7);
   });
 });
 

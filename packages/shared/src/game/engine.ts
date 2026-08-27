@@ -568,9 +568,9 @@ function toReserveDeck(state: GameState, cards: Card[], position: 'top' | 'botto
 }
 
 /**
- * Legacy-only (Mission 4 fix): pushes `cards` onto the discard pile — the shared tail for both a covered DEFEND
- * and an enemy's played table cards on defeat (exact or overkill). When GameState.discardCleanupLowToHigh is
- * set, sorts the batch so the LOWEST-value card ends up on top (the array's last element, matching how
+ * Legacy-only (Missions 4 and 11): pushes `cards` onto the discard pile — the shared tail for both a covered
+ * DEFEND and an enemy's played table cards on defeat (exact or overkill). When GameState.discardCleanupLowToHigh
+ * is set, sorts the batch so the LOWEST-value card ends up on top (the array's last element, matching how
  * rules.ts's discardPileTopValue reads "top") instead of whatever order the caller collected them in — sourced
  * from an independent fan digital-reimplementation's rules doc's "M4+ Cleanup discard ordering: when discarding
  * played cards during cleanup, place them low-to-high, lowest value on top." A no-op wrapper (behaves exactly

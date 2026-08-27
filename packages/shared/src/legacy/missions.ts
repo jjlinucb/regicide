@@ -744,6 +744,20 @@ export const MISSIONS: Mission[] = [
     // always banishes it, never recycled or discarded"), they go to the banish pile instead of the discard pile —
     // which is exactly what keeps feeding this same mechanic forward through the rest of the fight.
     pileTopEnemyBonus: true,
+    // SOURCED FIX (playtest-confirmed, see legacy-mission-playtest-findings): a normal covered DEFEND dumps the
+    // defending player's chosen cards onto the discard pile in whatever order they were selected — the ONLY
+    // multi-card discard-pile push this mission has, since pileTopEnemyBonus (above) already routes every
+    // defeated enemy's played cards to the BANISH pile instead. Without an ordering rule, surviving a hit is
+    // exactly what hands the next attack an unpredictable, potentially large discard-pile-top bonus — the same
+    // self-reinforcing shape independently found and fixed for Mission 4's discardTopBuffsAttack. The same
+    // independent fan digital-reimplementation's rules doc documents this as a permanent rule introduced at
+    // Mission 4 ("M4+ Cleanup discard ordering: place them low-to-high, lowest value on top") that stays in
+    // effect for every later mission — including this one, which reads the identical discard-pile-top value (see
+    // GameState.discardCleanupLowToHigh / engine.ts's pushToDiscardPile). This also restores the player agency an
+    // independent player-review blog explicitly describes using in this exact mission ("banish a low card...
+    // reducing the strength of the enemy") — the low-to-high sort is what guarantees that choice actually lands
+    // on top instead of being overwritten by whichever card the player happened to select last.
+    discardCleanupLowToHigh: true,
     // Sourced correction: the reward is NOT a beast-card pick — the previously-shipped AWAIT_BEAST_REWARD_CHOICE
     // window and CHOOSE_BEAST_REWARD action (and party.ts's applyBeastCardChoice) have been removed entirely, no
     // longer reachable from anywhere. The real reward is Esme herself: freed and returned to the party permanently
