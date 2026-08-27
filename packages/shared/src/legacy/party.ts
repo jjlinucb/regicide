@@ -113,6 +113,13 @@ export interface MissionReward {
   dualClassStickers?: number;
   /** Mission 9's "second Mage sticker" reward: gives one random eligible existing party member a bonus Mage sticker (see applyMageSticker). */
   mageSticker?: boolean;
+  /**
+   * A mixed-bag reward step several missions' sourced material calls for (first implemented for Mission 5, see
+   * legacy/missions.ts): permanently corrupts one random EXISTING party member (never a card this same reward
+   * just granted — see applyCorruptAnotherCard) with SuitedCard.corrupted. Not pure upside: the card's class
+   * power(s) ignore enemy immunity from then on, but every play banishes the reserve deck's top card as a cost.
+   */
+  corruptAnotherCard?: boolean;
 }
 
 /** The "Lucky 4" ranks Dual-class Stickers target — one sticker per rank, matching the physical game's 4-sticker sheets. */
@@ -171,11 +178,28 @@ export function applyMageSticker(party: Card[]): Card[] {
   return party.map((c) => (c.id === pick.id ? { ...c, secondClassArcane: true } : c));
 }
 
-/** Adds a mission's reward — recruits, any Dual-class Stickers, and any Mage sticker — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
+/**
+ * A mixed-bag reward step (see MissionReward.corruptAnotherCard): permanently corrupts one random eligible
+ * existing party member, excluding any card id in `excludeIds` (the recruits this same reward just granted —
+ * "another" card, not the new arrival) and any card already `corrupted` or `restored` (mutually exclusive with
+ * `corrupted` — see SuitedCard.restored). A no-op if nothing is eligible.
+ */
+export function applyCorruptAnotherCard(party: Card[], excludeIds: Set<string> = new Set()): Card[] {
+  const eligible = party.filter(
+    (c) => c.kind === 'suited' && !c.corrupted && !c.restored && !excludeIds.has(c.id),
+  );
+  if (eligible.length === 0) return party;
+  const pick = eligible[Math.floor(Math.random() * eligible.length)];
+  return party.map((c) => (c.id === pick.id ? { ...c, corrupted: true } : c));
+}
+
+/** Adds a mission's reward — recruits, any Dual-class Stickers, any Mage sticker, and any corrupt-another-card effect — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
 export function applyReward(party: Card[], reward: MissionReward): Card[] {
-  let next = [...party, ...reward.recruits.map(buildRecruitCard)];
+  const newRecruits = reward.recruits.map(buildRecruitCard);
+  let next = [...party, ...newRecruits];
   if (reward.dualClassStickers) next = applyDualClassStickers(next, reward.dualClassStickers);
   if (reward.mageSticker) next = applyMageSticker(next);
+  if (reward.corruptAnotherCard) next = applyCorruptAnotherCard(next, new Set(newRecruits.map((c) => c.id)));
   return next;
 }
 

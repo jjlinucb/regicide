@@ -94,6 +94,18 @@ function zoneCompanion(name: string, suit: Suit, rank: Rank): Card {
 }
 
 /**
+ * A named one-off card seeded straight into a mission's extraReserveCards: an ordinary, drawable, playable
+ * reserve-deck card with no special zone mechanic of its own — contrast zoneCompanion above, which instead
+ * anchors a card permanently in the mission zone. Introduced for Mission 5's Myla (see GameState.rollingZoneBonus
+ * / this mission's own entry below): sourced research found she was wrongly modeled as a permanent
+ * presetMissionZone immunity fixture in the shipped version — the real rule has her as just another card in the
+ * fight's reserve deck.
+ */
+function reserveCompanion(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `reserve-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name };
+}
+
+/**
  * A named survivor card, shared by Mission 7's pilgrimCards (see GameState.pilgrimMechanic) and Mission 8's
  * ascending mission zone (see GameState.ascendingZone) — both missions independently reused "Pilgrim" as flavor
  * for stranded survivors. The `pilgrim` flag only matters to Mission 8 (placing one in its zone never buffs the
@@ -349,17 +361,22 @@ export const MISSIONS: Mission[] = [
       enemy('Elder Sporeling Wailer', 'CLERIC', 30, 15),
       enemy('Elder Sporeling Bulwark', 'PALADIN', 30, 15),
     ],
-    // Myla (value 7) sits permanently in the mission zone for the whole fight, immune to her own class the same
-    // way Mission 3's zone grants immunity — she's the zone's fixed anchor, never flipped or banished, which is
-    // what lets her still plausibly be "in the mission zone" again come Mission 6.
-    presetMissionZone: [zoneCompanion('Myla', 'H', '7')],
-    // The grove's *other* zone slot is what actually rolls: per the tutorial transcript ("a rolling mission
-    // zone/banish-pile cycle each turn feeds bonus strength to the current enemy"), a single card cycles through
-    // a second, separate slot every turn — last turn's card banished for good, a fresh one flipped in off the
-    // reserve deck to replace it, its value buffing whatever Sporeling is currently being fought (see
-    // GameState.rollingZoneBonus / engine.ts's rollMissionZoneBonusCard). Keeping this as its own slot instead of
-    // folding it into Myla's presetMissionZone is deliberate: it satisfies the transcript's "rolling... feeds
-    // bonus strength" mechanic without disturbing Myla's static presence, which Mission 6's story leans on.
+    // Myla (value 7) rides along in the reserve deck for this fight as an ordinary, drawable, playable card —
+    // NOT a permanent presetMissionZone immunity anchor the way the mission originally shipped. Sourced research
+    // (regicidelegacy.com compendium / BGG threads / a fan digital reimplementation's rules doc — see this repo's
+    // legacy-missions-transcript-mismatches memory note) found no basis for a static Hearts-immunity fixture
+    // here; she's just another reserve-deck body this mission, same shape as Mission 9/12's own one-off flavor
+    // cards (see reserveCompanion above). She only becomes a real permanent party member starting Mission 6,
+    // via this mission's reward below.
+    extraReserveCards: [reserveCompanion('Myla', 'H', '7')],
+    // The grove's rolling zone, per the tutorial transcript ("a rolling mission zone/banish-pile cycle each turn
+    // feeds bonus strength to the current enemy"): every turn, the top card of the BANISH pile recycles into the
+    // rolling zone, accumulating there — never replaced, never cleared on its own — until the next kill banishes
+    // the whole pile-up and resets it. Sourced research corrected this from the shipped "one fresh card per turn
+    // off the reserve deck, single slot, no cap" reading, which let the buff climb forever without ever
+    // shrinking (see GameState.rollingZoneBonus / engine.ts's rollMissionZoneBonusCard). The corrected version is
+    // still uncapped in principle, but bounded in practice by the banish pile's own recycling rate and reset by
+    // every kill, instead of guaranteed to grow every single turn all fight long.
     rollingZoneBonus: true,
     // An exact kill on a Sporeling bursts outward: the enemy's own base attack is dealt as splash damage
     // straight into whatever's newly revealed — occasionally strong enough to chain into a second kill. This is
@@ -367,20 +384,21 @@ export const MISSIONS: Mission[] = [
     // next fight, equal to the fallen enemy's base strength") — already covered by this existing flag, no
     // separate implementation needed.
     exactKillSplashDamage: true,
-    // Reward: the Reaver faction — 4 permanent new recruits (playing one tears the top card off the reserve
-    // deck for bonus damage, banished either way, and doubles the whole attack, stacking to quadruple with a
-    // Warrior card in the same play) — plus a second round of Dual-class Stickers, and Myla herself (value 7),
-    // who spent this whole fight locked to the mission zone as a fixed immunity and now joins the party for
-    // real: a normal, drawable, playable Cleric card from Mission 6 onward.
+    // Reward: sourced research found the shipped version over-granted here — keeping all 4 new Reaver recruits
+    // permanently, when the source (and this repo's own mission-5.md transcript note: "how to permanently retire
+    // cards from the party roster, used here to trim the new Reavers back down after the mission") keeps only
+    // rank 5 (Haror) for good. Implemented as a straight, permanent single-recruit grant rather than
+    // modeling "recruit all 4, then retire 3" as two separate steps — this campaign's reward model elsewhere
+    // (e.g. Mission 11's applyBeastCardChoice) only ever tracks the FINAL kept roster, never an intermediate
+    // grant-then-retire history, so the net effect (only Haror ends up in the permanent party) is the same either
+    // way. Also adds the sourced-but-missing "corrupt another card" effect (see party.ts's
+    // applyCorruptAnotherCard) and a second round of Dual-class Stickers. Myla (value 7) — who spent this fight
+    // as an ordinary reserve-deck card, not a mission-zone fixture (see extraReserveCards above) — now joins the
+    // party for real: a normal, drawable, playable Cleric card from Mission 6 onward.
     reward: {
-      recruits: [
-        recruit('Oaken', 'REAVER', '3', 'D'),
-        recruit('Haror', 'REAVER', '5', 'C'),
-        recruit('Vena', 'REAVER', '7', 'S'),
-        recruit('Kina', 'REAVER', '10', 'H'),
-        recruit('Myla', 'CLERIC', '7'),
-      ],
+      recruits: [recruit('Haror', 'REAVER', '5', 'C'), recruit('Myla', 'CLERIC', '7')],
       dualClassStickers: 4,
+      corruptAnotherCard: true,
     },
   },
   {

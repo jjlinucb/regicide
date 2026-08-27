@@ -344,16 +344,19 @@ export interface GameState {
    */
   exactKillSplashDamage: boolean;
   /**
-   * Legacy-only (Mission 5): when true, a single "rolling" card cycles through its own zone slot every turn —
-   * separate from `missionZone`, which here holds only Myla's static presetMissionZone seat (fixed immunity,
-   * never flipped or banished). Each turn, whatever card currently occupies `rollingZoneCard` is banished for
-   * good and a fresh one flips in off the reserve deck to replace it (see engine.ts's rollMissionZoneBonusCard),
-   * its value buffing the current enemy's attack for as long as it sits there (see resolvedEnemyAttack) — the
-   * transcript's "rolling mission-zone/banish-pile cycle each turn feeds bonus strength to the current enemy."
+   * Legacy-only (Mission 5): when true, every turn recycles the top card of the BANISH pile (not the reserve
+   * deck) into `rollingZoneCards`, where it accumulates — never replaced or re-banished on its own — until the
+   * next enemy kill (see engine.ts's rollMissionZoneBonusCard). The accumulator's combined value buffs the
+   * current enemy's attack for as long as it sits there (see resolvedEnemyAttack / rules.ts's missionZoneValueSum),
+   * and a kill banishes the whole accumulator back to the banish pile and resets it to empty (see
+   * dealDamageAndCheckDefeat) — sourced research's "accumulates ALL cards recycled from the banish pile since
+   * the last kill and sums their total value," correcting the earlier shipped "one fresh card per turn, off the
+   * reserve deck" reading. Separate from `missionZone`, which this mission no longer preset-seeds at all (Myla
+   * is an ordinary reserve-deck card here, not a zone fixture — see missions.ts's Mission 5 entry).
    */
   rollingZoneBonus: boolean;
-  /** Legacy-only (Mission 5): the card currently occupying the rolling zone slot, if any (see rollingZoneBonus). */
-  rollingZoneCard: Card | null;
+  /** Legacy-only (Mission 5): the cards currently accumulated in the rolling zone slot, if any (see rollingZoneBonus). */
+  rollingZoneCards: Card[];
   /**
    * Legacy-only (Mission 6): when true, every enemy kill permanently grows `missionZone` — the lowest-value
    * card left on the enemy's table is moved into the zone instead of the discard pile — and then Myla (the
@@ -546,9 +549,12 @@ export type GameAction =
       /** See GameState.exactKillSplashDamage. */
       exactKillSplashDamage?: boolean;
       /**
-       * Legacy-only (Mission 5): seeds GameState.missionZone/zoneImmuneSuits with a fixed set of cards at
-       * mission start — unlike Mission 3's endOfTurnZoneFlip, this zone is static for the whole mission (never
-       * flipped into, never banished on defeat) since endOfTurnZoneFlip is left unset.
+       * Legacy-only (Mission 6, also seeded by Mission 8 for its ascending chain's anchor): seeds
+       * GameState.missionZone/zoneImmuneSuits with a fixed set of cards at mission start — unlike Mission 3's
+       * endOfTurnZoneFlip, this zone is static for the whole mission (never flipped into, never banished on
+       * defeat) since endOfTurnZoneFlip is left unset. Mission 5 no longer uses this (see missions.ts's Mission
+       * 5 entry) — sourced research found Myla was wrongly modeled here as a permanent immunity anchor; she's an
+       * ordinary reserve-deck card instead.
        */
       presetMissionZone?: Card[];
       /** See GameState.rollingZoneBonus. */
@@ -674,8 +680,8 @@ export interface ClientGameState {
   missionZone: Card[];
   /** See GameState.rollingZoneBonus. */
   rollingZoneBonus: boolean;
-  /** See GameState.rollingZoneCard. Public information — it's on the table. */
-  rollingZoneCard: Card | null;
+  /** See GameState.rollingZoneCards. Public information — it's on the table. */
+  rollingZoneCards: Card[];
   /** See GameState.zoneVengeanceOnKill. */
   zoneVengeanceOnKill: boolean;
   /** See GameState.pilgrimMechanic. */

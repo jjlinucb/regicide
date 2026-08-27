@@ -231,25 +231,24 @@ function flipMissionZoneCard(state: GameState): void {
 }
 
 /**
- * Mission 5 ("High and Mighty") only: a single "rolling" card cycles through its own zone slot every turn,
- * separate from `missionZone` (which here holds only Myla's static presetMissionZone seat — a fixed immunity
- * that never flips or banishes, preserving her narrative presence across Missions 5 and 6). Whatever card
- * currently occupies the rolling slot is banished for good, and a fresh one flips in off the reserve deck to
- * replace it — its value buffs the current enemy's attack for as long as it sits there (see resolvedEnemyAttack).
+ * Mission 5 ("High and Mighty") only: every turn, the top card of the BANISH pile (not the reserve deck) recycles
+ * into `rollingZoneCards`, where it accumulates alongside whatever's already sitting there — nothing is banished
+ * or replaced here, unlike every other zone-flip in this file. The accumulator keeps growing until the next enemy
+ * kill resets it (see dealDamageAndCheckDefeat), so its rate of growth is naturally bounded by how often the
+ * banish pile actually receives fresh cards, not guaranteed every turn — sourced research's "accumulates ALL
+ * cards recycled from the banish pile since the last kill and sums their total value," correcting the earlier
+ * shipped "one fresh card per turn off the reserve deck, single-slot" reading. `missionZone` itself is untouched
+ * by this mission (Myla is an ordinary reserve-deck card, not a zone fixture — see missions.ts's Mission 5 entry).
  * Only called from advanceToNextPlayer, so a kill that lets the same player continue their turn naturally skips
  * a cycle that turn, same as flipMissionZoneCard.
  */
 function rollMissionZoneBonusCard(state: GameState): void {
   if (!state.rollingZoneBonus) return;
-  if (state.rollingZoneCard) {
-    banishCards(state, [state.rollingZoneCard]);
-  }
-  const card = state.tavernDeck.shift();
-  state.rollingZoneCard = card ?? null;
-  if (card) {
-    const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester';
-    log(state, `The mission zone cycles ${label} in — last turn's card is banished for good, and the enemy grows bolder while this one sits there.`);
-  }
+  const card = state.banishPile.pop(); // top of the banish pile
+  if (!card) return;
+  state.rollingZoneCards.push(card);
+  const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester';
+  log(state, `${label} recycles out of the banish pile into the rolling zone — the enemy grows bolder while it (and everything else piled up there) sits.`);
 }
 
 /**
@@ -769,7 +768,9 @@ export function resolvedEnemyAttack(state: GameState): number {
   let buff = 0;
   if (state.discardTopBuffsAttack) buff += discardPileTopValue(state.discardPile);
   if (state.ascendingZone) buff += ascendingZoneAttackBuff(state.missionZone);
-  if (state.rollingZoneBonus && state.rollingZoneCard) buff += cardValue(state.rollingZoneCard);
+  // Mission 5: bonus strength from every card recycled into the rolling zone since the last kill, summed
+  // together (see GameState.rollingZoneBonus / rollMissionZoneBonusCard) — not just the single most-recent one.
+  if (state.rollingZoneBonus) buff += missionZoneValueSum(state.rollingZoneCards);
   // Mission 11: bonus strength from the discard pile's AND banish pile's top cards combined (see
   // GameState.pileTopEnemyBonus / rules.ts's banishPileTopValue).
   if (state.pileTopEnemyBonus) buff += discardPileTopValue(state.discardPile) + banishPileTopValue(state.banishPile);
@@ -880,6 +881,14 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       }
       state.missionZone = [];
       state.zoneImmuneSuits = [];
+    }
+    if (state.rollingZoneBonus && state.rollingZoneCards.length > 0) {
+      // Mission 5: a kill resets the "since the last kill" accumulation window — every card recycled into the
+      // rolling zone this stretch goes back to the banish pile (available to recycle out again later), and the
+      // buff it was feeding the just-defeated enemy doesn't carry over to whatever's revealed next.
+      banishCards(state, state.rollingZoneCards);
+      state.rollingZoneCards = [];
+      log(state, 'The rolling zone is banished — its buff resets for the next foe.');
     }
     if (state.corruptedPartyEnemies) {
       // Mission 10: "Mission-zone cards go to the banish pile normally, or to the discard pile instead on an
@@ -1154,7 +1163,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.discardCleanupLowToHigh = false;
   state.exactKillSplashDamage = false;
   state.rollingZoneBonus = false;
-  state.rollingZoneCard = null;
+  state.rollingZoneCards = [];
   state.zoneVengeanceOnKill = false;
   state.pilgrimMechanic = false;
   state.pilgrimDeck = [];
@@ -1281,7 +1290,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.discardCleanupLowToHigh = action.discardCleanupLowToHigh ?? false;
   state.exactKillSplashDamage = action.exactKillSplashDamage ?? false;
   state.rollingZoneBonus = action.rollingZoneBonus ?? false;
-  state.rollingZoneCard = null;
+  state.rollingZoneCards = [];
   state.zoneVengeanceOnKill = action.zoneVengeanceOnKill ?? false;
   state.pilgrimMechanic = action.pilgrimMechanic ?? false;
   // A small, fixed set of named survivors (not shuffled) — they surface in the same narrative order every time,
@@ -2133,7 +2142,7 @@ export function createLobbyState(): GameState {
     discardCleanupLowToHigh: false,
     exactKillSplashDamage: false,
     rollingZoneBonus: false,
-    rollingZoneCard: null,
+    rollingZoneCards: [],
     zoneVengeanceOnKill: false,
     pilgrimMechanic: false,
     pilgrimDeck: [],

@@ -34,7 +34,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     discardTopBuffsAttack: state.discardTopBuffsAttack,
     missionZone: state.missionZone,
     rollingZoneBonus: state.rollingZoneBonus,
-    rollingZoneCard: state.rollingZoneCard,
+    rollingZoneCards: state.rollingZoneCards,
     zoneVengeanceOnKill: state.zoneVengeanceOnKill,
     pilgrimMechanic: state.pilgrimMechanic,
     pilgrimZone: state.pilgrimZone,

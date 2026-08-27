@@ -5,6 +5,7 @@ import { CLASS_THEME } from './classes.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs } from './missions.js';
 import {
   applyBeastCardChoice,
+  applyCorruptAnotherCard,
   applyDualClassStickers,
   applyMageSticker,
   applyReward,
@@ -1033,7 +1034,7 @@ describe('legacy: mission 4 Beast Companions (strength-copying pair) + Scarlet W
   });
 });
 
-describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone, exact-kill splash)', () => {
+describe('legacy: mission 5 mechanics (Reaver reserve-tear, rolling banish-pile zone, exact-kill splash)', () => {
   function reaverCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
     return { ...suited(suit, rank), reaver: true, ...(special ? { special: 'PLUNDER' } : {}) };
   }
@@ -1112,7 +1113,7 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone,
     expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '9')).toBe(true);
   });
 
-  it('seeds the mission zone with a fixed, static set of cards at mission start', () => {
+  it("the engine's generic presetMissionZone capability still seeds a fixed, static set of cards at mission start (no longer how Mission 5 itself uses Myla — see the mission-5 reward describe block below)", () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 20, attack: 5 };
     const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
     const state = startCrimsonMission(1, [boss], { presetMissionZone: [myla] });
@@ -1135,46 +1136,61 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone,
     expect(state.currentEnemy?.damageTaken).toBe(7); // First Sporeling's base attack (7), splashed in
   });
 
-  it("cycles a fresh card from the reserve deck into its own rolling zone slot at end of turn, without disturbing Myla's static seat", () => {
+  it('recycles the top card of the BANISH pile (not the reserve deck) into the rolling zone every turn, accumulating instead of replacing', () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
-    const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
-    let state = startCrimsonMission(1, [boss], { presetMissionZone: [myla], rollingZoneBonus: true });
+    let state = startCrimsonMission(1, [boss], { rollingZoneBonus: true });
     state = structuredClone(state);
-    state.tavernDeck = [suited('C', '4'), ...state.tavernDeck];
-    state = rig(state, [suited('D', '2')]);
-    expect(state.rollingZoneCard).toBeNull(); // nothing cycled in yet — only happens at end of turn
+    state.banishPile = [suited('C', '4'), suited('D', '2')]; // 'D'-2 is on top — popped first
+    state = rig(state, [suited('H', '3'), suited('H', '3')]); // enough hand to cover 2 turns of the 1-attack boss
+    expect(state.rollingZoneCards).toEqual([]); // nothing recycled in yet — only happens at end of turn
 
-    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    // Turn 1: yield -> AWAIT_DEFEND (solo game, live enemy attack) -> defend to trigger the end-of-turn cycle.
+    let res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
     state = res.state;
-    // Solo game: yielding with a live enemy attack goes to AWAIT_DEFEND — cover it to trigger the end-of-turn cycle.
-    const res2 = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
-    state = res2.state;
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
 
-    // The rolling slot picked up the reserve deck's top card...
-    expect(state.rollingZoneCard).toMatchObject({ suit: 'C', rank: '4' });
-    // ...while Myla's static seat in missionZone is untouched, still granting Hearts immunity.
-    expect(state.missionZone).toEqual([myla]);
-    expect(state.zoneImmuneSuits).toEqual(['H']);
+    // The rolling zone picked up the banish pile's top card ('D'-2), and the reserve deck was never touched.
+    expect(state.rollingZoneCards).toMatchObject([{ suit: 'D', rank: '2' }]);
+    expect(state.banishPile).toMatchObject([{ suit: 'C', rank: '4' }]);
+
+    // Turn 2: the 'C'-4 recycles in too, ON TOP of the 'D'-2 — accumulating, not replacing it.
+    res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.rollingZoneCards).toMatchObject([{ suit: 'D', rank: '2' }, { suit: 'C', rank: '4' }]);
+    expect(state.banishPile).toEqual([]); // the whole pile has been recycled out
   });
 
-  it("buffs the current enemy's attack by the rolling card's value, and banishes the outgoing card when a new one cycles in", () => {
+  it("buffs the current enemy's attack by the rolling zone's combined value, not just the most recent card", () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 5 };
-    const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
-    let state = startCrimsonMission(2, [boss], { presetMissionZone: [myla], rollingZoneBonus: true });
+    let state = startCrimsonMission(1, [boss], { rollingZoneBonus: true });
     state = structuredClone(state);
-    state.rollingZoneCard = suited('C', '4'); // pretend a card already cycled in on a prior turn
-    state.tavernDeck = [suited('D', '9'), ...state.tavernDeck];
-    state = rig(state, [suited('D', '9')]); // covers the buffed attack exactly
+    state.rollingZoneCards = [suited('C', '4'), suited('D', '3')]; // pretend 2 cards already accumulated
+    state = rig(state, [suited('D', '12')]); // covers the buffed attack exactly
 
     const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
     state = res.state;
-    expect(state.pendingDamage).toBe(9); // 5 base + 4 from the rolling card that was still in play this turn
-    const res2 = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
-    state = res2.state;
+    expect(state.pendingDamage).toBe(12); // 5 base + 4 + 3 from both cards still accumulated in the zone
+  });
 
-    // The 4 that just buffed the attack is now banished for good, replaced by the fresh 9.
-    expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '4')).toBe(true);
-    expect(state.rollingZoneCard).toMatchObject({ suit: 'D', rank: '9' });
+  it('an enemy kill banishes the whole rolling-zone accumulation back to the banish pile and resets it to empty', () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'H', health: 10, attack: 1 };
+    let state = startCrimsonMission(1, [boss], { rollingZoneBonus: true });
+    state = structuredClone(state);
+    state.rollingZoneCards = [suited('C', '4'), suited('D', '3')]; // accumulated across a couple of turns
+    state = rig(state, [suited('S', '10')]); // exact 10 damage, Spades doesn't double
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    expect(state.currentEnemy).toBeNull(); // no more enemies left — the mission is won
+    expect(state.rollingZoneCards).toEqual([]);
+    expect(state.banishPile).toMatchObject([{ suit: 'C', rank: '4' }, { suit: 'D', rank: '3' }]);
   });
 });
 
@@ -1253,14 +1269,25 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
   });
 });
 
-describe('legacy: mission 5 reward (Reaver faction, Myla joins the party, Dual-class Stickers)', () => {
-  it('rewards 4 Reaver recruits, Myla as a real playable Cleric card, and a second round of Dual-class Stickers', () => {
+describe('legacy: mission 5 reward (only rank-5 Reaver kept, Myla joins the party, Dual-class Stickers, corrupt-another-card)', () => {
+  it('keeps only the rank-5 Reaver recruit (Haror) permanently — not all 4 originally shipped', () => {
+    // Sourced research (regicidelegacy.com compendium / BGG threads / a fan digital reimplementation's rules
+    // doc) found the shipped version over-granted: this repo's own mission-5 transcript note ("how to
+    // permanently retire cards from the party roster, used here to trim the new Reavers back down after the
+    // mission") and the sourced material agree only rank 5 survives.
     const mission5 = getMission(5)!;
-    expect(mission5.reward.recruits.filter((r) => r.class === 'REAVER').length).toBe(4);
+    const reavers = mission5.reward.recruits.filter((r) => r.class === 'REAVER');
+    expect(reavers.length).toBe(1);
+    expect(reavers[0]).toMatchObject({ name: 'Haror', rank: '5' });
+  });
+
+  it('rewards Myla as a real playable Cleric card, a second round of Dual-class Stickers, and a corrupt-another-card effect', () => {
+    const mission5 = getMission(5)!;
     const myla = mission5.reward.recruits.find((r) => r.name === 'Myla');
     expect(myla?.class).toBe('CLERIC');
     expect(myla?.rank).toBe('7');
     expect(mission5.reward.dualClassStickers).toBe(4);
+    expect(mission5.reward.corruptAnotherCard).toBe(true);
 
     const party = applyReward(buildInitialParty(), mission5.reward);
     const mylaCard = party.find((c) => c.kind === 'suited' && c.name === 'Myla');
@@ -1269,6 +1296,39 @@ describe('legacy: mission 5 reward (Reaver faction, Myla joins the party, Dual-c
       expect(mylaCard.guardian).toBeUndefined();
       expect(mylaCard.reaver).toBeUndefined();
     }
+    // The corrupt-another-card effect landed on some existing party member, never on Myla or Haror themselves.
+    const corrupted = party.filter((c) => c.kind === 'suited' && c.corrupted);
+    expect(corrupted.length).toBe(1);
+    expect(corrupted[0].name).not.toBe('Myla');
+    expect(corrupted[0].name).not.toBe('Haror');
+  });
+
+  it("no longer anchors Myla as a permanent presetMissionZone immunity fixture — she's an ordinary reserve-deck card for the fight itself", () => {
+    const mission5 = getMission(5)!;
+    expect(mission5.presetMissionZone).toBeUndefined();
+    expect(mission5.extraReserveCards?.some((c) => c.kind === 'suited' && c.name === 'Myla' && c.suit === 'H')).toBe(true);
+  });
+});
+
+describe('legacy: applyCorruptAnotherCard (mixed-bag reward primitive)', () => {
+  it('permanently corrupts exactly one eligible existing party member', () => {
+    const party = buildInitialParty();
+    const result = applyCorruptAnotherCard(party);
+    const corrupted = result.filter((c) => c.kind === 'suited' && c.corrupted);
+    expect(corrupted.length).toBe(1);
+  });
+
+  it('never corrupts a card whose id is excluded (e.g. a recruit this same reward just granted)', () => {
+    const party = buildInitialParty();
+    const excludeIds = new Set(party.map((c) => c.id));
+    const result = applyCorruptAnotherCard(party, excludeIds);
+    expect(result).toEqual(party); // nothing eligible — every id was excluded
+  });
+
+  it('is a no-op on an already-fully-corrupted party', () => {
+    const party = buildInitialParty().map((c) => (c.kind === 'suited' ? { ...c, corrupted: true } : c));
+    const result = applyCorruptAnotherCard(party);
+    expect(result).toEqual(party);
   });
 });
 
