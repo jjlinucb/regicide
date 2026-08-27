@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, createLobbyState } from '../game/engine.js';
+import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs } from './missions.js';
@@ -151,6 +151,7 @@ describe('legacy: mission setup', () => {
     expect(mission4.discardTopBuffsAttack).toBe(true);
     expect(mission4.exactKillToReserveDeck).toBe(true);
     expect(mission4.corruptedReturnQueue).toBe(true);
+    expect(mission4.discardCleanupLowToHigh).toBe(true);
     expect(mission4.reward.relics).toEqual(['SCARLET_WHISTLE']);
     expect(mission4.reward.recruits.length).toBe(4);
     expect(mission4.reward.recruits.every((r) => r.beast)).toBe(true);
@@ -809,6 +810,102 @@ describe('legacy: mission 4 mechanics (discard-pile attack buff + exact-kill to 
 
     expect(after.tavernDeck[0]).toStrictEqual(beforeReserveTop); // reserve deck untouched
     expect(after.discardPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '9')).toBe(true);
+  });
+});
+
+describe('legacy: mission 4 discard-cleanup low-to-high ordering (sourced fix for the discard-buff spiral)', () => {
+  function startFusionMission(enemies: LegacyEnemySpec[], cleanup: boolean): GameState {
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'fusion-cleanup-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      discardTopBuffsAttack: true,
+      discardCleanupLowToHigh: cleanup,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('a covered DEFEND places the lowest-value discarded card on top, regardless of the order the player selected them in', () => {
+    const boss: LegacyEnemySpec = { name: 'Experiment', suit: 'S', health: 100, attack: 20 };
+    let state = startFusionMission([boss], true);
+    const nine = suited('H', '9');
+    const four = suited('C', '4');
+    const seven = suited('S', '7');
+    // A harmless Diamonds-2 play just opens AWAIT_DEFEND without meaningfully denting the boss's 100 health.
+    state = rig(state, [suited('D', '2'), nine, four, seven]);
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    expect(state.pendingDamage).toBe(20); // discard pile is still empty, so no buff yet
+
+    // Cover the 20 damage with all 3 remaining cards (9 + 4 + 7 = 20), selected in a scrambled order.
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [nine.id, four.id, seven.id] }));
+    state = res.state;
+
+    expect(state.discardPile.length).toBe(3);
+    const top = state.discardPile[state.discardPile.length - 1];
+    const bottom = state.discardPile[0];
+    expect(top.kind === 'suited' && top.rank).toBe('4'); // lowest of the batch, regardless of selection order
+    expect(bottom.kind === 'suited' && bottom.rank).toBe('9'); // highest goes in first
+  });
+
+  it('without the flag, a covered DEFEND preserves whatever order the cardIds were given in (pre-fix behavior)', () => {
+    const boss: LegacyEnemySpec = { name: 'Experiment', suit: 'S', health: 100, attack: 20 };
+    let state = startFusionMission([boss], false);
+    const nine = suited('H', '9');
+    const four = suited('C', '4');
+    const seven = suited('S', '7');
+    state = rig(state, [suited('D', '2'), nine, four, seven]);
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [nine.id, four.id, seven.id] }));
+    state = res.state;
+
+    // Whatever order the player selected lands in the discard pile unchanged — the LAST one selected (7) is on top.
+    expect(state.discardPile.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['9', '4', '7']);
+  });
+
+  it('an enemy kill (overkill) sorts the whole accumulated table-cards batch low-to-high, capping the next enemy\'s buff at the lowest card', () => {
+    const enemyA: LegacyEnemySpec = { name: 'Specimen A', suit: 'D', health: 30, attack: 1 };
+    const enemyB: LegacyEnemySpec = { name: 'Specimen B', suit: 'H', health: 20, attack: 10 };
+    let state = startFusionMission([enemyA, enemyB], true);
+    state = rig(state, [suited('C', '9')], { tableCards: [suited('H', '2'), suited('D', '3')], damageTaken: 25 }); // 5 health left
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    expect(state.currentEnemy?.name).toBe('Specimen B'); // Clubs doubles 9 to 18 vs 5 health left — an overkill
+    // The finishing card (9) plus the two already on the table (2, 3) all land in the discard pile, lowest on top.
+    expect(state.discardPile.length).toBe(3);
+    const top = state.discardPile[state.discardPile.length - 1];
+    expect(top.kind === 'suited' && top.rank).toBe('2');
+    // Specimen B's live attack reads only that lowest card: 10 base + 2, not the 9 that actually landed the kill.
+    expect(resolvedEnemyAttack(state)).toBe(12);
+  });
+
+  it('without the flag, the kill (overkill) preserves table-card order, so the finishing card can land on top and buff the next enemy at its worst', () => {
+    const enemyA: LegacyEnemySpec = { name: 'Specimen A', suit: 'D', health: 30, attack: 1 };
+    const enemyB: LegacyEnemySpec = { name: 'Specimen B', suit: 'H', health: 20, attack: 10 };
+    let state = startFusionMission([enemyA, enemyB], false);
+    state = rig(state, [suited('C', '9')], { tableCards: [suited('H', '2'), suited('D', '3')], damageTaken: 25 });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    // Pre-fix behavior: table cards land in play order [2, 3, 9] — the finishing (highest) card ends up on top.
+    expect(state.discardPile.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['2', '3', '9']);
+    // The next enemy inherits the worst case: +9 instead of +2 — exactly the self-reinforcing spiral the fix closes.
+    expect(resolvedEnemyAttack(state)).toBe(19);
   });
 });
 

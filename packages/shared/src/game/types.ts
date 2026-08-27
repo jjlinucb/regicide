@@ -326,6 +326,18 @@ export interface GameState {
    */
   corruptedReturnQueue: boolean;
   /**
+   * Legacy-only (Mission 4 fix): when true, any batch of 2+ cards pushed onto the discard pile during cleanup
+   * (a covered DEFEND, or an enemy's played table cards on defeat — exact or overkill) is sorted so the
+   * LOWEST-value card of that batch ends up on top (the array's last element, per rules.ts's
+   * discardPileTopValue), instead of whatever order the caller happened to collect them in. Sourced from an
+   * independent fan digital-reimplementation's rules doc: "M4+ Cleanup discard ordering: when discarding played
+   * cards during cleanup, place them low-to-high, lowest value on top." Without this, Mission 4's own
+   * discardTopBuffsAttack buff spirals toward whatever the highest card played that turn happened to leave on
+   * top — surviving a hit and finishing a kill were what handed the next enemy its own attack bonus, confirmed
+   * unwinnable in simulated play (see engine.ts's pushToDiscardPile).
+   */
+  discardCleanupLowToHigh: boolean;
+  /**
    * Legacy-only (Mission 5): when true, an exact-damage kill bursts outward — the defeated enemy's own base
    * attack is dealt as splash damage straight into whatever's newly revealed at the top of the enemy deck
    * (which can itself chain into a further kill; see engine.ts's dealDamageAndCheckDefeat).
@@ -529,6 +541,8 @@ export type GameAction =
       exactKillToReserveDeck?: boolean;
       /** See GameState.corruptedReturnQueue. */
       corruptedReturnQueue?: boolean;
+      /** See GameState.discardCleanupLowToHigh. */
+      discardCleanupLowToHigh?: boolean;
       /** See GameState.exactKillSplashDamage. */
       exactKillSplashDamage?: boolean;
       /**

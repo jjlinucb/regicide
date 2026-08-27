@@ -557,6 +557,27 @@ function toReserveDeck(state: GameState, cards: Card[], position: 'top' | 'botto
 }
 
 /**
+ * Legacy-only (Mission 4 fix): pushes `cards` onto the discard pile — the shared tail for both a covered DEFEND
+ * and an enemy's played table cards on defeat (exact or overkill). When GameState.discardCleanupLowToHigh is
+ * set, sorts the batch so the LOWEST-value card ends up on top (the array's last element, matching how
+ * rules.ts's discardPileTopValue reads "top") instead of whatever order the caller collected them in — sourced
+ * from an independent fan digital-reimplementation's rules doc's "M4+ Cleanup discard ordering: when discarding
+ * played cards during cleanup, place them low-to-high, lowest value on top." A no-op wrapper (behaves exactly
+ * like `state.discardPile.push(...)`) for every mission that doesn't set the flag, or for a single-card push
+ * (nothing to order), same shape as banishCards/toReserveDeck above.
+ */
+function pushToDiscardPile(state: GameState, cards: Card[]): void {
+  if (cards.length === 0) return;
+  if (!state.discardCleanupLowToHigh || cards.length === 1) {
+    state.discardPile.push(...cards);
+    return;
+  }
+  // Descending by value: the highest card is pushed first, the lowest last — so the lowest ends up on top.
+  const ordered = [...cards].sort((a, b) => cardValue(b) - cardValue(a));
+  state.discardPile.push(...ordered);
+}
+
+/**
  * Pays a corrupted card's (or, via corruptedReturnQueue, a corrupted enemy's) cost: normally banishes the top of
  * the reserve deck (see SuitedCard.corrupted / EnemyState.corrupted). With Mission 9's 'EVERGREEN_MOTHER' relic
  * in play, the cost changes to another player banishing a card from their own hand instead — in solo play (no
@@ -989,7 +1010,7 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
     // own three-step cleanup (see the restoredCardMechanic block above for step one, and just below for step three).
     banishCards(state, enemy.tableCards);
   } else {
-    state.discardPile.push(...enemy.tableCards);
+    pushToDiscardPile(state, enemy.tableCards);
   }
   if (state.ruleset === 'legacy' && state.restoredCardMechanic) {
     // Mission 12's cleanup, step three: banish the ENTIRE discard pile too — order preserved, right after the
@@ -1130,6 +1151,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.discardTopBuffsAttack = false;
   state.exactKillToReserveDeck = false;
   state.corruptedReturnQueue = false;
+  state.discardCleanupLowToHigh = false;
   state.exactKillSplashDamage = false;
   state.rollingZoneBonus = false;
   state.rollingZoneCard = null;
@@ -1256,6 +1278,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.discardTopBuffsAttack = action.discardTopBuffsAttack ?? false;
   state.exactKillToReserveDeck = action.exactKillToReserveDeck ?? false;
   state.corruptedReturnQueue = action.corruptedReturnQueue ?? false;
+  state.discardCleanupLowToHigh = action.discardCleanupLowToHigh ?? false;
   state.exactKillSplashDamage = action.exactKillSplashDamage ?? false;
   state.rollingZoneBonus = action.rollingZoneBonus ?? false;
   state.rollingZoneCard = null;
@@ -1784,7 +1807,7 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
 
   const idSet = new Set(action.cardIds);
   player.hand = player.hand.filter((c) => !idSet.has(c.id));
-  state.discardPile.push(...cards);
+  pushToDiscardPile(state, cards);
 
   if (discardTotal < state.pendingDamage && !feignDeath) {
     state.phase = 'LOST';
@@ -2107,6 +2130,7 @@ export function createLobbyState(): GameState {
     discardTopBuffsAttack: false,
     exactKillToReserveDeck: false,
     corruptedReturnQueue: false,
+    discardCleanupLowToHigh: false,
     exactKillSplashDamage: false,
     rollingZoneBonus: false,
     rollingZoneCard: null,

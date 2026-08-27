@@ -352,6 +352,7 @@ export class RoomManager {
       discardTopBuffsAttack: mission.discardTopBuffsAttack,
       exactKillToReserveDeck: mission.exactKillToReserveDeck,
       corruptedReturnQueue: mission.corruptedReturnQueue,
+      discardCleanupLowToHigh: mission.discardCleanupLowToHigh,
       exactKillSplashDamage: mission.exactKillSplashDamage,
       presetMissionZone: mission.presetMissionZone,
       rollingZoneBonus: mission.rollingZoneBonus,

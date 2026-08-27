@@ -34,6 +34,8 @@ export interface Mission {
   exactKillToReserveDeck?: boolean;
   /** See GameState.corruptedReturnQueue. */
   corruptedReturnQueue?: boolean;
+  /** See GameState.discardCleanupLowToHigh. */
+  discardCleanupLowToHigh?: boolean;
   /** See GameState.exactKillSplashDamage. */
   exactKillSplashDamage?: boolean;
   /** See GameState.START_LEGACY_MISSION action's presetMissionZone. */
@@ -288,10 +290,18 @@ export const MISSIONS: Mission[] = [
     // The mission's key mechanic: whatever card currently sits on top of the discard pile adds its value
     // straight onto the active experiment's attack, recalculated live all the way through the turn — a Cleric
     // heal reshuffling the pile mid-turn can change the number before it's even resolved.
+    //
+    // SOURCED FIX (playtest-confirmed unwinnable without it — see legacy-mission-playtest-findings): both a
+    // normal DEFEND discard and any enemy kill (exact or overkill) dump cards straight onto this same discard
+    // pile, so surviving a hit and finishing a kill are exactly what hand the NEXT experiment its own attack
+    // bonus — self-reinforcing regardless of strategy or player count, confirmed unwinnable in simulated play.
+    // An independent fan digital-reimplementation's rules doc documents a permanent rule introduced at this
+    // mission ("M4+ Cleanup discard ordering: when discarding played cards during cleanup, place them
+    // low-to-high, lowest value on top") that is exactly the missing piece — see discardCleanupLowToHigh below.
     discardTopBuffsAttack: true,
     // An exact kill seals the specimen's card atop the reserve deck instead of the discard pile; any other
-    // kill sends the played cards to the discard pile as normal, in the order the attacker chose to play them
-    // — letting the party bury their high cards and leave a low one on top to blunt the next buff.
+    // kill still sends the played cards to the discard pile as normal — see discardCleanupLowToHigh for the
+    // ordering fix that now governs exactly how "as normal" is defined.
     exactKillToReserveDeck: true,
     // The transcript's other named mechanic: a defeated specimen doesn't stay gone — it rejoins the back of the
     // fight queue corrupted, following the same rule an ordinary corrupted party card does (ignores immunity,
@@ -299,6 +309,12 @@ export const MISSIONS: Mission[] = [
     // version never had this at all; a 12-enemy mission could in principle grow past 12 fights if every specimen
     // requeues once, which is exactly the transcript's intent.
     corruptedReturnQueue: true,
+    // SOURCED FIX, cited above: an independent fan digital-reimplementation's rules doc's "M4+ Cleanup discard
+    // ordering" rule — cards discarded during cleanup (both a covered DEFEND and an enemy kill's played cards)
+    // are placed low-to-high, so the LOWEST-value card of that batch ends up on top of the discard pile (see
+    // GameState.discardCleanupLowToHigh / engine.ts's pushToDiscardPile), instead of an arbitrary order that let
+    // the highest card played land on top and hand discardTopBuffsAttack its own worst-case buff right back.
+    discardCleanupLowToHigh: true,
     // Reward: two relics, not the Mage/Cleric recruits the shipped version originally granted here. Beast
     // Companions (x4) play by the same Animal Companion pairing rule but copy the paired card's strength instead
     // of contributing their own flat value (see rules.ts's validatePlayShape); the Scarlet Whistle then extends
