@@ -719,13 +719,6 @@ button {
   cursor: default;
 }
 
-.kinfolk-slot-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
 .kinfolk-include-toggle {
   display: flex;
   align-items: center;
