@@ -221,8 +221,8 @@ function LegacyTab() {
             </li>
             <li>
               <strong>The Jester</strong> works differently here: play it into the middle of the table, and any
-              player — including you — may silently claim it and take over the turn, ignoring that enemy's immunity
-              entirely.
+              player — including you — may claim it. Claiming resolves as a free 8-strength attack in a class of
+              your choosing, ignoring that enemy's immunity, then discards your hand and deals you a fresh one.
             </li>
             <li>Multi-card attacks (Kinfolk and Animal) resolve every class power once, at the combined strength.</li>
             <li>Communication rules are the same as classic Regicide — no hinting at your hand.</li>
@@ -242,8 +242,8 @@ function LegacyTab() {
         <section className="rules-section rules-callout">
           <h2>Solo Play</h2>
           <p>
-            Solo, you run a single 8-card hand. Twice per mission you may play a Jester on its own — always for 8
-            strength, in a class of your choosing, ignoring enemy immunity — instead of playing from your hand.
+            Solo, you run a single 8-card hand. With no one else at the table, every Jester you draw is effectively
+            yours alone to claim whenever it turns up.
           </p>
         </section>
       </div>

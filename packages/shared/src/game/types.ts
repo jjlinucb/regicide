@@ -194,6 +194,12 @@ export interface PlayerState {
   name: string;
   hand: Card[];
   connected: boolean;
+  /**
+   * Legacy-only, gated by the 'KINFOLK_FLUTE' relic: one card (value 2-5) this player has banked out of hand
+   * onto their personal Kinfolk slot, held for as long as they like until a matching-rank hand card lets them
+   * play the two together as a combo (see engine.ts's PLAY_CARDS's includeKinfolkSlot). Null when empty.
+   */
+  kinfolkSlot: Card | null;
 }
 
 export interface EnemyState {
@@ -310,8 +316,8 @@ export interface GameState {
   /** Set once on WON, only for 1-player games, based on soloJestersUsed at that moment. */
   victoryMedal: VictoryMedal | null;
   /**
-   * Legacy-only: the open Jester-claim window. Non-null from PLAY_JESTER until the claimant's
-   * combined attack resolves. `claimedBy` is null while the window is open to any player.
+   * Legacy-only: the open Jester-claim window. Non-null from PLAY_JESTER until CLAIM_JESTER resolves it.
+   * `claimedBy` is null while the window is open to any player.
    */
   jesterClaim: { card: Card; claimedBy: string | null } | null;
   /** Classic Regicide only: 0 until the first WON, then increments each time Endless Mode is continued into a new round (Kings join the deck, enemies scale up). */
@@ -333,11 +339,19 @@ export interface GameState {
   /** Legacy-only: relic ids the campaign has earned and carries into every mission (e.g. 'KINFOLK_FLUTE'). */
   relics: string[];
   /**
-   * Legacy-only, gated by the 'KINFOLK_FLUTE' relic: the open combo-assist window. Non-null from the moment a
-   * player commits cards to an attack (with room left in the combo) until it's resolved — any other player may
-   * silently add one matching card via ASSIST_COMBO before the attacker calls RESOLVE_COMBO.
+   * Legacy-only, gated by the 'SCARLET_WHISTLE' relic: the open combo-assist window. Non-null from the moment a
+   * player attacks alone with a lone Animal/Beast Companion until it's resolved — any other player may silently
+   * add one card via ASSIST_COMBO before the attacker calls RESOLVE_COMBO. The 'KINFOLK_FLUTE' relic used to
+   * share this window too, but was reworked into each player's own persistent kinfolkSlot instead (sourced fix —
+   * see PlayerState.kinfolkSlot / BANK_KINFOLK_CARD), so it no longer opens this window at all.
    */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
+  /**
+   * Legacy-only, gated by the 'KINFOLK_FLUTE' relic: true once the current player has already banked a card
+   * onto their kinfolkSlot this turn (see BANK_KINFOLK_CARD) — at most one bank per turn, even if the slot was
+   * emptied again by playing it into a combo. Reset to false every time a new turn begins.
+   */
+  kinfolkBankedThisTurn: boolean;
   /**
    * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic, sourced fix (see legacy-missions-transcript-
    * mismatches.md): the open Azure Emblem window — opened whenever a play includes a Mage card. The Mage's OWN
@@ -670,8 +684,17 @@ export type GameAction =
    * `chosenSuits` resolves any Mercenary any-suit Ace among `cardIds` (see SuitedCard.wildSuit) — cardId -> one
    * of the 4 base suits, required for every wildSuit card in the play, validated and applied (mutating that
    * card's `suit`) before validatePlayShape ever reads it. Omitted/empty when no wildSuit card is being played.
+   * `includeKinfolkSlot` (Legacy only, gated by 'KINFOLK_FLUTE'): fold the player's own banked kinfolkSlot card
+   * into this play as an extra combo card — the combined hand cards + slot card must still validate as one
+   * ordinary same-rank combo (see engine.ts's playCards). The slot is cleared on success.
    */
-  | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[]; chosenSuits?: Record<string, Suit> }
+  | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[]; chosenSuits?: Record<string, Suit>; includeKinfolkSlot?: boolean }
+  /**
+   * Legacy-only, gated by the 'KINFOLK_FLUTE' relic: banks one hand card (value 2-5) onto the player's own
+   * kinfolkSlot instead of attacking — a free side-action alongside (not instead of) their normal turn, capped
+   * at once per turn and only while the slot is empty (see GameState.kinfolkBankedThisTurn).
+   */
+  | { type: 'BANK_KINFOLK_CARD'; playerId: string; cardId: string }
   | { type: 'YIELD'; playerId: string }
   /** Legacy-only (Mission 8): places a card from hand into the ascending mission zone instead of attacking — ends the turn like a Yield, but progresses the chain (see GameState.ascendingZone). */
   | { type: 'PLACE_IN_ZONE'; playerId: string; cardId: string }
@@ -686,16 +709,24 @@ export type GameAction =
   | { type: 'ACTIVATE_JESTER'; playerId: string; cardId: string; nextPlayerId: string }
   /** Legacy-only equivalent of ACTIVATE_JESTER: plays the Jester into the open claim window instead of choosing who goes next. */
   | { type: 'PLAY_JESTER'; playerId: string; cardId: string }
-  /** Legacy-only: claim an open Jester window. Validated against the window being open, not turn ownership — any player may claim. */
-  | { type: 'CLAIM_JESTER'; playerId: string }
   /**
-   * Legacy-only, gated by the 'KINFOLK_FLUTE' relic: silently add a matching card from hand to the open
-   * combo-assist window. Any player except the attacker. `chosenSuit` resolves `cardId` if it's a Mercenary
-   * any-suit Ace (see SuitedCard.wildSuit / PLAY_CARDS's chosenSuits) — this window can open on a lone
-   * Companion-pairing play (see engine.ts's assistCombo), which reads the assisting card's suit too.
+   * Legacy-only: claim an open Jester window. Validated against the window being open, not turn ownership — any
+   * player may claim (or Mission 2's jesterClaimNextPlayerOnly restricts it to whoever's turn is next). Resolves
+   * immediately and atomically as its own attack: an 8-strength play in `attackSuit`, ignoring the enemy's
+   * immunity, followed by the claimant discarding their whole hand and drawing a fresh one — the base game's own
+   * printed Jester power, which Legacy never overrides (deliberate house rule; see engine.ts's claimJester —
+   * unsourced beyond the base game's own printed card text, since Mission 2's compendium page isn't published
+   * yet, but confirmed against footage of actual play).
+   */
+  | { type: 'CLAIM_JESTER'; playerId: string; attackSuit: Suit }
+  /**
+   * Legacy-only, gated by the 'SCARLET_WHISTLE' relic: silently add a card from hand to the open combo-assist
+   * window. Any player except the attacker. `chosenSuit` resolves `cardId` if it's a Mercenary any-suit Ace (see
+   * SuitedCard.wildSuit / PLAY_CARDS's chosenSuits) — this window can open on a lone Companion-pairing play (see
+   * engine.ts's assistCombo), which reads the assisting card's suit too.
    */
   | { type: 'ASSIST_COMBO'; playerId: string; cardId: string; chosenSuit?: Suit }
-  /** Legacy-only, gated by the 'KINFOLK_FLUTE' relic: the attacker locks in and resolves the open combo-assist window. */
+  /** Legacy-only, gated by the 'SCARLET_WHISTLE' relic: the attacker locks in and resolves the open combo-assist window. */
   | { type: 'RESOLVE_COMBO'; playerId: string }
   /**
    * Legacy-only, gated by the 'AZURE_EMBLEM' relic: the attacking player in an open Azure Emblem window (see
@@ -743,6 +774,8 @@ export interface ClientPlayerView {
   connected: boolean;
   handCount: number;
   hand?: Card[]; // present only for the viewing player
+  /** See PlayerState.kinfolkSlot. Public information — it sits on the shared relic, visible to the whole table. */
+  kinfolkSlot: Card | null;
 }
 
 export interface ClientGameState {
@@ -770,6 +803,10 @@ export interface ClientGameState {
   playerCourtTier: number;
   /** See GameState.comboAssist. */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
+  /** Legacy-only: relic ids the campaign has earned (e.g. 'KINFOLK_FLUTE', 'SCARLET_WHISTLE'). Public information. */
+  relics: string[];
+  /** See GameState.kinfolkBankedThisTurn. */
+  kinfolkBankedThisTurn: boolean;
   /** See GameState.azureEmblemWindow. Public information — it's on the table. */
   azureEmblemWindow: { pendingPlayerIds: string[]; eligibleCardIds: string[]; blockNextAttack: boolean } | null;
   /** See GameState.discardTopBuffsAttack. */

@@ -185,10 +185,15 @@ export const MISSIONS: Mission[] = [
     // adding-a-recruit beats the transcript shows are likewise just the existing SuitedCard.corrupted mechanic
     // and an ordinary mission reward — nothing mission-1-specific to add.
     exactKillToReserveDeck: true,
-    // Reward: the Kinfolk Flute relic only — once a player commits cards to an attack, any other player may
-    // silently slip in a matching card from hand to help complete the combo, no discussion allowed. (The
-    // transcript names no recruit reward for this mission — the two basic recruits the shipped version invented
-    // here are dropped.)
+    // Reward: the Kinfolk Flute relic only — each player gets a personal storage slot on the flute, and may bank
+    // one hand card worth 2-5 onto it (once per turn, a free side-action alongside their normal play). It sits
+    // there for as long as needed until a matching-rank hand card lets them play the two together as a combo
+    // (see engine.ts's BANK_KINFOLK_CARD / PLAY_CARDS's includeKinfolkSlot). Sourced correction: the shipped
+    // version instead had another player silently slip in a matching card to help complete someone else's combo
+    // — which did nothing at all in solo play (no one else at the table to help) and isn't what a fan digital
+    // reimplementation's own rules doc describes ("store a card... once per turn. Cards on the flute can be
+    // included in combos") — see the legacy-missions-transcript-mismatches memory doc. (The transcript names no
+    // recruit reward for this mission — the two basic recruits the shipped version invented here are dropped.)
     reward: {
       recruits: [],
       relics: ['KINFOLK_FLUTE'],
@@ -338,9 +343,10 @@ export const MISSIONS: Mission[] = [
     discardCleanupLowToHigh: true,
     // Reward: two relics, not the Mage/Cleric recruits the shipped version originally granted here. Beast
     // Companions (x4) play by the same Animal Companion pairing rule but copy the paired card's strength instead
-    // of contributing their own flat value (see rules.ts's validatePlayShape); the Scarlet Whistle then extends
-    // Mission 1's Kinfolk Flute silent-assist window to a lone Animal/Beast Companion attack (see engine.ts's
-    // playCards' scarletAssist).
+    // of contributing their own flat value (see rules.ts's validatePlayShape); the Scarlet Whistle then opens the
+    // same silent multiplayer combo-assist window (see GameState.comboAssist) to a lone Animal/Beast Companion
+    // attack — the window Mission 1's Kinfolk Flute used to share before being reworked into each player's own
+    // personal storage slot instead (see engine.ts's playCards' scarletAssist).
     reward: {
       recruits: [
         beastRecruit('Fennow', 'WARRIOR', 'A', 'C'),

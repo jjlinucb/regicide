@@ -48,28 +48,48 @@ export function GamePage({
   // A Mercenary any-suit Ace (see SuitedCard.wildSuit) needs a suit picked client-side before it can be played
   // or assisted with — cardId -> the player's choice, submitted alongside PLAY_CARDS/ASSIST_COMBO.
   const [chosenSuits, setChosenSuits] = useState<Record<string, Suit>>({});
+  // Kinfolk Flute: whether to fold the player's own banked slot card into this play (see PLAY_CARDS's includeKinfolkSlot).
+  const [includeKinfolkSlot, setIncludeKinfolkSlot] = useState(false);
 
   useEffect(() => {
     setSelectedIds(new Set());
     setChosenSuits({});
+    setIncludeKinfolkSlot(false);
   }, [state.currentPlayerIndex, state.turnPhase]);
 
   const me = state.players.find((p) => p.id === myPlayerId);
   const myHand = me?.hand ?? [];
   const isMyTurn = state.players[state.currentPlayerIndex]?.id === myPlayerId;
   const selectedCards = myHand.filter((c) => selectedIds.has(c.id));
-  const selectedTotal = selectedCards.reduce((sum, c) => sum + cardValue(c), 0);
   const isLoneJester = selectedCards.length === 1 && selectedCards[0].kind === 'jester';
   const unresolvedWildCard = selectedCards.find((c) => c.kind === 'suited' && c.wildSuit && !chosenSuits[c.id]);
+
+  // Kinfolk Flute: a personal storage slot, gated on the relic actually being earned.
+  const hasKinfolkFlute = state.relics.includes('KINFOLK_FLUTE');
+  const myKinfolkSlot = me?.kinfolkSlot ?? null;
+  const canBankKinfolk =
+    hasKinfolkFlute &&
+    isMyTurn &&
+    state.turnPhase === 'AWAIT_PLAY' &&
+    !myKinfolkSlot &&
+    !state.kinfolkBankedThisTurn &&
+    selectedCards.length === 1 &&
+    selectedCards[0].kind === 'suited' &&
+    cardValue(selectedCards[0]) >= 2 &&
+    cardValue(selectedCards[0]) <= 5;
+
+  // Folds the banked Kinfolk slot card into the local preview/validation whenever the player has it toggled on.
+  const previewCards = includeKinfolkSlot && myKinfolkSlot ? [...selectedCards, myKinfolkSlot] : selectedCards;
+  const selectedTotal = previewCards.reduce((sum, c) => sum + cardValue(c), 0);
 
   const playError = useMemo(() => {
     if (selectedCards.length === 0 || isLoneJester) return null;
     if (state.turnPhase === 'AWAIT_PLAY' && unresolvedWildCard) {
       return 'Choose a suit for the any-suit Ace before playing it.';
     }
-    const shape = validatePlayShape(selectedCards, state.endlessLoop);
+    const shape = validatePlayShape(previewCards, state.endlessLoop);
     return 'error' in shape ? shape.error : null;
-  }, [selectedCards, isLoneJester, state.turnPhase, state.endlessLoop, unresolvedWildCard]);
+  }, [previewCards, selectedCards, isLoneJester, state.turnPhase, state.endlessLoop, unresolvedWildCard]);
 
   function toggleCard(cardId: string) {
     setSelectedIds((prev) => {
@@ -173,8 +193,8 @@ export function GamePage({
           {state.endlessLoop > 0 && <span className="endless-badge" title="Endless Mode round">♛ Round {state.endlessLoop}</span>}
           {isComboAssistWindow
             ? isComboAttacker
-              ? 'Your attack is open for the Kinfolk Flute — resolve it when ready.'
-              : 'An attack is open for the Kinfolk Flute — silently add a matching card, or leave it alone.'
+              ? 'Your attack is open for the Scarlet Whistle — resolve it when ready.'
+              : 'An attack is open for the Scarlet Whistle — silently add a matching card, or leave it alone.'
             : isAzureEmblemWindow
               ? isMyAzureEmblemTurn
                 ? 'Azure Emblem: bank one of your Mage card(s) onto the reserve deck, or decline.'
@@ -215,26 +235,35 @@ export function GamePage({
             </button>
           )}
         </div>
-        {isLegacy && state.jesterClaim && !state.jesterClaim.claimedBy && (
+        {isLegacy && state.jesterClaim && (
           <div className="legacy-jester-claim-banner">
-            <span>🃏 A Jester is up for grabs — any player may claim it and attack, ignoring this enemy's immunity!</span>
-            <button type="button" className="btn" onClick={() => sendAction({ type: 'CLAIM_JESTER', playerId: myPlayerId })}>
-              Claim it
-            </button>
+            <span>🃏 A Jester is up for grabs — claim it for a free 8-strength attack, ignoring this enemy's immunity, then refill your hand. Pick a class:</span>
+            <div className="jester-picker-choices">
+              {(Object.keys(SUIT_LABEL) as Suit[]).map((suit) => (
+                <button
+                  key={suit}
+                  type="button"
+                  className="btn"
+                  onClick={() => sendAction({ type: 'CLAIM_JESTER', playerId: myPlayerId, attackSuit: suit })}
+                >
+                  {SUIT_LABEL[suit]}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {isComboAssistWindow && (
           <div className="legacy-jester-claim-banner">
             {isComboAttacker ? (
               <>
-                <span>🎵 Kinfolk Flute: your attack is open — anyone else may silently add a matching card before you resolve it.</span>
+                <span>🎗️ Scarlet Whistle: your attack is open — anyone else may silently add a matching card before you resolve it.</span>
                 <button type="button" className="btn" onClick={() => sendAction({ type: 'RESOLVE_COMBO', playerId: myPlayerId })}>
                   Resolve attack
                 </button>
               </>
             ) : (
               <span>
-                🎵 Kinfolk Flute: {state.players.find((p) => p.id === state.comboAssist!.attackerId)?.name} committed an attack —
+                🎗️ Scarlet Whistle: {state.players.find((p) => p.id === state.comboAssist!.attackerId)?.name} committed an attack —
                 pick a matching card from your hand below to silently add it, or leave it alone.
               </span>
             )}
@@ -290,6 +319,26 @@ export function GamePage({
             >
               🃏 Flip Jester ({MAX_SOLO_JESTERS - state.soloJestersUsed} left)
             </button>
+          )}
+          {hasKinfolkFlute && (
+            <span className="kinfolk-slot-status" title="A personal storage slot: bank one hand card worth 2-5, once per turn, then play it alongside a matching-rank card later.">
+              🎵{' '}
+              {myKinfolkSlot
+                ? `Kinfolk slot: ${myKinfolkSlot.kind === 'suited' ? myKinfolkSlot.name ?? `the ${myKinfolkSlot.rank}` : ''}`
+                : 'Kinfolk slot: empty'}
+              {canBankKinfolk && (
+                <button
+                  type="button"
+                  className="btn-solo-jester"
+                  onClick={() => {
+                    sendAction({ type: 'BANK_KINFOLK_CARD', playerId: myPlayerId, cardId: selectedCards[0].id });
+                    setSelectedIds(new Set());
+                  }}
+                >
+                  Bank it
+                </button>
+              )}
+            </span>
           )}
         </div>
         <Hand
@@ -461,6 +510,16 @@ export function GamePage({
       )}
 
       {isMyTurn &&
+        myKinfolkSlot &&
+        state.turnPhase === 'AWAIT_PLAY' &&
+        selectedCards.length > 0 && (
+          <label className="kinfolk-include-toggle">
+            <input type="checkbox" checked={includeKinfolkSlot} onChange={(e) => setIncludeKinfolkSlot(e.target.checked)} />
+            Play alongside your Kinfolk slot card ({myKinfolkSlot.kind === 'suited' ? myKinfolkSlot.name ?? `the ${myKinfolkSlot.rank}` : ''})
+          </label>
+        )}
+
+      {isMyTurn &&
         !isComboAssistWindow &&
         !isAzureEmblemWindow &&
         !isZoneVengeanceWindow &&
@@ -485,9 +544,11 @@ export function GamePage({
                 playerId: myPlayerId,
                 cardIds: selectedCards.map((c) => c.id),
                 chosenSuits: Object.keys(chosenSuits).length > 0 ? chosenSuits : undefined,
+                includeKinfolkSlot: includeKinfolkSlot || undefined,
               });
               setSelectedIds(new Set());
               setChosenSuits({});
+              setIncludeKinfolkSlot(false);
             }}
             onYield={() => sendAction({ type: 'YIELD', playerId: myPlayerId })}
             onDefend={() => {

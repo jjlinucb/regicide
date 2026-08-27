@@ -1,4 +1,4 @@
-import type { Card, CapturedPile, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit } from './types.js';
+import type { Card, CapturedPile, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit, SuitedCard } from './types.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,
@@ -163,6 +163,7 @@ function finishAdvanceToNextPlayer(state: GameState, idleYield = false): void {
   state.pendingDamage = 0;
   state.turnPhase = 'AWAIT_PLAY';
   state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
+  state.kinfolkBankedThisTurn = false;
   flipMissionZoneCard(state);
   rollMissionZoneBonusCard(state);
   flipStartOfTurnZoneCard(state);
@@ -1202,6 +1203,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
     name: action.playerNames[i],
     hand: [],
     connected: true,
+    kinfolkSlot: null,
   }));
 
   for (const player of players) {
@@ -1234,6 +1236,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.exactKillOnly = false;
   state.relics = [];
   state.comboAssist = null;
+  state.kinfolkBankedThisTurn = false;
   state.azureEmblemWindow = null;
   state.endOfTurnZoneFlip = false;
   state.missionZone = [];
@@ -1325,6 +1328,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
     name: action.playerNames[i],
     hand: [],
     connected: true,
+    kinfolkSlot: null,
   }));
 
   for (const player of players) {
@@ -1357,6 +1361,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.exactKillOnly = action.exactKillOnly ?? false;
   state.relics = action.relics ?? [];
   state.comboAssist = null;
+  state.kinfolkBankedThisTurn = false;
   state.azureEmblemWindow = null;
   state.endOfTurnZoneFlip = action.endOfTurnZoneFlip ?? false;
   state.missionZone = action.presetMissionZone ?? [];
@@ -1464,7 +1469,8 @@ function startEndlessRound(state: GameState): EngineResult {
 /**
  * Resolves a play already committed to the enemy's table (cards moved out of hand, already in tableCards):
  * class powers, damage, and the resulting AWAIT_DEFEND/turn-advance. Shared by the immediate PLAY_CARDS path
- * and by RESOLVE_COMBO, once an open Kinfolk Flute assist window is locked in.
+ * (including a Kinfolk Flute combo card folded in), by RESOLVE_COMBO once an open Scarlet Whistle assist window
+ * is locked in, and by claimJester's synthetic 8-strength Jester attack.
  */
 function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null): EngineResult {
   const shape = validatePlayShape(cards, state.endlessLoop);
@@ -1706,58 +1712,85 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
   const wildSuitErr = applyChosenSuits(cards, action.chosenSuits);
   if (wildSuitErr) return fail(wildSuitErr);
 
-  const shape = validatePlayShape(cards, state.endlessLoop);
-  if ('error' in shape) return fail(shape.error);
+  // Kinfolk Flute: fold the player's own banked slot card into this play as an extra combo card — pulled back
+  // out of storage the instant it helps complete a valid same-rank combo (see PlayerState.kinfolkSlot). Never a
+  // standalone play of just the slot card; a real hand card must still be played alongside it.
+  let kinfolkCard: Card | null = null;
+  if (action.includeKinfolkSlot) {
+    if (!state.relics.includes('KINFOLK_FLUTE')) return fail('The Kinfolk Flute has not been earned yet.');
+    if (!player.kinfolkSlot) return fail('Your Kinfolk slot is empty.');
+    if (cards.length === 0) return fail('Play at least one hand card alongside your Kinfolk Flute card.');
+    kinfolkCard = player.kinfolkSlot;
+  }
+  const shapeCards = kinfolkCard ? [...cards, kinfolkCard] : cards;
 
-  const claimedJester =
-    state.ruleset === 'legacy' && state.jesterClaim?.claimedBy === player.id ? state.jesterClaim.card : null;
+  const shape = validatePlayShape(shapeCards, state.endlessLoop);
+  if ('error' in shape) return fail(kinfolkCard ? `That doesn't combo with your Kinfolk Flute card: ${shape.error}` : shape.error);
 
   // Remove played cards from hand, move to the enemy's table pile for this fight.
   const idSet = new Set(action.cardIds);
   player.hand = player.hand.filter((c) => !idSet.has(c.id));
   state.currentEnemy!.tableCards.push(...cards);
-  if (claimedJester) {
-    state.currentEnemy!.tableCards.push(claimedJester);
-    state.jesterClaim = null;
+  if (kinfolkCard) {
+    state.currentEnemy!.tableCards.push(kinfolkCard);
+    player.kinfolkSlot = null;
+    log(state, `${player.name} pulls the banked card off the Kinfolk Flute to complete the combo.`);
   }
 
-  // Kinfolk Flute (Mission 1): with room left in the combo (fewer than 4 cards, total under 10) and no claimed
-  // Jester complicating things, open an assist window instead of resolving immediately — any other player may
-  // silently add one matching card before the attacker calls RESOLVE_COMBO.
-  const kinfolkAssist =
-    state.relics.includes('KINFOLK_FLUTE') &&
-    cards.every((c) => c.kind === 'suited') &&
-    cards.length < 4 &&
-    shape.totalValue < 10;
-
-  // Scarlet Whistle (Mission 4): the same silent-assist window, opened instead whenever a lone Animal or Beast
-  // Companion is played alone — any other player may silently add one card from hand to help the attack, which
-  // then resolves as a normal companion pairing (see rules.ts's validatePlayShape / RESOLVE_COMBO reusing the
-  // same resolveCommittedPlay path Kinfolk Flute's window already uses).
+  // Scarlet Whistle (Mission 4): playing a lone Animal/Beast Companion opens a silent-assist window instead of
+  // resolving immediately — any other player may add one card from hand before the attacker calls RESOLVE_COMBO
+  // (see assistCombo/resolveComboAssist, reusing the same resolveCommittedPlay path below). Moot whenever the
+  // player's own Kinfolk slot already supplied the second card — that resolves immediately, no window needed.
   const scarletAssist =
     state.relics.includes('SCARLET_WHISTLE') &&
+    !kinfolkCard &&
     cards.length === 1 &&
     cards[0].kind === 'suited' &&
     isCompanionCard(cards[0]);
 
   // Solo play has no one else to slip in a card, so the assist window would just force a pointless manual
   // "resolve" click every attack — skip it and resolve immediately instead.
-  const canOpenComboAssist =
-    state.ruleset === 'legacy' && !claimedJester && state.players.length > 1 && (kinfolkAssist || scarletAssist);
+  const canOpenComboAssist = state.ruleset === 'legacy' && state.players.length > 1 && scarletAssist;
 
   if (canOpenComboAssist) {
     state.comboAssist = { attackerId: player.id, cardIds: cards.map((c) => c.id) };
     state.turnPhase = 'AWAIT_COMBO_ASSIST';
-    log(
-      state,
-      kinfolkAssist
-        ? `${player.name} commits ${cards.length > 1 ? 'a combo' : 'a card'} to the attack — the Kinfolk Flute lets others silently add a matching card before it resolves.`
-        : `${player.name} attacks alone with a Companion card — the Scarlet Whistle lets another player silently add a card before it resolves.`,
-    );
+    log(state, `${player.name} attacks alone with a Companion card — the Scarlet Whistle lets another player silently add a card before it resolves.`);
     return ok(state);
   }
 
-  return resolveCommittedPlay(state, player, cards, claimedJester);
+  return resolveCommittedPlay(state, player, shapeCards, null);
+}
+
+/**
+ * Legacy-only, gated by the 'KINFOLK_FLUTE' relic: banks one hand card (value 2-5) onto the player's own
+ * kinfolkSlot instead of attacking — a free side-action alongside their normal turn (doesn't touch turnPhase),
+ * capped at once per turn and only while the slot is empty.
+ */
+function bankKinfolkCard(state: GameState, action: Extract<GameAction, { type: 'BANK_KINFOLK_CARD' }>): EngineResult {
+  if (state.ruleset !== 'legacy') return fail('BANK_KINFOLK_CARD is only available in Regicide Legacy.');
+  if (!state.relics.includes('KINFOLK_FLUTE')) return fail('The Kinfolk Flute has not been earned yet.');
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_PLAY');
+  if (err) return fail(err);
+
+  const player = currentPlayer(state);
+  if (player.kinfolkSlot) return fail('Your Kinfolk slot is already holding a card.');
+  if (state.kinfolkBankedThisTurn) return fail('You can only bank one card onto the Kinfolk Flute per turn.');
+
+  const card = player.hand.find((c) => c.id === action.cardId);
+  if (!card) return fail(`Card ${action.cardId} is not in your hand.`);
+  if (card.kind !== 'suited') return fail('Only a suited card worth 2-5 can be banked onto the Kinfolk Flute.');
+  if (state.pilgrimMechanic && card.pilgrim) {
+    return fail('A Pilgrim card is dead weight — it cannot be banked, even onto the Kinfolk Flute.');
+  }
+  const value = cardValue(card);
+  if (value < 2 || value > 5) return fail('Only a card worth 2-5 can be banked onto the Kinfolk Flute.');
+
+  player.hand = player.hand.filter((c) => c.id !== card.id);
+  player.kinfolkSlot = card;
+  state.kinfolkBankedThisTurn = true;
+  log(state, `${player.name} banks ${card.name ?? `the ${card.rank}`} onto the Kinfolk Flute, ready to complete a combo later.`);
+  return ok(state);
 }
 
 function assistCombo(state: GameState, action: Extract<GameAction, { type: 'ASSIST_COMBO' }>): EngineResult {
@@ -1770,8 +1803,8 @@ function assistCombo(state: GameState, action: Extract<GameAction, { type: 'ASSI
   const card = assister.hand.find((c) => c.id === action.cardId);
   if (!card) return fail('Card is not in your hand.');
   if (card.kind !== 'suited') return fail('Only a suited card can be added to a combo.');
-  // Mission 7's Pilgrim hand-trap extends to a silent Kinfolk Flute/Scarlet Whistle assist too — slipping one in
-  // is still "playing" it (see GameState.pilgrimMechanic / playCards' own rejection).
+  // Mission 7's Pilgrim hand-trap extends to a silent Scarlet Whistle assist too — slipping one in is still
+  // "playing" it (see GameState.pilgrimMechanic / playCards' own rejection).
   if (state.pilgrimMechanic && card.pilgrim) {
     return fail('A Pilgrim card is dead weight — it cannot be played, even silently assisted in.');
   }
@@ -1789,7 +1822,7 @@ function assistCombo(state: GameState, action: Extract<GameAction, { type: 'ASSI
   assister.hand = assister.hand.filter((c) => c.id !== card.id);
   state.currentEnemy!.tableCards.push(card);
   state.comboAssist.cardIds.push(card.id);
-  log(state, `${assister.name} silently slips a card into the open attack (Kinfolk Flute).`);
+  log(state, `${assister.name} silently slips a card into the open attack (Scarlet Whistle).`);
   return ok(state);
 }
 
@@ -1812,11 +1845,6 @@ function yieldTurn(state: GameState, action: Extract<GameAction, { type: 'YIELD'
   }
 
   const player = currentPlayer(state);
-  if (state.ruleset === 'legacy' && state.jesterClaim?.claimedBy === player.id) {
-    state.discardPile.push(state.jesterClaim.card);
-    log(state, `${player.name} yields — the claimed Jester goes to the discard pile, unused.`);
-    state.jesterClaim = null;
-  }
   log(state, `${player.name} yields.`);
   state.lastActionWasYield[state.currentPlayerIndex] = true;
 
@@ -1858,6 +1886,7 @@ function activateJester(state: GameState, action: Extract<GameAction, { type: 'A
   state.currentPlayerIndex = state.players.findIndex((p) => p.id === nextPlayer.id);
   state.turnPhase = 'AWAIT_PLAY';
   state.pendingDamage = 0;
+  state.kinfolkBankedThisTurn = false;
   log(state, `${nextPlayer.name} goes next.`);
   checkForStuckLoss(state);
   return ok(state);
@@ -1881,7 +1910,12 @@ function playJester(state: GameState, action: Extract<GameAction, { type: 'PLAY_
   return ok(state);
 }
 
-/** Legacy-only: claims an open Jester window. Validated against the window being open, not turn ownership — any player may claim. */
+/**
+ * Legacy-only: claims an open Jester window. Validated against the window being open, not turn ownership — any
+ * player may claim. Resolves immediately as its own attack (see below) rather than handing the claimant a
+ * separate PLAY_CARDS step, matching the base game's own printed Jester text ("play it on its own, instead of
+ * playing from your hand") that Legacy's compendium has never overridden — see GameAction's CLAIM_JESTER comment.
+ */
 function claimJester(state: GameState, action: Extract<GameAction, { type: 'CLAIM_JESTER' }>): EngineResult {
   if (state.ruleset !== 'legacy') return fail('CLAIM_JESTER is only available in Regicide Legacy.');
   if (state.phase !== 'IN_PROGRESS') return fail('The game is not in progress.');
@@ -1890,6 +1924,9 @@ function claimJester(state: GameState, action: Extract<GameAction, { type: 'CLAI
   }
   const player = findPlayer(state, action.playerId);
   if (!player) return fail('Unknown player.');
+  if (!BASE_SUITS.includes(action.attackSuit)) {
+    return fail('Choose a class to attack with — Hearts, Diamonds, Clubs, or Spades.');
+  }
 
   // Modified Jester rule (Mission 2's hydras only): the oppressive dual immunities restrict the claim to
   // whoever's turn comes next, instead of being open to the whole table.
@@ -1900,11 +1937,36 @@ function claimJester(state: GameState, action: Extract<GameAction, { type: 'CLAI
     }
   }
 
-  state.jesterClaim.claimedBy = player.id;
+  const jesterCard = state.jesterClaim.card;
+  state.jesterClaim = null;
   state.currentPlayerIndex = state.players.findIndex((p) => p.id === player.id);
   state.turnPhase = 'AWAIT_PLAY';
-  log(state, `${player.name} claims the Jester and takes over the turn.`);
+  state.kinfolkBankedThisTurn = false;
+  log(state, `${player.name} claims the Jester — a free 8-strength attack, ignoring immunity.`);
+
+  // The claimed Jester itself is the only "real" card here — it goes to the enemy's table (and eventually the
+  // discard pile) same as any played card. The 8-strength attack it grants is computed via a throwaway synthetic
+  // card, never entered into tableCards/discardPile itself, so it can't leak an extra card into the deck economy.
+  state.currentEnemy!.tableCards.push(jesterCard);
+  const syntheticAttack: SuitedCard = { id: `${jesterCard.id}-attack`, kind: 'suited', suit: action.attackSuit, rank: '8' };
+  const result = resolveCommittedPlay(state, player, [syntheticAttack], jesterCard);
+  if (!result.ok || state.phase !== 'IN_PROGRESS') return result;
+
+  refillHandFromDeck(state, player, 'the Jester');
   return ok(state);
+}
+
+/**
+ * Discards `player`'s entire hand and redraws it back up to `state.maxHandSize` — the base game's own printed
+ * Jester power (see useSoloJester), reused here for Legacy's CLAIM_JESTER, which never suspends it.
+ */
+function refillHandFromDeck(state: GameState, player: PlayerState, sourceLabel: string): void {
+  state.discardPile.push(...player.hand);
+  player.hand = [];
+  while (player.hand.length < state.maxHandSize && drawOneCard(state, player)) {
+    // keep drawing until the hand limit or the deck runs dry
+  }
+  log(state, `${player.name}'s hand is discarded and refilled to ${player.hand.length} (${sourceLabel}).`);
 }
 
 function useSoloJester(state: GameState, action: Extract<GameAction, { type: 'USE_SOLO_JESTER' }>): EngineResult {
@@ -2292,6 +2354,7 @@ export function createLobbyState(): GameState {
     exactKillOnly: false,
     relics: [],
     comboAssist: null,
+    kinfolkBankedThisTurn: false,
     azureEmblemWindow: null,
     endOfTurnZoneFlip: false,
     missionZone: [],
@@ -2351,6 +2414,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return assistCombo(draft, action);
     case 'RESOLVE_COMBO':
       return resolveComboAssist(draft, action);
+    case 'BANK_KINFOLK_CARD':
+      return bankKinfolkCard(draft, action);
     case 'RESOLVE_AZURE_EMBLEM':
       return resolveAzureEmblem(draft, action);
     case 'DEFEND':

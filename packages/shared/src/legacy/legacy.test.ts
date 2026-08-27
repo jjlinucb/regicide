@@ -267,7 +267,7 @@ describe('legacy: feign death', () => {
 });
 
 describe('legacy: jester claim', () => {
-  it('lets any player claim an open jester and ignore immunity for that one attack only (not permanently)', () => {
+  it('lets any player claim an open jester for a free 8-strength attack that ignores immunity, then refills their hand (not a permanent immunity break)', () => {
     // Cleric-class enemy (suit H) — immune to Cleric (Hearts) powers until the claimed attack ignores it.
     const enemy: LegacyEnemySpec = { name: 'Warden', suit: 'H', health: 100, attack: 5 };
     let state = startMission(2, [enemy], 0);
@@ -280,38 +280,37 @@ describe('legacy: jester claim', () => {
     expect(state.turnPhase).toBe('AWAIT_JESTER_CLAIM');
     expect(state.jesterClaim?.claimedBy).toBeNull();
 
-    // Player 2 (not the jester's player) claims it.
-    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: p2.id }));
-    state = res.state;
-    expect(state.currentPlayerIndex).toBe(1);
-    expect(state.turnPhase).toBe('AWAIT_PLAY');
-    expect(state.jesterClaim?.claimedBy).toBe(p2.id);
+    const toHeal = [suited('C', '2'), suited('C', '3'), suited('C', '4')];
+    state.discardPile = toHeal; // something to heal back
 
-    // Player 2 plays a Cleric (Hearts) card — normally blocked by this enemy's own-class immunity.
-    const healCard = suited('H', '5');
-    state.discardPile = [suited('C', '2'), suited('C', '3'), suited('C', '4')]; // something to heal back
-    state = rig(state, [healCard]);
-    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: p2.id, cardIds: [healCard.id] }));
+    // Player 2 (not the jester's player) claims it, attacking in Hearts — normally blocked by this enemy's own-class immunity.
+    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: p2.id, attackSuit: 'H' }));
     state = res.state;
 
     expect(state.jesterClaim).toBeNull(); // consumed
-    expect(state.discardPile.length).toBe(0); // Hearts healed (drained the 3-card discard pile) despite matching the enemy's class
+    expect(state.currentPlayerIndex).toBe(1);
+    expect(state.currentEnemy?.damageTaken).toBe(8); // flat 8-strength attack, Hearts doesn't double
+    // Hearts healed the 3-card discard pile back under the deck despite matching the enemy's class; the only
+    // cards left in the discard pile afterward are p2's own OLD hand, dumped by the Jester's own hand-refill.
+    expect(toHeal.every((c) => !state.discardPile.some((d) => d.id === c.id))).toBe(true);
+    expect(state.discardPile.length).toBe(state.maxHandSize);
     expect(state.currentEnemy?.immunityBroken).toBe(false); // one-shot only — NOT a permanent break like classic Regicide
+    // The base game's own printed Jester power also refreshes the claimant's hand.
+    expect(state.players[1].hand.length).toBe(state.maxHandSize);
   });
 
-  it('discards an unused claimed jester if the claimant yields instead of attacking', () => {
+  it('rejects a claim with no attackSuit chosen, or an invalid one', () => {
     const enemy: LegacyEnemySpec = { name: 'Warden', suit: 'H', health: 100, attack: 1 };
     let state = startMission(1, [enemy], 0);
     const j = jester();
     state = rig(state, [j]);
     let res = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId: state.players[0].id, cardId: j.id }));
     state = res.state;
-    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[0].id }));
-    state = res.state;
-    res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
-    state = res.state;
-    expect(state.jesterClaim).toBeNull();
-    expect(state.discardPile.some((c) => c.kind === 'jester')).toBe(true);
+
+    const missing = applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[0].id, attackSuit: undefined as unknown as SuitedCard['suit'] });
+    expect(missing.ok).toBe(false);
+    const invalid = applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[0].id, attackSuit: 'X' as SuitedCard['suit'] });
+    expect(invalid.ok).toBe(false);
   });
 
   it('rejects PLAY_JESTER/CLAIM_JESTER outside Regicide Legacy', () => {
@@ -450,7 +449,7 @@ describe('legacy: Dual-class Stickers reward (mission 2)', () => {
   });
 });
 
-describe('legacy: Kinfolk Flute relic (mission 1) — combo-assist window', () => {
+describe('legacy: Kinfolk Flute relic (mission 1) — personal storage slot', () => {
   function startMissionWithFlute(n: number, enemies: LegacyEnemySpec[]): GameState {
     const ids = Array.from({ length: n }, (_, i) => `p${i}`);
     const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
@@ -470,51 +469,111 @@ describe('legacy: Kinfolk Flute relic (mission 1) — combo-assist window', () =
 
   const target: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
 
-  it('opens an assist window instead of resolving immediately when there is room left in the combo', () => {
-    let state = startMissionWithFlute(2, [target]);
-    state = rig(state, [suited('H', '3')]);
-    const attackerId = state.players[state.currentPlayerIndex].id;
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }));
+  it('banks a hand card (value 2-5) onto the slot as a free side-action, without consuming the turn', () => {
+    let state = startMissionWithFlute(1, [target]);
+    const fiveCard = suited('H', '5');
+    state = rig(state, [fiveCard, suited('D', '9')]);
+    const playerId = state.players[0].id;
+
+    const res = ensureOk(applyAction(state, { type: 'BANK_KINFOLK_CARD', playerId, cardId: fiveCard.id }));
     state = res.state;
-    expect(state.turnPhase).toBe('AWAIT_COMBO_ASSIST');
-    expect(state.comboAssist?.attackerId).toBe(attackerId);
-    expect(state.currentEnemy?.damageTaken).toBe(0); // not resolved yet
+
+    expect(state.players[0].kinfolkSlot?.id).toBe(fiveCard.id);
+    expect(state.players[0].hand.some((c) => c.id === fiveCard.id)).toBe(false);
+    expect(state.turnPhase).toBe('AWAIT_PLAY'); // free side-action, doesn't consume the turn
+    expect(state.kinfolkBankedThisTurn).toBe(true);
   });
 
-  it('lets another player silently add a matching card, then the attacker resolves for the combined total', () => {
+  it('rejects banking without the relic, a card outside value 2-5, or onto an already-full slot', () => {
+    const state = startMissionWithFlute(1, [target]);
+    const playerId = state.players[0].id;
+
+    let noRelic = structuredClone(state);
+    noRelic.relics = [];
+    noRelic = rig(noRelic, [suited('H', '3')]);
+    expect(applyAction(noRelic, { type: 'BANK_KINFOLK_CARD', playerId, cardId: noRelic.players[0].hand[0].id }).ok).toBe(false);
+
+    const withAce = rig(state, [suited('H', 'A')]); // value 1, out of range
+    expect(applyAction(withAce, { type: 'BANK_KINFOLK_CARD', playerId, cardId: withAce.players[0].hand[0].id }).ok).toBe(false);
+
+    let full = rig(state, [suited('H', '5'), suited('C', '2')]);
+    const bankRes = ensureOk(applyAction(full, { type: 'BANK_KINFOLK_CARD', playerId, cardId: full.players[0].hand[0].id }));
+    full = bankRes.state;
+    const secondBank = applyAction(full, { type: 'BANK_KINFOLK_CARD', playerId, cardId: full.players[0].hand[0].id });
+    expect(secondBank.ok).toBe(false); // slot already holds a card
+  });
+
+  it('caps banking at once per turn even if the slot is emptied again the same turn', () => {
+    let state = startMissionWithFlute(1, [target]);
+    const playerId = state.players[0].id;
+    const five = suited('H', '5');
+    const otherFive = suited('D', '5');
+    state = rig(state, [five, otherFive]);
+
+    let res = ensureOk(applyAction(state, { type: 'BANK_KINFOLK_CARD', playerId, cardId: five.id }));
+    state = res.state;
+    res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId, cardIds: [otherFive.id], includeKinfolkSlot: true }),
+    );
+    state = res.state;
+    expect(state.players[0].kinfolkSlot).toBeNull(); // emptied out again, same turn
+
+    state = rig(state, [suited('C', '3')]);
+    const secondBank = applyAction(state, { type: 'BANK_KINFOLK_CARD', playerId, cardId: state.players[0].hand[0].id });
+    expect(secondBank.ok).toBe(false);
+  });
+
+  it('plays the banked slot card together with a matching-rank hand card as a normal combo, clearing the slot', () => {
+    let state = startMissionWithFlute(1, [target]);
+    const playerId = state.players[0].id;
+    const bankedFive = suited('H', '5');
+    state = rig(state, [bankedFive]);
+    let res = ensureOk(applyAction(state, { type: 'BANK_KINFOLK_CARD', playerId, cardId: bankedFive.id }));
+    state = res.state;
+
+    const matchingFive = suited('D', '5');
+    state = rig(state, [matchingFive]);
+    res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId, cardIds: [matchingFive.id], includeKinfolkSlot: true }),
+    );
+    state = res.state;
+
+    expect(state.players[0].kinfolkSlot).toBeNull();
+    expect(state.currentEnemy?.damageTaken).toBe(10); // 5 + 5 combo total
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === bankedFive.id)).toBe(true);
+  });
+
+  it("rejects folding in the slot card when ranks don't match, or when the slot is empty", () => {
+    let state = startMissionWithFlute(1, [target]);
+    const playerId = state.players[0].id;
+    const bankedFive = suited('H', '5');
+    state = rig(state, [bankedFive]);
+    const res = ensureOk(applyAction(state, { type: 'BANK_KINFOLK_CARD', playerId, cardId: bankedFive.id }));
+    state = res.state;
+
+    const mismatched = suited('D', '4');
+    state = rig(state, [mismatched]);
+    const badPlay = applyAction(state, { type: 'PLAY_CARDS', playerId, cardIds: [mismatched.id], includeKinfolkSlot: true });
+    expect(badPlay.ok).toBe(false);
+    expect(state.players[0].kinfolkSlot?.id).toBe(bankedFive.id); // untouched on failure
+
+    state = structuredClone(state);
+    state.players[0].kinfolkSlot = null;
+    state = rig(state, [suited('D', '5')]);
+    const emptySlot = applyAction(state, { type: 'PLAY_CARDS', playerId, cardIds: [state.players[0].hand[0].id], includeKinfolkSlot: true });
+    expect(emptySlot.ok).toBe(false);
+  });
+
+  it('no longer opens the old multiplayer combo-assist window — a lone play just resolves immediately', () => {
     let state = startMissionWithFlute(2, [target]);
     state = rig(state, [suited('H', '3')]);
     const attackerId = state.players[0].id;
-    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }));
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }),
+    );
     state = res.state;
-
-    state = structuredClone(state);
-    state.players[1].hand = [suited('H', '3')];
-    res = ensureOk(applyAction(state, { type: 'ASSIST_COMBO', playerId: state.players[1].id, cardId: state.players[1].hand[0].id }));
-    state = res.state;
-    expect(state.comboAssist?.cardIds.length).toBe(2);
-    expect(state.turnPhase).toBe('AWAIT_COMBO_ASSIST'); // still open until the attacker resolves
-
-    res = ensureOk(applyAction(state, { type: 'RESOLVE_COMBO', playerId: attackerId }));
-    state = res.state;
-    expect(state.comboAssist).toBeNull();
-    expect(state.currentEnemy?.damageTaken).toBe(6); // 3+3 combo total
-  });
-
-  it('rejects an assist card that would break the combo (mismatched rank), and rejects the attacker assisting their own attack', () => {
-    let state = startMissionWithFlute(2, [target]);
-    state = rig(state, [suited('H', '3')]);
-    const attackerId = state.players[0].id;
-    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
-
-    state = structuredClone(state);
-    state.players[1].hand = [suited('H', '4')]; // wrong rank
-    const badAssist = applyAction(state, { type: 'ASSIST_COMBO', playerId: state.players[1].id, cardId: state.players[1].hand[0].id });
-    expect(badAssist.ok).toBe(false);
-
-    const selfAssist = applyAction(state, { type: 'ASSIST_COMBO', playerId: attackerId, cardId: suited('H', '3').id });
-    expect(selfAssist.ok).toBe(false);
+    expect(state.turnPhase).not.toBe('AWAIT_COMBO_ASSIST');
+    expect(state.currentEnemy?.damageTaken).toBe(3); // resolved immediately, no assist window
   });
 });
 
@@ -592,11 +651,12 @@ describe('legacy: mission 2 modified Jester rule (next player only)', () => {
     const playRes = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId: state.players[0].id, cardId: j.id }));
     state = playRes.state;
 
-    const badClaim = applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[2].id });
+    const badClaim = applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[2].id, attackSuit: 'H' });
     expect(badClaim.ok).toBe(false);
 
-    const goodClaim = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[1].id }));
-    expect(goodClaim.state.jesterClaim?.claimedBy).toBe(state.players[1].id);
+    const goodClaim = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[1].id, attackSuit: 'H' }));
+    expect(goodClaim.state.jesterClaim).toBeNull(); // consumed — resolves immediately now
+    expect(goodClaim.state.currentEnemy?.damageTaken).toBe(8); // the dual immunity was ignored
   });
 });
 
@@ -1697,12 +1757,12 @@ describe('legacy: mission 7 mechanics (Pilgrim hand-trap)', () => {
     expect(state.players[0].hand.some((c) => c.id === 'fenwick')).toBe(true);
   });
 
-  it('rejects a Kinfolk Flute silent assist when the offered card is a Pilgrim', () => {
+  it('rejects banking a Pilgrim onto the Kinfolk Flute, even though it prints an in-range value', () => {
     const target: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
     const res0 = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',
-      playerIds: ['p0', 'p1'],
-      playerNames: ['Player 0', 'Player 1'],
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
       seed: 'flute-pilgrim-test',
       party: buildInitialParty(),
       enemies: [target],
@@ -1711,17 +1771,13 @@ describe('legacy: mission 7 mechanics (Pilgrim hand-trap)', () => {
       pilgrimMechanic: true,
     });
     let state = ensureOk(res0).state;
-    state = rig(state, [suited('H', '3')]);
-    const attackerId = state.players[0].id;
-    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
-    expect(state.turnPhase).toBe('AWAIT_COMBO_ASSIST');
+    const pilgrimCard: Card = { id: 'bank-pilgrim', kind: 'suited', suit: 'H', rank: '3', pilgrim: true };
+    state = rig(state, [pilgrimCard]);
+    const playerId = state.players[0].id;
 
-    state = structuredClone(state);
-    const pilgrimAssist: Card = { id: 'assist-pilgrim', kind: 'suited', suit: 'H', rank: '3', pilgrim: true };
-    state.players[1].hand = [pilgrimAssist];
-    const badAssist = applyAction(state, { type: 'ASSIST_COMBO', playerId: state.players[1].id, cardId: pilgrimAssist.id });
-    expect(badAssist.ok).toBe(false);
+    const badBank = applyAction(state, { type: 'BANK_KINFOLK_CARD', playerId, cardId: pilgrimCard.id });
+    expect(badBank.ok).toBe(false);
+    expect(state.players[0].kinfolkSlot).toBeNull();
   });
 
   it('rejects a DEFEND selection that includes a Pilgrim, even when its value would help cover the damage', () => {
@@ -3711,8 +3767,9 @@ describe('legacy: Mercenary any-suit Ace (wildSuit)', () => {
 
   it('ASSIST_COMBO resolves a wildSuit assisting card via its own chosenSuit', () => {
     const target: LegacyEnemySpec = { name: 'Combo Target', suit: 'C', health: 100, attack: 1 };
-    let state = startMissionWithRelics(2, [target], ['KINFOLK_FLUTE']);
-    state = rig(state, [suited('H', '3')]);
+    let state = startMissionWithRelics(2, [target], ['SCARLET_WHISTLE']);
+    const lead = suited('H', 'A'); // a lone Animal Companion opens the Scarlet Whistle assist window
+    state = rig(state, [lead]);
     const attackerId = state.players[0].id;
     let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
@@ -3729,8 +3786,8 @@ describe('legacy: Mercenary any-suit Ace (wildSuit)', () => {
 
     res = ensureOk(applyAction(state, { type: 'RESOLVE_COMBO', playerId: attackerId }));
     state = res.state;
-    // Companion pairing (the Ace counts as an Animal Companion): 3 (attacker's card) + 1 (the Ace) = 4 damage.
-    expect(state.currentEnemy?.damageTaken).toBe(4);
+    // Companion pairing (both cards count as Animal Companions, each contributing its own value): 1 + 1 = 2 damage.
+    expect(state.currentEnemy?.damageTaken).toBe(2);
     expect(state.currentEnemy?.tableCards.some((c) => c.kind === 'suited' && c.suit === 'D')).toBe(true);
   });
 });
