@@ -10,7 +10,8 @@ export type ClassId =
   | 'GUARDIAN'
   | 'DRUID'
   | 'CHANTER'
-  | 'EVERGREEN';
+  | 'EVERGREEN'
+  | 'MERCENARY';
 
 /**
  * Regicide Legacy's four base classes map 1:1 onto classic Regicide's four suits — Warrior=Clubs (double damage),
@@ -32,10 +33,14 @@ export interface ClassTheme {
   tag: string;
   glyph: string;
   color: string;
-  /** This class's signature ability, grantable to a stand-out recruit on top of its base suit power (see party.ts's RecruitSpec.special). */
-  specialAbility: SpecialAbilityId;
-  specialName: string;
-  specialText: string;
+  /**
+   * This class's signature ability, grantable to a stand-out recruit on top of its base suit power (see party.ts's
+   * RecruitSpec.special). Absent only for MERCENARY, which no recruit/sticker reward ever targets — it exists
+   * purely as classForCard's display theme for the Mercenary "19" card (see SuitedCard.noSuitPower).
+   */
+  specialAbility?: SpecialAbilityId;
+  specialName?: string;
+  specialText?: string;
 }
 
 export const CLASS_THEME: Record<ClassId, ClassTheme> = {
@@ -145,6 +150,13 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
       'Evergreen: resolves all four base class powers at once — heal, draw, double damage, reduce enemy ' +
       "strength — and always ignores enemy immunity, no matter which classes the enemy is immune to.",
   },
+  MERCENARY: {
+    id: 'MERCENARY',
+    name: 'Mercenary',
+    tag: 'No Power',
+    glyph: '⛒',
+    color: '#6b6255',
+  },
 };
 
 export const SUIT_TO_CLASS: Record<Suit, ClassTheme> = {
@@ -170,6 +182,7 @@ export function classForCard(card: {
   druid?: boolean;
   chanter?: boolean;
   evergreen?: boolean;
+  noSuitPower?: boolean;
 }): ClassTheme {
   if (card.arcane) return CLASS_THEME.MAGE;
   if (card.reaver) return CLASS_THEME.REAVER;
@@ -177,5 +190,6 @@ export function classForCard(card: {
   if (card.druid) return CLASS_THEME.DRUID;
   if (card.chanter) return CLASS_THEME.CHANTER;
   if (card.evergreen) return CLASS_THEME.EVERGREEN;
+  if (card.noSuitPower) return CLASS_THEME.MERCENARY;
   return SUIT_TO_CLASS[card.suit];
 }

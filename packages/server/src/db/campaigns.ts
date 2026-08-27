@@ -1,4 +1,4 @@
-import type { Card } from '@regicide/shared';
+import type { Card, MercenaryProgress } from '@regicide/shared';
 import type { Pool } from 'pg';
 import { generateRoomCode } from '../rooms/roomCode.js';
 
@@ -8,6 +8,7 @@ export interface CampaignRecord {
   missionsCompleted: number[];
   currentMission: number;
   permanentRules: string[];
+  mercenaryProgress: MercenaryProgress | null;
   updatedAt: number;
 }
 
@@ -59,7 +60,7 @@ export class PostgresCampaignStore implements CampaignStore {
 
   async get(code: string): Promise<CampaignRecord | null> {
     const res = await this.pool.query(
-      `SELECT code, party, missions_completed, current_mission, permanent_rules,
+      `SELECT code, party, missions_completed, current_mission, permanent_rules, mercenary_progress,
               extract(epoch from updated_at) * 1000 AS updated_at_ms
        FROM campaigns WHERE code = $1`,
       [code.toUpperCase()],
@@ -72,27 +73,29 @@ export class PostgresCampaignStore implements CampaignStore {
       missionsCompleted: row.missions_completed,
       currentMission: row.current_mission,
       permanentRules: row.permanent_rules,
+      mercenaryProgress: row.mercenary_progress,
       updatedAt: Number(row.updated_at_ms),
     };
   }
 
   async create(record: CampaignRecord): Promise<void> {
     await this.pool.query(
-      `INSERT INTO campaigns (code, party, missions_completed, current_mission, permanent_rules)
-       VALUES ($1, $2, $3, $4, $5)`,
+      `INSERT INTO campaigns (code, party, missions_completed, current_mission, permanent_rules, mercenary_progress)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
       [
         record.code.toUpperCase(),
         JSON.stringify(record.party),
         record.missionsCompleted,
         record.currentMission,
         JSON.stringify(record.permanentRules),
+        JSON.stringify(record.mercenaryProgress),
       ],
     );
   }
 
   async save(record: CampaignRecord): Promise<void> {
     await this.pool.query(
-      `UPDATE campaigns SET party = $2, missions_completed = $3, current_mission = $4, permanent_rules = $5, updated_at = now()
+      `UPDATE campaigns SET party = $2, missions_completed = $3, current_mission = $4, permanent_rules = $5, mercenary_progress = $6, updated_at = now()
        WHERE code = $1`,
       [
         record.code.toUpperCase(),
@@ -100,6 +103,7 @@ export class PostgresCampaignStore implements CampaignStore {
         record.missionsCompleted,
         record.currentMission,
         JSON.stringify(record.permanentRules),
+        JSON.stringify(record.mercenaryProgress),
       ],
     );
   }

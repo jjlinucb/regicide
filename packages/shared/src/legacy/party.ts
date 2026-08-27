@@ -5,7 +5,9 @@ import { CLASS_THEME } from './classes.js';
 
 const ALL_SUITS: Suit[] = ['H', 'D', 'C', 'S'];
 
-type NonRoyalRank = Exclude<Rank, 'J' | 'Q' | 'K'>;
+// '12' and '19' only ever appear on Mercenary cards (see legacy/mercenaries.ts), never on a human party member —
+// excluded here too so STARTING_NAMES doesn't need dummy entries for ranks it will never actually be looked up with.
+type NonRoyalRank = Exclude<Rank, 'J' | 'Q' | 'K' | '12' | '19'>;
 
 /**
  * Original names for the Golden Blade Syndicate's 40 starting members, by class and rank. Not the physical game's

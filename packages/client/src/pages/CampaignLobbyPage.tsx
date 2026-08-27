@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { MISSIONS } from '@regicide/shared';
-import type { LegacySavePayload, LegacyStatePayload, RoomStatePayload } from '@regicide/shared';
+import type { LegacySavePayload, LegacyStatePayload, MercenaryTypeId, RoomStatePayload } from '@regicide/shared';
+import { MercenaryCamp } from '../components/MercenaryCamp';
 
 /** Downloads the campaign's current progress as a JSON save file — a local backup independent of server persistence. */
 function downloadSave(legacyState: LegacyStatePayload): void {
@@ -24,12 +25,14 @@ export function CampaignLobbyPage({
   legacyState,
   myPlayerId,
   onStartMission,
+  onSetMercenaryLoadout,
   onLeave,
 }: {
   roomState: RoomStatePayload;
   legacyState: LegacyStatePayload;
   myPlayerId: string;
   onStartMission: (missionId: number) => void;
+  onSetMercenaryLoadout: (loadout: Partial<Record<MercenaryTypeId, number>>) => Promise<{ ok: true } | { ok: false; error: string }>;
   onLeave: () => void;
 }) {
   const isHost = roomState.players.find((p) => p.id === myPlayerId)?.isHost ?? false;
@@ -86,6 +89,10 @@ export function CampaignLobbyPage({
             </p>
           )}
         </div>
+
+        {legacyState.mercenaryProgress && legacyState.mercenaryProgress.missionId === legacyState.currentMission && (
+          <MercenaryCamp progress={legacyState.mercenaryProgress} isHost={isHost} onSave={onSetMercenaryLoadout} />
+        )}
 
         {selectedMission && (
           <div className="legacy-mission-brief">

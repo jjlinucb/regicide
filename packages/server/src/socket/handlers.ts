@@ -25,6 +25,7 @@ function legacyStatePayload(room: Room): LegacyStatePayload | null {
     missionsCompleted: room.legacy.missionsCompleted,
     currentMission: room.legacy.currentMission,
     permanentRules: room.legacy.permanentRules,
+    mercenaryProgress: room.legacy.mercenaryProgress,
   };
 }
 
@@ -135,6 +136,15 @@ export function registerSocketHandlers(io: IOServer, socket: IOSocket, rooms: Ro
     const found = rooms.findPlayerBySocket(socket.id);
     if (!found) return cb({ ok: false, error: 'Not in a room.' });
     const result = rooms.startLegacyMission(code, found.player.id, missionId);
+    if ('error' in result) return cb({ ok: false, error: result.error });
+    cb({ ok: true });
+    broadcastRoom(io, result.room);
+  });
+
+  socket.on('legacy:setMercenaryLoadout', async ({ code, loadout }, cb) => {
+    const found = rooms.findPlayerBySocket(socket.id);
+    if (!found) return cb({ ok: false, error: 'Not in a room.' });
+    const result = await rooms.setMercenaryLoadout(code, found.player.id, loadout);
     if ('error' in result) return cb({ ok: false, error: result.error });
     cb({ ok: true });
     broadcastRoom(io, result.room);

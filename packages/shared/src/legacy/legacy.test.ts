@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
+import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs } from './missions.js';
 import {
   applyCorruptAnotherCard,
@@ -3528,5 +3529,208 @@ describe('legacy: mission 12 defeat cleanup (banish the mission zone, then the e
     expect(res.state.banishPile.some((c) => c.id === restoredInZone.id)).toBe(false);
     expect(res.state.tavernDeck.some((c) => c.id === restoredInZone.id)).toBe(true);
     expect(res.state.banishPile.some((c) => c.id === killCard.id)).toBe(true); // the plain kill card banishes normally
+  });
+});
+
+function startMissionWithRelics(n: number, enemies: LegacyEnemySpec[], relics: string[]): GameState {
+  const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+  const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+  const res = applyAction(createLobbyState(), {
+    type: 'START_LEGACY_MISSION',
+    playerIds: ids,
+    playerNames: names,
+    seed: 'mercenary-test',
+    party: buildInitialParty(),
+    enemies,
+    jesterCount: 0,
+    relics,
+  });
+  if (!res.ok) throw new Error(res.error);
+  return res.state;
+}
+
+describe('legacy: Mercenary Camp catalog & coin formula', () => {
+  it('the catalog totals the sourced 14 physical cards across its maxQty values', () => {
+    const total = MERCENARY_CATALOG.reduce((sum, spec) => sum + spec.maxQty, 0);
+    expect(total).toBe(14);
+  });
+
+  it('mercenaryCoinsForLosses grows triangularly with the loss count', () => {
+    expect(mercenaryCoinsForLosses(1)).toBe(1);
+    expect(mercenaryCoinsForLosses(2)).toBe(3);
+    expect(mercenaryCoinsForLosses(3)).toBe(6);
+    expect(mercenaryCoinsForLosses(4)).toBe(10);
+  });
+
+  it('buildMercenaryLoadout returns the concrete cards for a selection that fits the budget', () => {
+    const result = buildMercenaryLoadout({ TWELVE_H: 1, NINETEEN: 1 }, 4); // 1 + 3 = 4 coins
+    expect(Array.isArray(result)).toBe(true);
+    const cards = result as Card[];
+    expect(cards.length).toBe(2);
+    expect(cards.some((c) => c.kind === 'suited' && c.rank === '12')).toBe(true);
+    expect(cards.some((c) => c.kind === 'suited' && c.rank === '19')).toBe(true);
+  });
+
+  it('rejects a selection past a type\'s maxQty', () => {
+    const result = buildMercenaryLoadout({ NINETEEN: 3 }, 999);
+    expect(result).toEqual({ error: '19: at most 2 available.' });
+  });
+
+  it('rejects a selection that costs more than the coin budget', () => {
+    const result = buildMercenaryLoadout({ JESTER: 2 }, 5); // 2 * 5 = 10 coins, only 5 available
+    expect(result).toEqual({ error: 'That loadout costs 10 coins — only 5 available.' });
+  });
+});
+
+describe('legacy: Mercenary "2/5" flexible combo rank', () => {
+  it('combos with a real 2 by resolving to rank 2, at half the printed "2/5" value', () => {
+    const enemy: LegacyEnemySpec = { name: 'Target', suit: 'C', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    const realTwo = suited('D', '2');
+    const mercTwoFive = buildMercenaryCard('TWO_FIVE_S') as SuitedCard;
+    state = rig(state, [realTwo, mercTwoFive]);
+    const tavernBefore = state.tavernDeck.length;
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [realTwo.id, mercTwoFive.id] }),
+    );
+
+    // Total value 2+2=4 (the "2/5" contributes its flagged alternate, not its printed 5): Diamonds draws 4,
+    // Spades shields 4, no Clubs present so no doubling.
+    expect(res.state.currentEnemy?.damageTaken).toBe(4);
+    expect(res.state.currentEnemy?.spadesShield).toBe(4);
+    expect(res.state.tavernDeck.length).toBeLessThanOrEqual(tavernBefore - 4);
+  });
+
+  it('two "2/5"s alone with no anchoring card default to their shared printed rank (5), not the alternate', () => {
+    const enemy: LegacyEnemySpec = { name: 'Target', suit: 'S', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    const mercClubs = buildMercenaryCard('TWO_FIVE_C') as SuitedCard;
+    const mercHearts = buildMercenaryCard('TWO_FIVE_H') as SuitedCard;
+    state = rig(state, [mercClubs, mercHearts]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mercClubs.id, mercHearts.id] }),
+    );
+
+    // Total value 5+5=10, doubled by Clubs to 20 — proves the combo resolved at rank 5 (its printed value),
+    // not rank 2 (which would total 4, doubled to 8).
+    expect(res.state.currentEnemy?.damageTaken).toBe(20);
+  });
+
+  it('played alone, a "2/5" contributes exactly its printed value (5), ignoring the flexible alternate entirely', () => {
+    const enemy: LegacyEnemySpec = { name: 'Target', suit: 'C', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    const mercHearts = buildMercenaryCard('TWO_FIVE_H') as SuitedCard;
+    state = rig(state, [mercHearts]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mercHearts.id] }));
+
+    expect(res.state.currentEnemy?.damageTaken).toBe(5);
+  });
+});
+
+describe('legacy: Mercenary "19" carries no suit power', () => {
+  it('played alone, deals its raw value with no suit power firing at all (its placeholder suit is inert)', () => {
+    const enemy: LegacyEnemySpec = { name: 'Target', suit: 'C', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    const nineteen = buildMercenaryCard('NINETEEN') as SuitedCard; // placeholder suit 'H'
+    state = rig(state, [nineteen]);
+    state.discardPile = [suited('C', '3'), suited('C', '4')]; // would be healed back if Hearts fired
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [nineteen.id] }));
+
+    expect(res.state.currentEnemy?.damageTaken).toBe(19);
+    expect(res.state.discardPile.length).toBe(2); // untouched — no Hearts heal despite the card's Hearts placeholder suit
+  });
+
+  it('sitting on top of the discard pile, does not extend the current enemy\'s immunity (unlike a real suited card)', () => {
+    let state = startMission11(1);
+    const heartsCard: SuitedCard = suited('H', '5');
+    state = rig(state, [heartsCard], { suit: 'C', baseAttack: 0, spadesShield: 0, maxHealth: 100, damageTaken: 0 }); // Warrior suit, not Hearts
+    state.discardPile = [buildMercenaryCard('NINETEEN')]; // placeholder suit 'H', but noSuitPower excludes it
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [heartsCard.id] }),
+    );
+
+    expect(res.state.log.some((e) => e.message.includes('blocked'))).toBe(false);
+    expect(res.state.discardPile.length).toBe(0); // the Hearts heal fired and healed the "19" straight back into the reserve deck
+  });
+});
+
+describe('legacy: Mercenary any-suit Ace (wildSuit)', () => {
+  it('PLAY_CARDS resolves the chosen suit and triggers that suit\'s power', () => {
+    const enemy: LegacyEnemySpec = { name: 'Target', suit: 'C', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    const wildAce = buildMercenaryCard('WILD_ACE') as SuitedCard; // placeholder suit 'H'
+    state = rig(state, [wildAce]);
+    const tavernBefore = state.tavernDeck.length;
+
+    const res = ensureOk(
+      applyAction(state, {
+        type: 'PLAY_CARDS',
+        playerId: state.players[0].id,
+        cardIds: [wildAce.id],
+        chosenSuits: { [wildAce.id]: 'D' },
+      }),
+    );
+
+    expect(res.state.currentEnemy?.tableCards.some((c) => c.kind === 'suited' && c.suit === 'D')).toBe(true);
+    expect(res.state.tavernDeck.length).toBe(tavernBefore - 1); // Diamonds drew its 1 card of value
+  });
+
+  it('rejects playing the any-suit Ace with no suit chosen', () => {
+    const enemy: LegacyEnemySpec = { name: 'Target', suit: 'C', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    const wildAce = buildMercenaryCard('WILD_ACE') as SuitedCard;
+    state = rig(state, [wildAce]);
+
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [wildAce.id] });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe('Choose a suit for the any-suit Ace before playing it.');
+  });
+
+  it('rejects an invalid (non-base) suit choice', () => {
+    const enemy: LegacyEnemySpec = { name: 'Target', suit: 'C', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    const wildAce = buildMercenaryCard('WILD_ACE') as SuitedCard;
+    state = rig(state, [wildAce]);
+
+    const res = applyAction(state, {
+      type: 'PLAY_CARDS',
+      playerId: state.players[0].id,
+      cardIds: [wildAce.id],
+      chosenSuits: { [wildAce.id]: 'X' } as Record<string, SuitedCard['suit']>,
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe('Invalid suit choice for the any-suit Ace — must be Hearts, Diamonds, Clubs, or Spades.');
+  });
+
+  it('ASSIST_COMBO resolves a wildSuit assisting card via its own chosenSuit', () => {
+    const target: LegacyEnemySpec = { name: 'Combo Target', suit: 'C', health: 100, attack: 1 };
+    let state = startMissionWithRelics(2, [target], ['KINFOLK_FLUTE']);
+    state = rig(state, [suited('H', '3')]);
+    const attackerId = state.players[0].id;
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_COMBO_ASSIST');
+
+    const wildAce = buildMercenaryCard('WILD_ACE') as SuitedCard;
+    state = structuredClone(state);
+    state.players[1].hand = [wildAce];
+    res = ensureOk(
+      applyAction(state, { type: 'ASSIST_COMBO', playerId: state.players[1].id, cardId: wildAce.id, chosenSuit: 'D' }),
+    );
+    state = res.state;
+    expect(state.comboAssist?.cardIds.length).toBe(2);
+
+    res = ensureOk(applyAction(state, { type: 'RESOLVE_COMBO', playerId: attackerId }));
+    state = res.state;
+    // Companion pairing (the Ace counts as an Animal Companion): 3 (attacker's card) + 1 (the Ace) = 4 damage.
+    expect(state.currentEnemy?.damageTaken).toBe(4);
+    expect(state.currentEnemy?.tableCards.some((c) => c.kind === 'suited' && c.suit === 'D')).toBe(true);
   });
 });
