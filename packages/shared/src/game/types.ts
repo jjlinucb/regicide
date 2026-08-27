@@ -83,12 +83,18 @@ export interface SuitedCard {
    */
   chanter?: boolean;
   /**
-   * Legacy-only (Mission 8): marks a Pilgrim survivor card seeded into that mission's own reserve deck —
-   * unrelated to Mission 7's separate pilgrimDeck/pilgrimZone mechanic (see GameState.pilgrimZone), despite the
-   * shared name; both missions independently reused "Pilgrim" as flavor for stranded survivors. Otherwise an
-   * entirely ordinary card — playable and discardable like any other — except when placed into Mission 8's
-   * ascending mission zone: a Pilgrim card placed there never buffs the current enemy's attack the way a
-   * non-Pilgrim card bridging a gap does (see GameState.ascendingZone / rules.ts's ascendingZoneAttackBuff).
+   * Legacy-only: marks a Pilgrim survivor card. Two missions independently reused "Pilgrim" as flavor for
+   * stranded survivors and share this one flag, each gated by its own separate GameState switch so the two never
+   * collide (no mission sets both):
+   * - Mission 7 ("Tales of Rebirth"), gated by GameState.pilgrimMechanic: shuffled into the reserve deck as an
+   *   ordinary card (see Mission.extraReserveCards) and drawn normally, but the instant one lands in a hand it
+   *   becomes a permanent hand-trap for the rest of the mission — dead weight that can never be played or
+   *   discarded for any purpose, including covering defend damage or Feign Death (see engine.ts's PLAY_CARDS /
+   *   ASSIST_COMBO / DEFEND rejection checks) — until an exact-damage kill frees one for free (see
+   *   dealDamageAndCheckDefeat's exact-kill Pilgrim release).
+   * - Mission 8 ("Winds of Chaos"), gated by GameState.ascendingZone: an entirely ordinary card — playable and
+   *   discardable like any other — except when placed into the ascending mission zone, where it never buffs the
+   *   current enemy's attack the way a non-Pilgrim card bridging a gap does (see rules.ts's ascendingZoneAttackBuff).
    */
   pilgrim?: boolean;
   /**
@@ -105,6 +111,14 @@ export interface SuitedCard {
    * value (see engine.ts's resolveArcaneBolts).
    */
   secondClassArcane?: boolean;
+  /**
+   * Legacy-only: marks a card that's picked up a bonus Guardian sticker (Mission 6's sourced reward — see
+   * legacy/party.ts's applyGuardianSticker / legacy/missions.ts's Mission 6 entry) on top of an existing class.
+   * Unlike a pure Guardian recruit's `guardian` flag (which replaces suit-power resolution entirely), this card
+   * keeps resolving its normal suit power AND raises the Guardian's absolute shield when played (see engine.ts's
+   * resolveCommittedPlay's guardianCards handling) — the same "second class" shape as secondClassArcane above.
+   */
+  secondClassGuardian?: boolean;
   /**
    * Legacy-only: marks a Beast Companion (Mission 4's reward, x4, each tied to a specific character). Works like
    * an Animal Companion (see rules.ts's isAnimalCompanion) — playable alone, or paired with exactly one other
@@ -199,9 +213,12 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * What the current player must do next. AWAIT_JESTER_CLAIM, AWAIT_COMBO_ASSIST, and AWAIT_AZURE_EMBLEM are
  * Legacy-only. AWAIT_ZONE_PURGE and AWAIT_CHANT_TRIM are Mission 8-only (see GameState.zonePurge / chanterWindow).
  * AWAIT_END_OF_TURN and AWAIT_RESCUE_CHOICE are Mission 9's captured-piles mechanic only (see
- * GameState.capturedPilesActive). AWAIT_BEAST_REWARD_CHOICE is Mission 11 only (see GameState.beastDeckMechanic) —
- * opened once the mission's last enemy falls, resolved via CHOOSE_BEAST_REWARD; the mission only actually
- * completes (phase -> WON) once it's resolved.
+ * GameState.capturedPilesActive). AWAIT_ZONE_VENGEANCE_CHOICE is Mission 6 only (see
+ * GameState.zoneVengeanceChoice) — opened by a kill under zoneVengeanceOnKill, resolved via
+ * CHOOSE_ZONE_VENGEANCE_SACRIFICE. AWAIT_BARD_SURRENDER is Mission 10 only (see
+ * GameState.corruptedPartyEnemies) — opened by an enemy Bard's end-of-turn power when the ending player's hand is
+ * non-empty, resolved via SURRENDER_CARD_TO_ZONE; engine.ts's advanceToNextPlayer pauses mid-advance right here
+ * until it resolves, same shape as AWAIT_END_OF_TURN pausing there for Mission 9.
  */
 export type TurnPhase =
   | 'AWAIT_PLAY'
@@ -209,11 +226,12 @@ export type TurnPhase =
   | 'AWAIT_JESTER_CLAIM'
   | 'AWAIT_COMBO_ASSIST'
   | 'AWAIT_AZURE_EMBLEM'
+  | 'AWAIT_ZONE_VENGEANCE_CHOICE'
   | 'AWAIT_ZONE_PURGE'
   | 'AWAIT_CHANT_TRIM'
   | 'AWAIT_END_OF_TURN'
   | 'AWAIT_RESCUE_CHOICE'
-  | 'AWAIT_BEAST_REWARD_CHOICE';
+  | 'AWAIT_BARD_SURRENDER';
 
 /**
  * Legacy-only (Mission 9): one of the 3 captured piles seeding GameState.capturedPiles. `faceDown[0]` is the
@@ -285,12 +303,15 @@ export interface GameState {
    */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
   /**
-   * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic: the open Azure Emblem window — opened whenever
-   * a play includes a Mage card. Every other player, one at a time in turn order, may silently place a single
-   * card from hand atop the reserve deck via RESOLVE_AZURE_EMBLEM (or decline by omitting a card), stocking it
-   * for later. `blockNextAttack` mirrors a Guardian shield raised in the same play.
+   * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic, sourced fix (see legacy-missions-transcript-
+   * mismatches.md): the open Azure Emblem window — opened whenever a play includes a Mage card. The Mage's OWN
+   * player (`pendingPlayerIds` holds just that one attacker id, kept as an array for shape-compatibility with
+   * every other pending-player-queue field) may bank one of `eligibleCardIds` (this play's own Mage card(s),
+   * still sitting on the enemy's table) onto the reserve deck via RESOLVE_AZURE_EMBLEM instead of losing it to
+   * the discard pile later, or decline by omitting a card. `blockNextAttack` mirrors a Guardian shield raised in
+   * the same play.
    */
-  azureEmblemWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
+  azureEmblemWindow: { pendingPlayerIds: string[]; eligibleCardIds: string[]; blockNextAttack: boolean } | null;
   /**
    * Legacy-only: when true (Mission 3), the top of the reserve deck flips face-up into `missionZone` at the end
    * of every turn, and the current enemy becomes immune to that card's class(es) too (see zoneImmuneSuits).
@@ -326,46 +347,79 @@ export interface GameState {
    */
   corruptedReturnQueue: boolean;
   /**
+   * Legacy-only (Missions 4 and 11): when true, any batch of 2+ cards pushed onto the discard pile during
+   * cleanup (a covered DEFEND, or an enemy's played table cards on defeat — exact or overkill) is sorted so the
+   * LOWEST-value card of that batch ends up on top (the array's last element, per rules.ts's
+   * discardPileTopValue), instead of whatever order the caller happened to collect them in. Sourced from an
+   * independent fan digital-reimplementation's rules doc: "M4+ Cleanup discard ordering: when discarding played
+   * cards during cleanup, place them low-to-high, lowest value on top" — a permanent rule introduced at Mission
+   * 4 that stays in effect for every later mission, including Mission 11, whose own pileTopEnemyBonus reads this
+   * same pile's top value. Without this, a mission that buffs enemy attack off the discard pile's top card
+   * spirals toward whatever the highest card played that turn happened to leave on top — surviving a hit (a
+   * covered DEFEND) is exactly what hands the next attack its own worst-case bonus (see engine.ts's
+   * pushToDiscardPile).
+   */
+  discardCleanupLowToHigh: boolean;
+  /**
    * Legacy-only (Mission 5): when true, an exact-damage kill bursts outward — the defeated enemy's own base
    * attack is dealt as splash damage straight into whatever's newly revealed at the top of the enemy deck
    * (which can itself chain into a further kill; see engine.ts's dealDamageAndCheckDefeat).
    */
   exactKillSplashDamage: boolean;
   /**
-   * Legacy-only (Mission 5): when true, a single "rolling" card cycles through its own zone slot every turn —
-   * separate from `missionZone`, which here holds only Myla's static presetMissionZone seat (fixed immunity,
-   * never flipped or banished). Each turn, whatever card currently occupies `rollingZoneCard` is banished for
-   * good and a fresh one flips in off the reserve deck to replace it (see engine.ts's rollMissionZoneBonusCard),
-   * its value buffing the current enemy's attack for as long as it sits there (see resolvedEnemyAttack) — the
-   * transcript's "rolling mission-zone/banish-pile cycle each turn feeds bonus strength to the current enemy."
+   * Legacy-only (Mission 5): when true, every turn recycles the top card of the BANISH pile (not the reserve
+   * deck) into `rollingZoneCards`, where it accumulates — never replaced or re-banished on its own — until the
+   * next enemy kill (see engine.ts's rollMissionZoneBonusCard). The accumulator's combined value buffs the
+   * current enemy's attack for as long as it sits there (see resolvedEnemyAttack / rules.ts's missionZoneValueSum),
+   * and a kill banishes the whole accumulator back to the banish pile and resets it to empty (see
+   * dealDamageAndCheckDefeat) — sourced research's "accumulates ALL cards recycled from the banish pile since
+   * the last kill and sums their total value," correcting the earlier shipped "one fresh card per turn, off the
+   * reserve deck" reading. Separate from `missionZone`, which this mission no longer preset-seeds at all (Myla
+   * is an ordinary reserve-deck card here, not a zone fixture — see missions.ts's Mission 5 entry).
    */
   rollingZoneBonus: boolean;
-  /** Legacy-only (Mission 5): the card currently occupying the rolling zone slot, if any (see rollingZoneBonus). */
-  rollingZoneCard: Card | null;
+  /** Legacy-only (Mission 5): the cards currently accumulated in the rolling zone slot, if any (see rollingZoneBonus). */
+  rollingZoneCards: Card[];
   /**
-   * Legacy-only (Mission 6): when true, every enemy kill permanently grows `missionZone` — the lowest-value
-   * card left on the enemy's table is moved into the zone instead of the discard pile — and then Myla (the
-   * zone's permanent occupant, see presetMissionZone) strikes: pendingDamage is set to the live sum of every
-   * card's value in missionZone and turnPhase becomes AWAIT_DEFEND, reusing the normal defend/loss flow so an
-   * uncovered hit ends the mission exactly like any other undefended attack (see engine.ts's
-   * dealDamageAndCheckDefeat). An exact-damage kill excludes the single highest-value zone card from that
-   * one strike's total. The zone itself is never cleared for the rest of the mission.
+   * Legacy-only (Mission 6), sourced fix (see legacy-missions-transcript-mismatches.md — the official rules card
+   * and a fan digital-reimplementation's rules doc agree on this): when true, every enemy kill permanently grows
+   * `missionZone` — a PLAYER chooses one card from the play area just committed to the kill (the defeated
+   * enemy's own table, see GameState.zoneVengeanceChoice / engine.ts's chooseZoneVengeanceSacrifice) to move into
+   * the zone instead of the discard pile. The shipped version instead auto-picked the lowest-value card for the
+   * player, routinely dragging a second or third suit into Myla's permanent immunity on the very first kill.
+   * Once the zone grows, Myla (its permanent occupant, see presetMissionZone) strikes: pendingDamage is set to
+   * the live sum of every card's value in missionZone and turnPhase becomes AWAIT_DEFEND, reusing the normal
+   * defend/loss flow so an uncovered hit ends the mission exactly like any other undefended attack (see
+   * engine.ts's finishEnemyDefeatTail) — UNLESS the winning attack included a Guardian, which cancels this
+   * strike entirely (also sourced, previously unimplemented — see dealDamageAndCheckDefeat's
+   * attackIncludesGuardian). An exact-damage kill excludes the single highest-value zone card from that one
+   * strike's total. The zone itself is never cleared for the rest of the mission.
    */
   zoneVengeanceOnKill: boolean;
   /**
-   * Legacy-only (Mission 7): when true, gates the whole Pilgrim mechanic — the start-of-turn flip into
-   * `pilgrimZone`, the value-matching rescue on any attack play, and the deck-burn penalty on every enemy kill
-   * (see engine.ts's flipPilgrimCard / checkPilgrimRescue / dealDamageAndCheckDefeat).
+   * Legacy-only (Mission 6): the open AWAIT_ZONE_VENGEANCE_CHOICE window opened by a kill under
+   * zoneVengeanceOnKill above — non-null until CHOOSE_ZONE_VENGEANCE_SACRIFICE resolves it. `remaining` and
+   * `attackIncludesGuardian` are carried through from the kill so finishEnemyDefeatTail can resume the rest of
+   * the defeat resolution exactly as if zoneVengeanceOnKill's sacrifice had resolved inline.
+   */
+  zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean } | null;
+  /**
+   * Legacy-only (Mission 7): when true, gates the whole Pilgrim hand-trap rule — Pilgrim cards (see
+   * SuitedCard.pilgrim), shuffled into the reserve deck via Mission.extraReserveCards like any other card, can
+   * never be played (PLAY_CARDS, ASSIST_COMBO) or discarded (DEFEND, including Feign Death) once drawn into a
+   * hand — dead weight sitting there for the rest of the mission — and an exact-damage kill frees one for free
+   * (see dealDamageAndCheckDefeat).
+   *
+   * Sourced from the official compendium FAQ, replacing an earlier, unsourced shared-zone rescue/burn-on-kill
+   * economy that drained the same reserve-deck pool both hand-refill (Diamonds) and defense depend on — confirmed
+   * unwinnable in simulated play (see legacy-mission-playtest-findings). `pilgrimDeck`/`pilgrimZone` below are
+   * inert leftovers from that old economy, kept only for type/client compatibility — no mission populates them
+   * anymore, so both are always empty.
    */
   pilgrimMechanic: boolean;
-  /** Legacy-only (Mission 7): the face-down Pilgrim deck, separate from the reserve deck — its top card flips into `pilgrimZone` at the start of every turn. */
+  /** Vestigial (see GameState.pilgrimMechanic) — no mission populates this anymore; always empty. Kept only so GameAction's pilgrimCards / ClientGameState's pilgrimDeckCount stay type-compatible for any future mission. */
   pilgrimDeck: Card[];
-  /**
-   * Legacy-only (Mission 7): Pilgrim cards flipped face-up into the shared mission zone, awaiting rescue.
-   * Playing an attack whose total value exactly matches a Pilgrim's value here banishes that Pilgrim (rescued
-   * for good). On every enemy kill, the reserve deck burns cards from its top equal to the combined value of
-   * every Pilgrim still waiting here — never cleared except by exact-value rescues.
-   */
+  /** Vestigial (see GameState.pilgrimMechanic) — no mission populates this anymore; always empty. Kept only so ClientGameState's pilgrimZone stays type-compatible for any future mission. */
   pilgrimZone: Card[];
   /**
    * Legacy-only (Mission 8): when true, the mission zone builds an ascending A-through-10 chain instead of any
@@ -416,8 +470,10 @@ export interface GameState {
   /**
    * Legacy-only (Mission 10, "Pride to Fall"): when true, the mission's 8-enemy fight queue is built at mission
    * start from the campaign's own party instead of a static MissionEnemySpec list — 8 cards are pulled from
-   * `party` (see START_LEGACY_MISSION), corrupted, sorted weakest-to-strongest by card value, and each becomes an
-   * enemy with health fixed at 5x its (base, pre-zone-bonus) strength (see deck.ts's buildCorruptedPartyEnemies).
+   * `party` (see START_LEGACY_MISSION, preferring already-`corrupted` party members per sourced research before
+   * falling back to a random sample — see deck.ts's buildCorruptedPartyEnemies for the full reasoning), corrupted,
+   * sorted weakest-to-strongest by card value, and each becomes an enemy with health fixed at 5x its (base,
+   * pre-zone-bonus) strength.
    * Also gates this mission's 2 always-on class powers, resolved via resolvedEnemyAttack /
    * applyEnemyPaladinDamageReduction: an enemy Warrior doubles its total strength (base + mission-zone bonus,
    * see startOfTurnZoneFlip) before any Spades shield is subtracted; an enemy Paladin reduces damage it takes by
@@ -447,8 +503,9 @@ export interface GameState {
   restoredPartyCards: Card[];
   /**
    * Legacy-only (Mission 11, "Descent into Darkness"): when true, gates the mission's whole beast-deck mechanic —
-   * the start-of-turn class-keyed flip (see engine.ts's flipBeastDeckCard), the exact-kill-skips-next-flip rule
-   * (see skipNextBeastDeckFlip), and the end-of-mission AWAIT_BEAST_REWARD_CHOICE window.
+   * the start-of-turn suit-keyed flip (see engine.ts's flipBeastDeckCard) and the exact-kill-skips-next-flip rule
+   * (see skipNextBeastDeckFlip). The mission's reward (Esme's permanent upgrade) doesn't touch this deck at all —
+   * see party.ts's applyEvergreenUpgrade / missions.ts's Mission 11 entry.
    */
   beastDeckMechanic: boolean;
   /**
@@ -457,8 +514,9 @@ export interface GameState {
    * seeded here at mission start instead of joining the reserve deck, so no Beast card is available to draw or
    * play this mission. Its top card flips for a one-shot effect at the start of every turn (see
    * flipBeastDeckCard), moving to `beastDeckDiscard`; once empty, it reshuffles from there and the cycle
-   * continues. At mission end, `beastDeck` and `beastDeckDiscard` together are the pool CHOOSE_BEAST_REWARD picks
-   * from (see GameState.restoredPartyCards / party.ts's applyBeastCardChoice).
+   * continues. Every Beast Companion card was never removed from the persisted campaign roster to begin with (same
+   * "sits out, comes back automatically" shape as this mission's sidelined Esme) — this `beastDeck` is only the
+   * mission's temporary in-fight copy, so all 4 simply return to the party unchanged at mission end.
    */
   beastDeck: Card[];
   /** Legacy-only (Mission 11): beast-deck cards already flipped this mission — reshuffled back into `beastDeck` once it runs dry (see flipBeastDeckCard). */
@@ -529,12 +587,17 @@ export type GameAction =
       exactKillToReserveDeck?: boolean;
       /** See GameState.corruptedReturnQueue. */
       corruptedReturnQueue?: boolean;
+      /** See GameState.discardCleanupLowToHigh. */
+      discardCleanupLowToHigh?: boolean;
       /** See GameState.exactKillSplashDamage. */
       exactKillSplashDamage?: boolean;
       /**
-       * Legacy-only (Mission 5): seeds GameState.missionZone/zoneImmuneSuits with a fixed set of cards at
-       * mission start — unlike Mission 3's endOfTurnZoneFlip, this zone is static for the whole mission (never
-       * flipped into, never banished on defeat) since endOfTurnZoneFlip is left unset.
+       * Legacy-only (Mission 6, also seeded by Mission 8 for its ascending chain's anchor): seeds
+       * GameState.missionZone/zoneImmuneSuits with a fixed set of cards at mission start — unlike Mission 3's
+       * endOfTurnZoneFlip, this zone is static for the whole mission (never flipped into, never banished on
+       * defeat) since endOfTurnZoneFlip is left unset. Mission 5 no longer uses this (see missions.ts's Mission
+       * 5 entry) — sourced research found Myla was wrongly modeled here as a permanent immunity anchor; she's an
+       * ordinary reserve-deck card instead.
        */
       presetMissionZone?: Card[];
       /** See GameState.rollingZoneBonus. */
@@ -543,7 +606,7 @@ export type GameAction =
       zoneVengeanceOnKill?: boolean;
       /** See GameState.pilgrimMechanic. */
       pilgrimMechanic?: boolean;
-      /** Unshuffled Pilgrim cards to seed GameState.pilgrimDeck with (shuffled at mission start). */
+      /** Vestigial (see GameState.pilgrimMechanic) — Pilgrim cards are seeded via extraReserveCards now, not this. No mission sets it anymore. */
       pilgrimCards?: Card[];
       /** See GameState.ascendingZone. */
       ascendingZone?: boolean;
@@ -589,11 +652,17 @@ export type GameAction =
   /** Legacy-only, gated by the 'KINFOLK_FLUTE' relic: the attacker locks in and resolves the open combo-assist window. */
   | { type: 'RESOLVE_COMBO'; playerId: string }
   /**
-   * Legacy-only, gated by the 'AZURE_EMBLEM' relic: the front-of-queue player in an open Azure Emblem window
-   * (see GameState.azureEmblemWindow) either places `cardId` from their hand atop the reserve deck, or declines
-   * by omitting it.
+   * Legacy-only, gated by the 'AZURE_EMBLEM' relic: the attacking player in an open Azure Emblem window (see
+   * GameState.azureEmblemWindow) either banks `cardId` (one of this play's own Mage cards) onto the reserve
+   * deck, or declines by omitting it.
    */
   | { type: 'RESOLVE_AZURE_EMBLEM'; playerId: string; cardId?: string }
+  /**
+   * Legacy-only (Mission 6), sourced fix, from AWAIT_ZONE_VENGEANCE_CHOICE: the player who just landed the kill
+   * chooses `cardId`, from the defeated enemy's own table (see GameState.zoneVengeanceChoice), to sacrifice
+   * permanently into the mission zone.
+   */
+  | { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE'; playerId: string; cardId: string }
   | { type: 'DEFEND'; playerId: string; cardIds: string[] }
   | { type: 'USE_SOLO_JESTER'; playerId: string }
   /**
@@ -606,11 +675,14 @@ export type GameAction =
   /** Legacy-only (Mission 9), from AWAIT_RESCUE_CHOICE: an exact kill's bonus — sends `pileIndex`'s face-up captured card straight to the top of the reserve deck. */
   | { type: 'CHOOSE_EXACT_KILL_RESCUE'; playerId: string; pileIndex: number }
   /**
-   * Legacy-only (Mission 11), from AWAIT_BEAST_REWARD_CHOICE: picks `cardId` (one of the beast-deck cards, see
-   * GameState.beastDeck/beastDeckDiscard) to carry into Mission 12. Validated against the window being open, not
-   * turn ownership — any player may make the pick for the party, same as CLAIM_JESTER.
+   * Legacy-only (Mission 10), from AWAIT_BARD_SURRENDER: the ending player picks `cardId` from their own hand to
+   * move into the mission zone, per an enemy Bard's end-of-turn power. Sourced correction (regicidelegacy.com's
+   * compendium, corroborated by BGG threads and a working fan digital reimplementation's own UI — see the
+   * legacy-missions-transcript-mismatches memory doc's Mission 10 section): the shipped version used to auto-pick
+   * the player's lowest-value card instead of offering a real choice. Resuming turn-advancement after this
+   * resolves is engine.ts's surrenderCardToZone's job.
    */
-  | { type: 'CHOOSE_BEAST_REWARD'; playerId: string; cardId: string }
+  | { type: 'SURRENDER_CARD_TO_ZONE'; playerId: string; cardId: string }
   /** Classic Regicide only, from WON: continues into another round with Kings shuffled into the Tavern deck and enemies scaled up. */
   | { type: 'START_ENDLESS_ROUND' };
 
@@ -653,22 +725,24 @@ export interface ClientGameState {
   /** See GameState.comboAssist. */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
   /** See GameState.azureEmblemWindow. Public information — it's on the table. */
-  azureEmblemWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
+  azureEmblemWindow: { pendingPlayerIds: string[]; eligibleCardIds: string[]; blockNextAttack: boolean } | null;
   /** See GameState.discardTopBuffsAttack. */
   discardTopBuffsAttack: boolean;
   /** See GameState.missionZone. Public information — it's on the table. */
   missionZone: Card[];
   /** See GameState.rollingZoneBonus. */
   rollingZoneBonus: boolean;
-  /** See GameState.rollingZoneCard. Public information — it's on the table. */
-  rollingZoneCard: Card | null;
+  /** See GameState.rollingZoneCards. Public information — it's on the table. */
+  rollingZoneCards: Card[];
   /** See GameState.zoneVengeanceOnKill. */
   zoneVengeanceOnKill: boolean;
+  /** See GameState.zoneVengeanceChoice. Public information — the eligible cards are the enemy's own (public) table. */
+  zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean } | null;
   /** See GameState.pilgrimMechanic. */
   pilgrimMechanic: boolean;
-  /** See GameState.pilgrimZone. Public information — it's on the table. */
+  /** Vestigial (see GameState.pilgrimMechanic) — always empty now; a Pilgrim card sits in the owning player's own (redacted) hand instead of any shared zone. */
   pilgrimZone: Card[];
-  /** See GameState.pilgrimDeck — count only, it's face-down. */
+  /** Vestigial (see GameState.pilgrimMechanic) — always 0 now. */
   pilgrimDeckCount: number;
   /** See GameState.ascendingZone. */
   ascendingZone: boolean;

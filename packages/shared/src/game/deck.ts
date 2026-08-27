@@ -180,10 +180,24 @@ export function buildCapturedPiles(party: Card[], rng: () => number): { piles: C
 export const CORRUPTED_PARTY_ENEMY_COUNT = 8;
 
 /**
- * Legacy-only (Mission 10): pulls CORRUPTED_PARTY_ENEMY_COUNT cards out of the campaign party (randomly, via the
- * mission's own seeded RNG — the transcript says "eight" without specifying which ones, so this is a judgment
- * call, not a transcript detail) and turns each into a fixed-order enemy, sorted weakest-to-strongest by card
- * value. Each enemy's health is fixed at 5x its (base) strength per the transcript — a flat multiple set here at
+ * Legacy-only (Mission 10): pulls CORRUPTED_PARTY_ENEMY_COUNT cards out of the campaign party and turns each into
+ * a fixed-order enemy, sorted weakest-to-strongest by card value.
+ *
+ * Sourced correction (regicidelegacy.com's compendium, corroborated by BoardGameGeek threads and an independent
+ * fan digital reimplementation — see the legacy-missions-transcript-mismatches memory doc's Mission 10 section):
+ * the fight is supposed to be built from party members ALREADY marked corrupted earlier in the campaign
+ * (SuitedCard.corrupted), not sampled fresh at random the way this shipped originally. In the actual current
+ * campaign, though, no earlier mission's reward path sets that flag on a party card yet — the "corrupt another
+ * card" reward step several earlier missions (2, 5, 8) are separately documented as missing isn't implemented,
+ * and fixing that is out of scope here — so in practice `corrupted` below the fold-line is checked honestly and
+ * usually comes up empty. This prioritizes any already-corrupted members first (so the sourced rule takes over
+ * the instant an earlier mission starts corrupting cards for real) and only falls back to the old
+ * random-sample-from-the-whole-party behavior to fill out whatever slots corrupted members don't cover — which,
+ * against today's actual party state, is effectively all 8. Which corrupted members (or, on the fallback path,
+ * which random ones) get pulled beyond "prefer corrupted" isn't specified by the transcript beyond "eight," so
+ * the random tie-break remains a judgment call, not a transcript detail, exactly as before.
+ *
+ * Each enemy's health is fixed at 5x its (base) strength per the transcript — a flat multiple set here at
  * spec-build time, never recalculated later even though the enemy's *dealt* attack climbs with the mission zone
  * (see engine.ts's resolvedEnemyAttack). `secondSuit` carries over too, so a Dual-class Stickers party member
  * comes back immune to both classes, same as the class-immunity rule the transcript says otherwise applies "as
@@ -196,8 +210,15 @@ export function buildCorruptedPartyEnemies(
   rng: () => number,
 ): { enemies: EnemyState[]; leftoverParty: Card[] } {
   const suited = party.filter((c): c is SuitedCard => c.kind === 'suited');
-  const shuffled = shuffle(suited, rng);
-  const chosen = shuffled.slice(0, CORRUPTED_PARTY_ENEMY_COUNT);
+  const corrupted = shuffle(
+    suited.filter((c) => c.corrupted),
+    rng,
+  );
+  const uncorrupted = shuffle(
+    suited.filter((c) => !c.corrupted),
+    rng,
+  );
+  const chosen = [...corrupted, ...uncorrupted].slice(0, CORRUPTED_PARTY_ENEMY_COUNT);
   const chosenIds = new Set(chosen.map((c) => c.id));
   const leftoverParty = party.filter((c) => !chosenIds.has(c.id));
 

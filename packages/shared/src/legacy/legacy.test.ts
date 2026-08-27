@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, createLobbyState } from '../game/engine.js';
+import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs } from './missions.js';
 import {
-  applyBeastCardChoice,
+  applyCorruptAnotherCard,
   applyDualClassStickers,
+  applyEvergreenUpgrade,
+  applyGuardianSticker,
   applyMageSticker,
   applyReward,
   applyRestoredPartyCards,
@@ -151,6 +153,7 @@ describe('legacy: mission setup', () => {
     expect(mission4.discardTopBuffsAttack).toBe(true);
     expect(mission4.exactKillToReserveDeck).toBe(true);
     expect(mission4.corruptedReturnQueue).toBe(true);
+    expect(mission4.discardCleanupLowToHigh).toBe(true);
     expect(mission4.reward.relics).toEqual(['SCARLET_WHISTLE']);
     expect(mission4.reward.recruits.length).toBe(4);
     expect(mission4.reward.recruits.every((r) => r.beast)).toBe(true);
@@ -614,7 +617,13 @@ describe('legacy: mission 3 mechanics (end-of-turn mission zone)', () => {
     return res.state;
   }
 
-  it('flips the top reserve card into the mission zone at end of turn, adding its class to the enemy\'s immunity', () => {
+  it('flips the top reserve card into the mission zone at end of turn, but grants no NEW immunity once the enemy already has its own', () => {
+    // Second-pass balance fix (see engine.ts's flipMissionZoneCard doc comment): simulation showed the zone
+    // compounding on top of the enemy's own inherent immunity was the actual driver of Mission 3's ~0% win rate,
+    // not something a partial cap could fix — so the zone now never pushes an enemy past however many classes it
+    // was already immune to on its own. The card still flips into the shared zone (feeding the exact-kill-save
+    // and banish-on-defeat cleanup below) — it just stops adding to zoneImmuneSuits once that ceiling is hit,
+    // which for every Mission 3 enemy (single-class, no secondSuit since the first-pass fix) means immediately.
     const boss: LegacyEnemySpec = { name: 'Archive Boss', suit: 'S', health: 100, attack: 1 };
     let state = startZoneMission(1, [boss]);
     state = structuredClone(state);
@@ -628,8 +637,34 @@ describe('legacy: mission 3 mechanics (end-of-turn mission zone)', () => {
     const res2 = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
     state = res2.state;
 
-    expect(state.missionZone.length).toBe(1);
-    expect(state.zoneImmuneSuits).toContain('H');
+    expect(state.missionZone.length).toBe(1); // the card still visibly flips into the zone
+    expect(state.zoneImmuneSuits).toEqual([]); // but grants no new immunity — the Spades-immune boss already has its own
+    expect(state.log.some((e) => e.message.includes('resistance is already spent'))).toBe(true);
+  });
+
+  it('the immunity cap is measured against however many classes the enemy itself already resists, not a hardcoded number', () => {
+    // No shipped Mission 3 enemy carries a secondSuit any more (see missions.ts), but the cap is written against
+    // "however many classes this enemy already resists" rather than a hardcoded number, so a dual-immune enemy
+    // (2 inherent classes) still gets zero new ones from the zone, exactly like a single-immune enemy does —
+    // verified directly since nothing else exercises that path.
+    const boss: LegacyEnemySpec = { name: 'Two-Headed Boss', suit: 'S', secondSuit: 'C', health: 100, attack: 1 };
+    let state = startZoneMission(1, [boss]);
+    state = structuredClone(state);
+    state.tavernDeck = [suited('H', '5'), suited('D', '3'), ...state.tavernDeck];
+    state = rig(state, [suited('D', '2'), suited('D', '9')]); // 2 cards on hand — one to defend with each of the 2 turns below
+
+    let res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.zoneImmuneSuits).toEqual([]); // already at its own 2-class ceiling (S + C) before the flip
+
+    res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.missionZone.length).toBe(2); // both cards still visibly accumulate in the zone
+    expect(state.zoneImmuneSuits).toEqual([]); // still nothing new — the enemy started at its own ceiling already
   });
 
   it('banishes the mission zone (saving one card to discard on an exact kill) when the enemy is defeated, and skips that turn\'s flip', () => {
@@ -647,6 +682,34 @@ describe('legacy: mission 3 mechanics (end-of-turn mission zone)', () => {
     expect(state.zoneImmuneSuits.length).toBe(0);
     expect(state.banishPile.length).toBe(1); // one card banished, one saved
     expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '4')).toBe(true);
+  });
+
+  it('an overkill under exactKillOnly also banishes the escalating mission zone, not just an exact kill', () => {
+    const boss: LegacyEnemySpec = { name: 'Archive Boss', suit: 'S', health: 20, attack: 1 };
+    const startRes = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'zone-overkill-test',
+      party: buildInitialParty(),
+      enemies: [boss, { name: 'Second Boss', suit: 'C', health: 15, attack: 5 }],
+      jesterCount: 0,
+      endOfTurnZoneFlip: true,
+      exactKillOnly: true,
+    });
+    let state = ensureOk(startRes).state;
+    state = structuredClone(state);
+    state.missionZone = [suited('H', '3'), suited('D', '4')];
+    state.zoneImmuneSuits = ['H', 'D'];
+    state = rig(state, [suited('C', '10')], { damageTaken: 15 }); // 15 already taken, +10 overkills a 20-health boss
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
+    state = res.state;
+
+    expect(state.currentEnemy?.name).toBe('Second Boss'); // recycled and moved on, not an exact kill
+    expect(state.missionZone.length).toBe(0);
+    expect(state.zoneImmuneSuits.length).toBe(0);
+    expect(state.banishPile.length).toBe(2); // both zone cards banished — no exact kill, so nothing saved to discard
   });
 
   it('a corrupted card ignores mission-zone immunity for its own class, at the cost of banishing the top reserve card', () => {
@@ -749,6 +812,102 @@ describe('legacy: mission 4 mechanics (discard-pile attack buff + exact-kill to 
 
     expect(after.tavernDeck[0]).toStrictEqual(beforeReserveTop); // reserve deck untouched
     expect(after.discardPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '9')).toBe(true);
+  });
+});
+
+describe('legacy: mission 4 discard-cleanup low-to-high ordering (sourced fix for the discard-buff spiral)', () => {
+  function startFusionMission(enemies: LegacyEnemySpec[], cleanup: boolean): GameState {
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'fusion-cleanup-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      discardTopBuffsAttack: true,
+      discardCleanupLowToHigh: cleanup,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('a covered DEFEND places the lowest-value discarded card on top, regardless of the order the player selected them in', () => {
+    const boss: LegacyEnemySpec = { name: 'Experiment', suit: 'S', health: 100, attack: 20 };
+    let state = startFusionMission([boss], true);
+    const nine = suited('H', '9');
+    const four = suited('C', '4');
+    const seven = suited('S', '7');
+    // A harmless Diamonds-2 play just opens AWAIT_DEFEND without meaningfully denting the boss's 100 health.
+    state = rig(state, [suited('D', '2'), nine, four, seven]);
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    expect(state.pendingDamage).toBe(20); // discard pile is still empty, so no buff yet
+
+    // Cover the 20 damage with all 3 remaining cards (9 + 4 + 7 = 20), selected in a scrambled order.
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [nine.id, four.id, seven.id] }));
+    state = res.state;
+
+    expect(state.discardPile.length).toBe(3);
+    const top = state.discardPile[state.discardPile.length - 1];
+    const bottom = state.discardPile[0];
+    expect(top.kind === 'suited' && top.rank).toBe('4'); // lowest of the batch, regardless of selection order
+    expect(bottom.kind === 'suited' && bottom.rank).toBe('9'); // highest goes in first
+  });
+
+  it('without the flag, a covered DEFEND preserves whatever order the cardIds were given in (pre-fix behavior)', () => {
+    const boss: LegacyEnemySpec = { name: 'Experiment', suit: 'S', health: 100, attack: 20 };
+    let state = startFusionMission([boss], false);
+    const nine = suited('H', '9');
+    const four = suited('C', '4');
+    const seven = suited('S', '7');
+    state = rig(state, [suited('D', '2'), nine, four, seven]);
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [nine.id, four.id, seven.id] }));
+    state = res.state;
+
+    // Whatever order the player selected lands in the discard pile unchanged — the LAST one selected (7) is on top.
+    expect(state.discardPile.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['9', '4', '7']);
+  });
+
+  it('an enemy kill (overkill) sorts the whole accumulated table-cards batch low-to-high, capping the next enemy\'s buff at the lowest card', () => {
+    const enemyA: LegacyEnemySpec = { name: 'Specimen A', suit: 'D', health: 30, attack: 1 };
+    const enemyB: LegacyEnemySpec = { name: 'Specimen B', suit: 'H', health: 20, attack: 10 };
+    let state = startFusionMission([enemyA, enemyB], true);
+    state = rig(state, [suited('C', '9')], { tableCards: [suited('H', '2'), suited('D', '3')], damageTaken: 25 }); // 5 health left
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    expect(state.currentEnemy?.name).toBe('Specimen B'); // Clubs doubles 9 to 18 vs 5 health left — an overkill
+    // The finishing card (9) plus the two already on the table (2, 3) all land in the discard pile, lowest on top.
+    expect(state.discardPile.length).toBe(3);
+    const top = state.discardPile[state.discardPile.length - 1];
+    expect(top.kind === 'suited' && top.rank).toBe('2');
+    // Specimen B's live attack reads only that lowest card: 10 base + 2, not the 9 that actually landed the kill.
+    expect(resolvedEnemyAttack(state)).toBe(12);
+  });
+
+  it('without the flag, the kill (overkill) preserves table-card order, so the finishing card can land on top and buff the next enemy at its worst', () => {
+    const enemyA: LegacyEnemySpec = { name: 'Specimen A', suit: 'D', health: 30, attack: 1 };
+    const enemyB: LegacyEnemySpec = { name: 'Specimen B', suit: 'H', health: 20, attack: 10 };
+    let state = startFusionMission([enemyA, enemyB], false);
+    state = rig(state, [suited('C', '9')], { tableCards: [suited('H', '2'), suited('D', '3')], damageTaken: 25 });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    // Pre-fix behavior: table cards land in play order [2, 3, 9] — the finishing (highest) card ends up on top.
+    expect(state.discardPile.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['2', '3', '9']);
+    // The next enemy inherits the worst case: +9 instead of +2 — exactly the self-reinforcing spiral the fix closes.
+    expect(resolvedEnemyAttack(state)).toBe(19);
   });
 });
 
@@ -876,7 +1035,7 @@ describe('legacy: mission 4 Beast Companions (strength-copying pair) + Scarlet W
   });
 });
 
-describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone, exact-kill splash)', () => {
+describe('legacy: mission 5 mechanics (Reaver reserve-tear, rolling banish-pile zone, exact-kill splash)', () => {
   function reaverCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
     return { ...suited(suit, rank), reaver: true, ...(special ? { special: 'PLUNDER' } : {}) };
   }
@@ -955,7 +1114,7 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone,
     expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '9')).toBe(true);
   });
 
-  it('seeds the mission zone with a fixed, static set of cards at mission start', () => {
+  it("the engine's generic presetMissionZone capability still seeds a fixed, static set of cards at mission start (no longer how Mission 5 itself uses Myla — see the mission-5 reward describe block below)", () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 20, attack: 5 };
     const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
     const state = startCrimsonMission(1, [boss], { presetMissionZone: [myla] });
@@ -978,46 +1137,61 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, preset mission zone,
     expect(state.currentEnemy?.damageTaken).toBe(7); // First Sporeling's base attack (7), splashed in
   });
 
-  it("cycles a fresh card from the reserve deck into its own rolling zone slot at end of turn, without disturbing Myla's static seat", () => {
+  it('recycles the top card of the BANISH pile (not the reserve deck) into the rolling zone every turn, accumulating instead of replacing', () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
-    const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
-    let state = startCrimsonMission(1, [boss], { presetMissionZone: [myla], rollingZoneBonus: true });
+    let state = startCrimsonMission(1, [boss], { rollingZoneBonus: true });
     state = structuredClone(state);
-    state.tavernDeck = [suited('C', '4'), ...state.tavernDeck];
-    state = rig(state, [suited('D', '2')]);
-    expect(state.rollingZoneCard).toBeNull(); // nothing cycled in yet — only happens at end of turn
+    state.banishPile = [suited('C', '4'), suited('D', '2')]; // 'D'-2 is on top — popped first
+    state = rig(state, [suited('H', '3'), suited('H', '3')]); // enough hand to cover 2 turns of the 1-attack boss
+    expect(state.rollingZoneCards).toEqual([]); // nothing recycled in yet — only happens at end of turn
 
-    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    // Turn 1: yield -> AWAIT_DEFEND (solo game, live enemy attack) -> defend to trigger the end-of-turn cycle.
+    let res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
     state = res.state;
-    // Solo game: yielding with a live enemy attack goes to AWAIT_DEFEND — cover it to trigger the end-of-turn cycle.
-    const res2 = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
-    state = res2.state;
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
 
-    // The rolling slot picked up the reserve deck's top card...
-    expect(state.rollingZoneCard).toMatchObject({ suit: 'C', rank: '4' });
-    // ...while Myla's static seat in missionZone is untouched, still granting Hearts immunity.
-    expect(state.missionZone).toEqual([myla]);
-    expect(state.zoneImmuneSuits).toEqual(['H']);
+    // The rolling zone picked up the banish pile's top card ('D'-2), and the reserve deck was never touched.
+    expect(state.rollingZoneCards).toMatchObject([{ suit: 'D', rank: '2' }]);
+    expect(state.banishPile).toMatchObject([{ suit: 'C', rank: '4' }]);
+
+    // Turn 2: the 'C'-4 recycles in too, ON TOP of the 'D'-2 — accumulating, not replacing it.
+    res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.rollingZoneCards).toMatchObject([{ suit: 'D', rank: '2' }, { suit: 'C', rank: '4' }]);
+    expect(state.banishPile).toEqual([]); // the whole pile has been recycled out
   });
 
-  it("buffs the current enemy's attack by the rolling card's value, and banishes the outgoing card when a new one cycles in", () => {
+  it("buffs the current enemy's attack by the rolling zone's combined value, not just the most recent card", () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 5 };
-    const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
-    let state = startCrimsonMission(2, [boss], { presetMissionZone: [myla], rollingZoneBonus: true });
+    let state = startCrimsonMission(1, [boss], { rollingZoneBonus: true });
     state = structuredClone(state);
-    state.rollingZoneCard = suited('C', '4'); // pretend a card already cycled in on a prior turn
-    state.tavernDeck = [suited('D', '9'), ...state.tavernDeck];
-    state = rig(state, [suited('D', '9')]); // covers the buffed attack exactly
+    state.rollingZoneCards = [suited('C', '4'), suited('D', '3')]; // pretend 2 cards already accumulated
+    state = rig(state, [suited('D', '12')]); // covers the buffed attack exactly
 
     const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
     state = res.state;
-    expect(state.pendingDamage).toBe(9); // 5 base + 4 from the rolling card that was still in play this turn
-    const res2 = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
-    state = res2.state;
+    expect(state.pendingDamage).toBe(12); // 5 base + 4 + 3 from both cards still accumulated in the zone
+  });
 
-    // The 4 that just buffed the attack is now banished for good, replaced by the fresh 9.
-    expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '4')).toBe(true);
-    expect(state.rollingZoneCard).toMatchObject({ suit: 'D', rank: '9' });
+  it('an enemy kill banishes the whole rolling-zone accumulation back to the banish pile and resets it to empty', () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'H', health: 10, attack: 1 };
+    let state = startCrimsonMission(1, [boss], { rollingZoneBonus: true });
+    state = structuredClone(state);
+    state.rollingZoneCards = [suited('C', '4'), suited('D', '3')]; // accumulated across a couple of turns
+    state = rig(state, [suited('S', '10')]); // exact 10 damage, Spades doesn't double
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    expect(state.currentEnemy).toBeNull(); // no more enemies left — the mission is won
+    expect(state.rollingZoneCards).toEqual([]);
+    expect(state.banishPile).toMatchObject([{ suit: 'C', rank: '4' }, { suit: 'D', rank: '3' }]);
   });
 });
 
@@ -1042,7 +1216,12 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
 
   const myla: Card = { id: 'myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla' };
 
-  it('sacrifices the lowest-value card left on the table into the mission zone on kill (never the discard pile)', () => {
+  /** Resolves an open AWAIT_ZONE_VENGEANCE_CHOICE window for the current player. */
+  function chooseSacrifice(state: GameState, cardId: string): GameState {
+    return ensureOk(applyAction(state, { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE', playerId: state.players[0].id, cardId })).state;
+  }
+
+  it('sourced fix: opens a player choice instead of auto-sacrificing — the card never falls to the mission zone until chosen', () => {
     const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 8, attack: 1 };
     let state = startGardenMission(1, [boss], [myla]);
     state = rig(state, [suited('D', '9')]);
@@ -1050,19 +1229,56 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
-    expect(state.missionZone.length).toBe(2); // Myla + the sacrificed 9
+    expect(state.turnPhase).toBe('AWAIT_ZONE_VENGEANCE_CHOICE');
+    expect(state.zoneVengeanceChoice).toEqual({ remaining: -1, attackIncludesGuardian: false });
+    expect(state.missionZone.length).toBe(1); // Myla only — nothing sacrificed yet
+    expect(state.currentEnemy?.tableCards.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')).toBe(true);
+
+    state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
+
+    expect(state.missionZone.length).toBe(2); // Myla + the chosen 9
     expect(state.missionZone.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')).toBe(true);
     expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')).toBe(false);
   });
 
-  it("Myla strikes for the zone's live sum right after it grows, routed through AWAIT_DEFEND", () => {
+  it('sourced fix: the player may sacrifice ANY card from the play area, not just the lowest-value one', () => {
+    // Three separate turns' worth of cards pile up on the boss's table before the killing blow — the shipped
+    // auto-sacrifice would always take the lowest (the 3). This proves the player can choose otherwise.
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 15, attack: 0 };
+    const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'C', health: 20, attack: 1 };
+    let state = startGardenMission(1, [boss, next], [myla]);
+
+    state = rig(state, [suited('D', '3')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.turnPhase).toBe('AWAIT_PLAY'); // enemy attack is 0 — turn just advances, no kill yet
+
+    state = rig(state, [suited('S', '4')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+
+    state = rig(state, [suited('H', '8')]); // 3 + 4 + 8 = 15 — exact kill
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.turnPhase).toBe('AWAIT_ZONE_VENGEANCE_CHOICE');
+    expect(state.currentEnemy?.tableCards.length).toBe(3);
+
+    // Deliberately sacrifice the middle-value card (4), not the lowest (3).
+    const chosen = state.currentEnemy!.tableCards.find((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '4')!;
+    state = chooseSacrifice(state, chosen.id);
+
+    expect(state.missionZone.some((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '4')).toBe(true);
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '3')).toBe(true);
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'H' && c.rank === '8')).toBe(true);
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '4')).toBe(false);
+  });
+
+  it("Myla strikes for the zone's live sum right after the chosen sacrifice lands, routed through AWAIT_DEFEND", () => {
     const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 8, attack: 1 };
     const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'D', health: 20, attack: 1 };
     let state = startGardenMission(1, [boss, next], [myla]);
     state = rig(state, [suited('D', '9')]);
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
 
     // Overkill (8 health, 9 damage) — not an exact kill, so no card is spared: 7 (Myla) + 9 = 16.
     expect(state.turnPhase).toBe('AWAIT_DEFEND');
@@ -1075,8 +1291,8 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     let state = startGardenMission(1, [boss, next], [myla]);
     state = rig(state, [suited('D', '9')]);
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
 
     // Exact kill: zone becomes [Myla(7), 9], but the 9 (highest) is spared from this strike — only 7 lands.
     expect(state.missionZone.length).toBe(2);
@@ -1084,26 +1300,69 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     expect(state.pendingDamage).toBe(7);
   });
 
+  it('sourced fix: a winning attack that includes a Guardian cancels the strike entirely (zone still grows)', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 5, attack: 1 };
+    const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'D', health: 20, attack: 1 };
+    let state = startGardenMission(1, [boss, next], [myla]);
+    const shield: SuitedCard = { ...suited('D', '5'), guardian: true };
+    state = rig(state, [shield]);
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.zoneVengeanceChoice).toEqual({ remaining: 0, attackIncludesGuardian: true });
+    state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
+
+    expect(state.missionZone.length).toBe(2); // the zone still grows — only the team-damage step is cancelled
+    expect(state.turnPhase).toBe('AWAIT_PLAY'); // no Myla strike — same player continues, no AWAIT_DEFEND
+    expect(state.pendingDamage).toBe(0);
+  });
+
+  it('rejects a sacrifice choice from the wrong player, wrong phase, or a card not on the table', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 8, attack: 1 };
+    let state = startGardenMission(2, [boss], [myla]);
+    state = rig(state, [suited('D', '9')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+
+    const cardId = state.currentEnemy!.tableCards[0].id;
+    expect(applyAction(state, { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE', playerId: state.players[1].id, cardId }).ok).toBe(false);
+    expect(applyAction(state, { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE', playerId: state.players[0].id, cardId: 'not-a-real-card' }).ok).toBe(false);
+
+    state = chooseSacrifice(state, cardId);
+    expect(
+      applyAction(state, { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE', playerId: state.players[0].id, cardId }).ok,
+    ).toBe(false); // window already closed
+  });
+
   it('leaves the mission zone permanently grown after a kill — nothing clears it', () => {
     const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 5, attack: 1 };
     let state = startGardenMission(1, [boss], [myla]);
     state = rig(state, [suited('H', '5')]);
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
 
     expect(state.missionZone.length).toBe(2); // Myla + the sacrificed 5, permanently
   });
 });
 
-describe('legacy: mission 5 reward (Reaver faction, Myla joins the party, Dual-class Stickers)', () => {
-  it('rewards 4 Reaver recruits, Myla as a real playable Cleric card, and a second round of Dual-class Stickers', () => {
+describe('legacy: mission 5 reward (only rank-5 Reaver kept, Myla joins the party, Dual-class Stickers, corrupt-another-card)', () => {
+  it('keeps only the rank-5 Reaver recruit (Haror) permanently — not all 4 originally shipped', () => {
+    // Sourced research (regicidelegacy.com compendium / BGG threads / a fan digital reimplementation's rules
+    // doc) found the shipped version over-granted: this repo's own mission-5 transcript note ("how to
+    // permanently retire cards from the party roster, used here to trim the new Reavers back down after the
+    // mission") and the sourced material agree only rank 5 survives.
     const mission5 = getMission(5)!;
-    expect(mission5.reward.recruits.filter((r) => r.class === 'REAVER').length).toBe(4);
+    const reavers = mission5.reward.recruits.filter((r) => r.class === 'REAVER');
+    expect(reavers.length).toBe(1);
+    expect(reavers[0]).toMatchObject({ name: 'Haror', rank: '5' });
+  });
+
+  it('rewards Myla as a real playable Cleric card, a second round of Dual-class Stickers, and a corrupt-another-card effect', () => {
+    const mission5 = getMission(5)!;
     const myla = mission5.reward.recruits.find((r) => r.name === 'Myla');
     expect(myla?.class).toBe('CLERIC');
     expect(myla?.rank).toBe('7');
     expect(mission5.reward.dualClassStickers).toBe(4);
+    expect(mission5.reward.corruptAnotherCard).toBe(true);
 
     const party = applyReward(buildInitialParty(), mission5.reward);
     const mylaCard = party.find((c) => c.kind === 'suited' && c.name === 'Myla');
@@ -1112,16 +1371,62 @@ describe('legacy: mission 5 reward (Reaver faction, Myla joins the party, Dual-c
       expect(mylaCard.guardian).toBeUndefined();
       expect(mylaCard.reaver).toBeUndefined();
     }
+    // The corrupt-another-card effect landed on some existing party member, never on Myla or Haror themselves.
+    const corrupted = party.filter((c) => c.kind === 'suited' && c.corrupted);
+    expect(corrupted.length).toBe(1);
+    expect(corrupted[0].name).not.toBe('Myla');
+    expect(corrupted[0].name).not.toBe('Haror');
+  });
+
+  it("no longer anchors Myla as a permanent presetMissionZone immunity fixture — she's an ordinary reserve-deck card for the fight itself", () => {
+    const mission5 = getMission(5)!;
+    expect(mission5.presetMissionZone).toBeUndefined();
+    expect(mission5.extraReserveCards?.some((c) => c.kind === 'suited' && c.name === 'Myla' && c.suit === 'H')).toBe(true);
   });
 });
 
-describe('legacy: mission 6 reward (Guardian faction + Azure Emblem relic)', () => {
-  it('rewards 4 Guardian recruits, one carrying the Aegis special ability', () => {
+describe('legacy: applyCorruptAnotherCard (mixed-bag reward primitive)', () => {
+  it('permanently corrupts exactly one eligible existing party member', () => {
+    const party = buildInitialParty();
+    const result = applyCorruptAnotherCard(party);
+    const corrupted = result.filter((c) => c.kind === 'suited' && c.corrupted);
+    expect(corrupted.length).toBe(1);
+  });
+
+  it('never corrupts a card whose id is excluded (e.g. a recruit this same reward just granted)', () => {
+    const party = buildInitialParty();
+    const excludeIds = new Set(party.map((c) => c.id));
+    const result = applyCorruptAnotherCard(party, excludeIds);
+    expect(result).toEqual(party); // nothing eligible — every id was excluded
+  });
+
+  it('is a no-op on an already-fully-corrupted party', () => {
+    const party = buildInitialParty().map((c) => (c.kind === 'suited' ? { ...c, corrupted: true } : c));
+    const result = applyCorruptAnotherCard(party);
+    expect(result).toEqual(party);
+  });
+});
+
+describe('legacy: mission 6 reward, sourced fix (only the rank-3 Guardian kept, plus a Guardian sticker)', () => {
+  it('keeps only the rank-3 Guardian (Ferro) as a permanent recruit — ranks 5/7/9 are not granted', () => {
     const mission6 = getMission(6)!;
+    expect(mission6.reward.recruits.length).toBe(1);
+    expect(mission6.reward.recruits[0]).toMatchObject({ name: 'Ferro', class: 'GUARDIAN', rank: '3' });
+
     const party = applyReward(buildInitialParty(), mission6.reward);
     const guardians = party.filter((c) => c.kind === 'suited' && c.guardian);
-    expect(guardians.length).toBe(4);
-    expect(guardians.filter((c) => c.kind === 'suited' && c.special === 'AEGIS').length).toBe(1);
+    expect(guardians.length).toBe(1);
+    expect(guardians[0].kind === 'suited' && guardians[0].name).toBe('Ferro');
+  });
+
+  it('grants a bonus Guardian sticker to one existing rank-8 party card instead of the other 3 Guardian recruits', () => {
+    const mission6 = getMission(6)!;
+    expect(mission6.reward.guardianSticker).toBe(true);
+
+    const party = applyReward(buildInitialParty(), mission6.reward);
+    const stickered = party.filter((c) => c.kind === 'suited' && c.secondClassGuardian);
+    expect(stickered.length).toBe(1);
+    expect(stickered[0].kind === 'suited' && stickered[0].rank).toBe('8');
   });
 
   it('a Guardian recruit takes its explicit suit (Guardian has none of its own) and is flagged guardian', () => {
@@ -1136,7 +1441,29 @@ describe('legacy: mission 6 reward (Guardian faction + Azure Emblem relic)', () 
   });
 });
 
-describe('legacy: Azure Emblem relic (mission 6) — Mage-attack assist window', () => {
+describe('legacy: bonus Guardian sticker (secondClassGuardian — keeps its own suit power AND raises the shield)', () => {
+  it('resolves both its printed suit power and the Guardian shield when played', () => {
+    const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 20 };
+    let state = startMission(1, [boss]);
+    const stickered: SuitedCard = { ...suited('C', '4'), secondClassGuardian: true }; // Warrior + bonus shield
+    state = rig(state, [stickered]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+
+    expect(res.state.currentEnemy?.damageTaken).toBe(8); // Clubs doubles the play's value (4*2=8)
+    expect(res.state.turnPhase).toBe('AWAIT_PLAY'); // the shield blocked the enemy's attack — no damage suffered
+  });
+
+  it('applyGuardianSticker gives one random eligible rank-8 party member secondClassGuardian', () => {
+    const party = buildInitialParty();
+    const next = applyGuardianSticker(party);
+    const stickered = next.filter((c) => c.kind === 'suited' && c.secondClassGuardian);
+    expect(stickered.length).toBe(1);
+    expect(stickered[0].kind === 'suited' && stickered[0].rank).toBe('8');
+  });
+});
+
+describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage's OWN player's card", () => {
   function mageCard(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
     return { ...suited(suit, rank), arcane: true };
   }
@@ -1158,59 +1485,71 @@ describe('legacy: Azure Emblem relic (mission 6) — Mage-attack assist window',
     return res.state;
   }
 
-  it('opens a window for every other player once a Mage card joins the attack, deferring the enemy retaliation', () => {
+  it("opens a window for the Mage's OWN player (not the others) once a Mage card joins the attack, deferring the enemy retaliation", () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     let state = startEmblemMission(3, [boss]);
     state = structuredClone(state);
     const player0Id = state.players[0].id;
-    state.players[0].hand = [mageCard('H', '4')];
+    const played = mageCard('H', '4');
+    state.players[0].hand = [played];
 
     const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
     expect(state.turnPhase).toBe('AWAIT_AZURE_EMBLEM');
-    expect(state.azureEmblemWindow).toEqual({ pendingPlayerIds: [state.players[1].id, state.players[2].id], blockNextAttack: false });
+    expect(state.azureEmblemWindow).toEqual({ pendingPlayerIds: [player0Id], eligibleCardIds: [played.id], blockNextAttack: false });
     expect(state.currentEnemy?.damageTaken).toBe(8); // 4 from the normal play + 4 from the arcane bolt, as usual
   });
 
-  it('lets each player in the queue silently place a card atop the reserve deck, or decline, in order', () => {
+  it("lets the Mage's own player bank that Mage card onto the reserve deck instead of losing it to the discard pile", () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     let state = startEmblemMission(3, [boss]);
     state = structuredClone(state);
     const player0Id = state.players[0].id;
-    state.players[0].hand = [mageCard('H', '4')];
-    const stashedCard = suited('D', '9');
-    state.players[1].hand = [stashedCard];
+    const played = mageCard('H', '4');
+    state.players[0].hand = [played];
 
     state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
-    const player1Id = state.players[1].id;
-    const player2Id = state.players[2].id;
 
-    // Player 1 stocks a card; player 2 declines.
-    let res = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player1Id, cardId: stashedCard.id }));
-    state = res.state;
-    expect(state.tavernDeck[0]).toEqual(stashedCard);
-    expect(state.players[1].hand.length).toBe(0);
-    expect(state.azureEmblemWindow?.pendingPlayerIds).toEqual([player2Id]);
-
-    res = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player2Id }));
+    const res = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id, cardId: played.id }));
     state = res.state;
 
+    expect(state.tavernDeck[0]).toEqual(played);
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === played.id)).toBe(false); // banked, not left on the table
     expect(state.azureEmblemWindow).toBeNull();
-    expect(state.turnPhase).toBe('AWAIT_DEFEND'); // deferred attack now resolves for the Mage's player
+    expect(state.turnPhase).toBe('AWAIT_DEFEND'); // deferred attack now resolves
     expect(state.pendingDamage).toBe(10);
   });
 
-  it('rejects a response from anyone but the front of the queue, and is inert without the relic', () => {
+  it('lets the Mage\'s own player decline — the card stays on the table (bound for the discard pile like any other)', () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     let state = startEmblemMission(2, [boss]);
     state = structuredClone(state);
     const player0Id = state.players[0].id;
-    state.players[0].hand = [mageCard('H', '4')];
+    const played = mageCard('H', '4');
+    state.players[0].hand = [played];
 
     state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
-    const bad = applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id });
-    expect(bad.ok).toBe(false); // player 0 isn't in the queue — they're the attacker
+    state = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id })).state;
+
+    expect(state.azureEmblemWindow).toBeNull();
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === played.id)).toBe(true); // left in place, declined
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+  });
+
+  it('rejects a response from anyone but the Mage\'s own player, rejects banking an ineligible card, and is inert without the relic', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startEmblemMission(2, [boss]);
+    state = structuredClone(state);
+    const player0Id = state.players[0].id;
+    const player1Id = state.players[1].id;
+    const played = mageCard('H', '4');
+    state.players[0].hand = [played];
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+
+    expect(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player1Id }).ok).toBe(false); // not their window
+    expect(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id, cardId: 'not-eligible' }).ok).toBe(false);
 
     // Without the relic, the same Mage play never opens the window at all.
     let plain = startMission(2, [boss]);
@@ -1268,8 +1607,43 @@ describe('legacy: Guardian class power (absolute shield, one attack at a time)',
   });
 });
 
-describe('legacy: mission 7 mechanics (Pilgrim zone)', () => {
-  function startWellMission(n: number, enemies: LegacyEnemySpec[], pilgrimCards: Card[]): GameState {
+describe('legacy: mission 7 setup (Tales of Rebirth Pilgrim hand-trap)', () => {
+  it('is a 12-enemy 3-wave gauntlet with 8 Pilgrim cards seeded via extraReserveCards, gated by pilgrimMechanic', () => {
+    const mission7 = getMission(7)!;
+    expect(mission7.enemies.length).toBe(12);
+    expect(mission7.pilgrimMechanic).toBe(true);
+    // Sourced rework: Pilgrims are ordinary reserve-deck cards now, not a separate face-down deck/zone.
+    expect(mission7.pilgrimCards).toBeUndefined();
+    expect(mission7.extraReserveCards?.length).toBe(8);
+    expect(mission7.extraReserveCards?.every((c) => c.kind === 'suited' && c.pilgrim)).toBe(true);
+  });
+
+  it('shuffles the 8 Pilgrim cards into the reserve deck alongside the party at mission start (no separate deck/zone populated)', () => {
+    const mission7 = getMission(7)!;
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'well-setup-test',
+      party: buildInitialParty(),
+      enemies: missionEnemiesToSpecs(mission7.enemies),
+      jesterCount: 0,
+      pilgrimMechanic: mission7.pilgrimMechanic,
+      extraReserveCards: mission7.extraReserveCards,
+    });
+    const state = ensureOk(res).state;
+    expect(state.pilgrimMechanic).toBe(true);
+    // Vestigial fields from the old shared-zone economy — always empty under the new hand-trap rule.
+    expect(state.pilgrimZone.length).toBe(0);
+    expect(state.pilgrimDeck.length).toBe(0);
+    const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
+    // 40 party + 8 Pilgrims = 48 total in circulation (hands + reserve deck).
+    expect(handCount + state.tavernDeck.length).toBe(48);
+  });
+});
+
+describe('legacy: mission 7 mechanics (Pilgrim hand-trap)', () => {
+  function startWellMission(n: number, enemies: LegacyEnemySpec[]): GameState {
     const ids = Array.from({ length: n }, (_, i) => `p${i}`);
     const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
     const res = applyAction(createLobbyState(), {
@@ -1281,71 +1655,189 @@ describe('legacy: mission 7 mechanics (Pilgrim zone)', () => {
       enemies,
       jesterCount: 0,
       pilgrimMechanic: true,
-      pilgrimCards,
     });
     if (!res.ok) throw new Error(res.error);
     return res.state;
   }
 
-  const fenwick: Card = { id: 'fenwick', kind: 'suited', suit: 'H', rank: '2', name: 'Old Fenwick' };
-  const sae: Card = { id: 'sae', kind: 'suited', suit: 'D', rank: '3', name: 'Little Sae' };
+  const fenwick: Card = { id: 'fenwick', kind: 'suited', suit: 'H', rank: '2', name: 'Old Fenwick', pilgrim: true };
 
-  it('flips the top Pilgrim into the zone right at mission start, before anyone has played', () => {
+  it('rejects PLAY_CARDS outright when a Pilgrim card is played alone', () => {
     const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 20, attack: 10 };
-    const state = startWellMission(1, [boss], [fenwick, sae]);
-    expect(state.pilgrimZone.length).toBe(1);
-    expect(state.pilgrimZone[0].id).toBe('fenwick');
-    expect(state.pilgrimDeck.length).toBe(1);
+    let state = startWellMission(1, [boss]);
+    state = rig(state, [fenwick]);
+
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [fenwick.id] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/dead weight|cannot be played/i);
   });
 
-  it('flips another Pilgrim at the start of the next turn', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 };
-    let state = startWellMission(1, [boss], [fenwick, sae]);
+  it('rejects a combo play if any one of its cards is a Pilgrim, even paired with an ordinary card', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 20, attack: 10 };
+    let state = startWellMission(1, [boss]);
+    const ordinary = suited('H', '2'); // same rank as fenwick, would otherwise form a valid combo
+    state = rig(state, [fenwick, ordinary]);
+
+    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [fenwick.id, ordinary.id] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/dead weight|cannot be played/i);
+  });
+
+  it('still allows an ordinary (non-Pilgrim) card in the same hand to be played normally', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 20, attack: 10 };
+    let state = startWellMission(1, [boss]);
+    const ordinary = suited('D', '4');
+    state = rig(state, [fenwick, ordinary]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [ordinary.id] }));
+    state = res.state;
+    expect(state.currentEnemy?.damageTaken).toBe(4);
+    // The Pilgrim is untouched — still stuck in hand.
+    expect(state.players[0].hand.some((c) => c.id === 'fenwick')).toBe(true);
+  });
+
+  it('rejects a Kinfolk Flute silent assist when the offered card is a Pilgrim', () => {
+    const target: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
+    const res0 = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0', 'p1'],
+      playerNames: ['Player 0', 'Player 1'],
+      seed: 'flute-pilgrim-test',
+      party: buildInitialParty(),
+      enemies: [target],
+      jesterCount: 0,
+      relics: ['KINFOLK_FLUTE'],
+      pilgrimMechanic: true,
+    });
+    let state = ensureOk(res0).state;
+    state = rig(state, [suited('H', '3')]);
+    const attackerId = state.players[0].id;
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: attackerId, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_COMBO_ASSIST');
+
+    state = structuredClone(state);
+    const pilgrimAssist: Card = { id: 'assist-pilgrim', kind: 'suited', suit: 'H', rank: '3', pilgrim: true };
+    state.players[1].hand = [pilgrimAssist];
+    const badAssist = applyAction(state, { type: 'ASSIST_COMBO', playerId: state.players[1].id, cardId: pilgrimAssist.id });
+    expect(badAssist.ok).toBe(false);
+  });
+
+  it('rejects a DEFEND selection that includes a Pilgrim, even when its value would help cover the damage', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 5 };
+    let state = startWellMission(1, [boss]);
+    state = rig(state, [fenwick, suited('D', '6')]); // fenwick(2) + 6 = 8, would cover 5 damage if it were allowed
     const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
     state = res.state;
-    expect(state.pilgrimZone.length).toBe(2);
-    expect(state.pilgrimZone[1].id).toBe('sae');
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+
+    const bad = applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) });
+    expect(bad.ok).toBe(false);
+
+    // Covering with just the non-Pilgrim card is allowed and succeeds instead.
+    const nonPilgrimId = state.players[0].hand.find((c) => c.id !== 'fenwick')!.id;
+    const good = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [nonPilgrimId] }));
+    expect(good.state.phase).toBe('IN_PROGRESS');
+    expect(good.state.players[0].hand.some((c) => c.id === 'fenwick')).toBe(true); // still stuck, untouched
   });
 
-  it("rescues (banishes) a Pilgrim when an attack's total value exactly matches theirs", () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
-    let state = startWellMission(1, [boss], [fenwick]); // fenwick is worth 2
-    state = rig(state, [suited('D', '2')]);
-
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
-
-    expect(state.pilgrimZone.length).toBe(0);
-    expect(state.banishPile.some((c) => c.id === 'fenwick')).toBe(true);
-    expect(state.discardPile.some((c) => c.id === 'fenwick')).toBe(false);
-  });
-
-  it('leaves a waiting Pilgrim alone when the played value does not match', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
-    let state = startWellMission(1, [boss], [fenwick]); // worth 2
-    state = rig(state, [suited('D', '5')]);
-
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
-
-    expect(state.pilgrimZone.length).toBe(1);
-  });
-
-  it("burns reserve-deck cards on kill equal to the Pilgrim zone's combined unrescued value", () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
-    let state = startWellMission(1, [boss], [fenwick, sae]); // zone = [fenwick(2)] after the mission-start flip
+  it('blocks Feign Death entirely while holding a Pilgrim — the whole-hand discard is rejected outright, not silently allowed', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 20 };
+    let state = startWellMission(1, [boss]);
+    state = rig(state, [fenwick, suited('D', '2')]); // hand of 2, one is a Pilgrim
+    state.maxHandSize = 2; // "at hand limit" — the usual Feign Death precondition
     let res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
-    state = res.state; // zone = [fenwick(2), sae(3)] after the next turn's flip
-    expect(state.pilgrimZone.length).toBe(2);
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
 
-    const tavernBefore = state.tavernDeck.length;
-    // Spades matches the boss's own immunity (blocked, no Diamonds-style draw side effect) — isolates the burn.
-    state = rig(state, [suited('S', '8')]); // kills the boss outright, doesn't match either Pilgrim's value
-    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    const bad = applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) });
+    expect(bad.ok).toBe(false);
+    expect(state.phase).toBe('IN_PROGRESS'); // rejected outright, not resolved as a loss
+  });
+
+  it('still loses normally (no soft-lock) when the non-Pilgrim cards alone cannot cover the damage', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 20 };
+    let state = startWellMission(1, [boss]);
+    state = rig(state, [fenwick, suited('D', '3')]);
+    state.maxHandSize = 2;
+    let res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
     state = res.state;
 
-    expect(state.pilgrimZone.length).toBe(2); // neither rescued
-    expect(tavernBefore - state.tavernDeck.length).toBe(5); // burned 2 + 3 = 5 off the reserve deck's top
+    const nonPilgrimId = state.players[0].hand.find((c) => c.id !== 'fenwick')!.id;
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [nonPilgrimId] }));
+    state = res.state;
+    expect(state.phase).toBe('LOST'); // 3 < 20, not the whole hand (Pilgrim left behind) — no Feign Death exception
+  });
+});
+
+describe('legacy: mission 7 mechanic (exact-kill Pilgrim release)', () => {
+  function startWellMission(n: number, enemies: LegacyEnemySpec[]): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: names,
+      seed: 'well-exact-kill-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      pilgrimMechanic: true,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it('an exact-damage kill banishes one Pilgrim stuck in the killer\'s own hand, for free', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
+    let state = startWellMission(1, [boss]);
+    const trapped: Card = { id: 'trapped-pilgrim', kind: 'suited', suit: 'H', rank: '2', name: 'Old Fenwick', pilgrim: true };
+    state = rig(state, [trapped, suited('S', '8')]); // 8 damage = exactly lethal
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[1].id] }));
+    state = res.state;
+
+    expect(state.currentEnemy).toBeNull(); // boss defeated, mission complete (only enemy)
+    expect(state.players[0].hand.some((c) => c.id === 'trapped-pilgrim')).toBe(false);
+    expect(state.banishPile.some((c) => c.id === 'trapped-pilgrim')).toBe(true);
+    expect(state.discardPile.some((c) => c.id === 'trapped-pilgrim')).toBe(false);
+  });
+
+  it("frees a Pilgrim from another player's hand (scanned in turn order) when the killer holds none", () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
+    let state = startWellMission(2, [boss]);
+    const trapped: Card = { id: 'trapped-other', kind: 'suited', suit: 'H', rank: '2', pilgrim: true };
+    state = structuredClone(state);
+    state.players[0].hand = [suited('S', '8')]; // current player: no Pilgrim
+    state.players[1].hand = [trapped]; // teammate: holding one
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.players[1].hand.some((c) => c.id === 'trapped-other')).toBe(false);
+    expect(state.banishPile.some((c) => c.id === 'trapped-other')).toBe(true);
+  });
+
+  it('does nothing extra on an exact kill when nobody is holding a Pilgrim', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
+    let state = startWellMission(1, [boss]);
+    state = rig(state, [suited('S', '8')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    expect(res.state.banishPile.length).toBe(0);
+  });
+
+  it('does NOT release a Pilgrim on an overkill (non-exact) hit', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 5, attack: 0 };
+    let state = startWellMission(1, [boss]);
+    const trapped: Card = { id: 'trapped-pilgrim-2', kind: 'suited', suit: 'H', rank: '2', pilgrim: true };
+    state = rig(state, [trapped, suited('S', '8')]); // 8 damage vs 5 health — overkill, not exact
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[1].id] }));
+    state = res.state;
+
+    expect(state.players[0].hand.some((c) => c.id === 'trapped-pilgrim-2')).toBe(true); // still stuck
+    expect(state.banishPile.some((c) => c.id === 'trapped-pilgrim-2')).toBe(false);
   });
 });
 
@@ -2041,6 +2533,37 @@ describe('legacy: mission 10 setup (Pride to Fall)', () => {
     expect(handCount + state.tavernDeck.length).toBe(32);
   });
 
+  it(
+    'prioritizes already-corrupted party members for the enemy queue over a random sample — sourced correction, ' +
+      "see legacy-missions-transcript-mismatches memory doc's Mission 10 section",
+    () => {
+      const party = buildInitialParty();
+      // Mark exactly 3 party cards corrupted (fewer than the 8 the queue needs — realistic today, since no
+      // earlier mission's reward path actually sets this flag yet; see deck.ts's buildCorruptedPartyEnemies).
+      const corruptedIds = new Set(party.slice(0, 3).map((c) => c.id));
+      const seededParty = party.map((c) => (corruptedIds.has(c.id) ? { ...c, corrupted: true } : c));
+
+      const state = startMission10(1, { startOfTurnZoneFlip: false, party: seededParty });
+      const queue = [state.currentEnemy!, ...state.castleDeck];
+      const queueSourceIds = new Set(queue.map((e) => e.sourceCard!.id));
+
+      // All 3 corrupted members were pulled into the queue...
+      for (const id of corruptedIds) expect(queueSourceIds.has(id)).toBe(true);
+      // ...and the remaining 5 slots fell back to the old random-sample-from-the-whole-party behavior to fill
+      // out the queue, exactly as before this fix, since only 3 corrupted members exist to draw from.
+      expect(queue.length).toBe(8);
+    },
+  );
+
+  it('falls back to a random sample from the whole party when no member is corrupted yet (today\'s realistic campaign state)', () => {
+    // buildInitialParty() never marks anything corrupted — no earlier mission's reward path does that yet — so
+    // this is the actual state a real campaign reaches Mission 10 in today, not a hypothetical.
+    const state = startMission10(1, { startOfTurnZoneFlip: false });
+    const queue = [state.currentEnemy!, ...state.castleDeck];
+    expect(queue.length).toBe(8);
+    expect(queue.every((e) => e.sourceCard?.kind === 'suited' && !e.sourceCard.corrupted)).toBe(true);
+  });
+
   it('fails to start when the party has fewer than 8 eligible members to corrupt', () => {
     const res = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',
@@ -2109,6 +2632,22 @@ describe('legacy: mission 10 class powers (corrupted-hero enemies)', () => {
     expect(res.state.pendingDamage).toBe(4);
   });
 
+  it(
+    'caps the mission zone\'s contribution to the enemy\'s attack — UNSOURCED balance judgment call (see ' +
+      'MISSION_10_ZONE_BONUS_CAP\'s own comment in engine.ts and legacy-mission-playtest-findings for why)',
+    () => {
+      let state = startMission10();
+      state = rig(state, [], { suit: 'S', baseAttack: 5, spadesShield: 0 }); // Paladin suit, not Warrior — keeps the math to base + capped zone
+      // Raw zone sum is 4+5+6+8 = 23, far past the cap — only MISSION_10_ZONE_BONUS_CAP (10) of it should count.
+      state.missionZone = [suited('D', '4'), suited('H', '5'), suited('C', '6'), suited('S', '8')];
+
+      const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+      // 5 base + 10 (capped zone, not the raw 23) = 15.
+      expect(res.state.pendingDamage).toBe(15);
+    },
+  );
+
   it('an enemy Paladin reduces damage it takes by its own base strength', () => {
     let state = startMission10();
     state = rig(state, [suited('D', '10')], { suit: 'S', baseAttack: 4, maxHealth: 100, damageTaken: 0 }); // Paladin suit
@@ -2144,17 +2683,56 @@ describe('legacy: mission 10 class powers (corrupted-hero enemies)', () => {
     expect(res.state.missionZone.map((c) => c.id)).toEqual([draggedId]);
   });
 
-  it('an enemy Bard forces the ending player to move their lowest-value hand card into the mission zone', () => {
+  it(
+    'an enemy Bard opens a player CHOICE (AWAIT_BARD_SURRENDER) instead of auto-picking a card — sourced ' +
+      'correction, see legacy-missions-transcript-mismatches memory doc\'s Mission 10 section',
+    () => {
+      let state = startMission10({ startOfTurnZoneFlip: false });
+      const low = suited('C', '2');
+      const mid = suited('H', '5');
+      const high = suited('D', '8');
+      state = rig(state, [mid, low, high], { suit: 'D', baseAttack: 0 }); // Bard suit, 0 attack
+
+      const yielded = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+      // Pauses right here — the whole hand is still intact, nothing has moved to the zone yet, and the
+      // current-player pointer hasn't advanced (still whoever's turn is ending).
+      expect(yielded.state.turnPhase).toBe('AWAIT_BARD_SURRENDER');
+      expect(yielded.state.players[0].hand.map((c) => c.id).sort()).toEqual([high.id, low.id, mid.id].sort());
+      expect(yielded.state.missionZone.length).toBe(0);
+      expect(yielded.state.currentPlayerIndex).toBe(0);
+
+      // The player picks — deliberately NOT the lowest-value card, proving this is a real choice rather than a
+      // relabeled auto-pick.
+      const res = ensureOk(
+        applyAction(yielded.state, { type: 'SURRENDER_CARD_TO_ZONE', playerId: state.players[0].id, cardId: high.id }),
+      );
+
+      expect(res.state.players[0].hand.map((c) => c.id).sort()).toEqual([low.id, mid.id].sort());
+      expect(res.state.missionZone.map((c) => c.id)).toEqual([high.id]);
+      // Turn-advancement resumed and completed once the choice resolved.
+      expect(res.state.turnPhase).toBe('AWAIT_PLAY');
+    },
+  );
+
+  it("SURRENDER_CARD_TO_ZONE rejects a card not in the ending player's hand, and rejects a different player resolving it", () => {
     let state = startMission10({ startOfTurnZoneFlip: false });
-    const low = suited('C', '2');
-    const mid = suited('H', '5');
-    const high = suited('D', '8');
-    state = rig(state, [mid, low, high], { suit: 'D', baseAttack: 0 }); // Bard suit, 0 attack
+    const inHand = suited('H', '4');
+    state = rig(state, [inHand], { suit: 'D', baseAttack: 0 });
+    const yielded = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    expect(yielded.state.turnPhase).toBe('AWAIT_BARD_SURRENDER');
 
-    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    const notInHand = applyAction(yielded.state, {
+      type: 'SURRENDER_CARD_TO_ZONE',
+      playerId: state.players[0].id,
+      cardId: 'not-a-real-card-id',
+    });
+    expect(notInHand.ok).toBe(false);
 
-    expect(res.state.players[0].hand.map((c) => c.id).sort()).toEqual([high.id, mid.id].sort());
-    expect(res.state.missionZone.map((c) => c.id)).toEqual([low.id]);
+    const wrongPlayer = applyAction(yielded.state, { type: 'SURRENDER_CARD_TO_ZONE', playerId: 'someone-else', cardId: inHand.id });
+    expect(wrongPlayer.ok).toBe(false);
+    // Neither rejected attempt actually moved the card.
+    expect(yielded.state.players[0].hand.map((c) => c.id)).toEqual([inHand.id]);
   });
 
   it("an enemy Bard's forced move is skipped entirely when the ending player's hand is empty", () => {
@@ -2274,20 +2852,38 @@ function startMission11(n: number, opts: { party?: Card[] } = {}): GameState {
     jesterCount: 0,
     beastDeckMechanic: mission11.beastDeckMechanic,
     pileTopEnemyBonus: mission11.pileTopEnemyBonus,
+    discardCleanupLowToHigh: mission11.discardCleanupLowToHigh,
   });
   if (!res.ok) throw new Error(res.error);
   return res.state;
 }
 
 describe('legacy: mission 11 setup (Descent into Darkness)', () => {
-  it('the mission entry has 4 elite enemies (one per base class), the beast-deck and pile-top-bonus flags, and no separate recruit reward', () => {
+  it('the mission entry has 5 enemies (4 weak mooks, one per base class, plus the final boss Evil Goran), the beast-deck and pile-top-bonus flags, sidelines Esme by identity, and rewards her upgrade instead of a recruit', () => {
     const mission11 = getMission(11)!;
     expect(mission11.title).toBe('Descent into Darkness');
-    expect(mission11.enemies.length).toBe(4);
+    expect(mission11.enemies.length).toBe(5);
     expect(new Set(mission11.enemies.map((e) => e.class))).toEqual(new Set(['WARRIOR', 'BARD', 'CLERIC', 'PALADIN']));
+
+    const mooks = mission11.enemies.slice(0, 4);
+    expect(mooks.every((e) => e.health === 30 && e.attack === 10)).toBe(true);
+
+    const boss = mission11.enemies[4];
+    expect(boss.name).toBe('Evil Goran');
+    expect(boss.health).toBe(90);
+    expect(boss.attack).toBe(20);
+
     expect(mission11.beastDeckMechanic).toBe(true);
     expect(mission11.pileTopEnemyBonus).toBe(true);
+    expect(mission11.discardCleanupLowToHigh).toBe(true);
+    expect(mission11.sidelineIdentity).toEqual({ suit: 'C', rank: '6' });
     expect(mission11.reward.recruits).toEqual([]);
+    expect(mission11.reward.upgradeSidelinedCard).toEqual({ suit: 'C', rank: '6' });
+  });
+
+  it('the starting party names the sidelined identity (6 of Clubs) "Esme"', () => {
+    const esme = buildInitialParty().find((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6');
+    expect(esme?.name).toBe('Esme');
   });
 
   it('builds the beast deck from the mission-4 beast cards in the party, and none of them are available to draw or play this mission', () => {
@@ -2486,80 +3082,140 @@ describe('legacy: mission 11 pile-top bonus strength & immunity, and banish-on-d
   });
 });
 
-describe('legacy: mission 11 reward (pick one beast card to carry forward)', () => {
-  it("opens AWAIT_BEAST_REWARD_CHOICE (not an immediate WON) when the mission's last enemy falls", () => {
-    const beasts = mission4BeastCards();
-    let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
-    state = structuredClone(state);
-    state.castleDeck = []; // the current enemy is the last of the 4
-    state = rig(state, [suited('D', '9')], { suit: 'S', baseAttack: 0, maxHealth: 9, damageTaken: 0, spadesShield: 0 });
-
-    const res = ensureOk(
-      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
-    );
-
-    expect(res.state.phase).toBe('IN_PROGRESS'); // not WON yet — the party still has to choose
-    expect(res.state.turnPhase).toBe('AWAIT_BEAST_REWARD_CHOICE');
-    const pool = [...res.state.beastDeck, ...res.state.beastDeckDiscard];
-    expect(pool.length).toBe(4);
+describe('legacy: mission 11 discard cleanup ordering fix (discardCleanupLowToHigh)', () => {
+  it('the mission enables discardCleanupLowToHigh — the only multi-card discard-pile push this mission has (pileTopEnemyBonus routes every enemy-defeat table-card batch to the BANISH pile instead)', () => {
+    const mission11 = getMission(11)!;
+    expect(mission11.discardCleanupLowToHigh).toBe(true);
   });
 
-  it('CHOOSE_BEAST_REWARD resolves the choice into restoredPartyCards and completes the mission', () => {
+  it('a covered DEFEND with multiple cards leaves the LOWEST-value card on top of the discard pile, regardless of the order the player selected them in', () => {
+    const low = suited('H', '2');
+    const mid = suited('D', '5');
+    const high = suited('S', '9');
+
+    // No beast cards in the party — an empty beast deck is a guaranteed no-op (see the "no-op beast deck" setup
+    // test above), which isolates this assertion from Mission 11's OTHER mechanic (a start-of-turn beast flip
+    // could otherwise banish the very top-of-discard-pile card this test is checking, as a Warrior flip does).
+    let stateA = startMission11(1, { party: buildInitialParty() });
+    stateA = rig(stateA, [low, mid, high], { baseAttack: 3, spadesShield: 0 });
+    const yieldedA = ensureOk(applyAction(stateA, { type: 'YIELD', playerId: stateA.players[0].id }));
+    expect(yieldedA.state.turnPhase).toBe('AWAIT_DEFEND');
+    // Select in high, low, mid order — worst case for an unsorted push (the finishing card, mid, would land on top).
+    const defendedA = ensureOk(
+      applyAction(yieldedA.state, { type: 'DEFEND', playerId: yieldedA.state.players[0].id, cardIds: [high.id, low.id, mid.id] }),
+    );
+
+    let stateB = startMission11(1, { party: buildInitialParty() });
+    stateB = rig(stateB, [suited('H', '2'), suited('D', '5'), suited('S', '9')], { baseAttack: 3, spadesShield: 0 });
+    const [lowB, midB, highB] = stateB.players[0].hand;
+    const yieldedB = ensureOk(applyAction(stateB, { type: 'YIELD', playerId: stateB.players[0].id }));
+    // Select in the opposite order this time — low, mid, high.
+    const defendedB = ensureOk(
+      applyAction(yieldedB.state, { type: 'DEFEND', playerId: yieldedB.state.players[0].id, cardIds: [lowB.id, midB.id, highB.id] }),
+    );
+
+    for (const res of [defendedA, defendedB]) {
+      const top = res.state.discardPile[res.state.discardPile.length - 1];
+      expect(top.kind).toBe('suited');
+      if (top.kind === 'suited') expect(top.rank).toBe('2'); // the lowest-value card, no matter the selection order
+    }
+  });
+
+  it('without the flag, a covered DEFEND preserves whatever order the cards were selected in (proves the sort is gated by discardCleanupLowToHigh, not always-on)', () => {
+    const enemy: LegacyEnemySpec = { name: 'Ungoverned Foe', suit: 'H', health: 100, attack: 3 };
+    let state = startMission(1, [enemy]); // plain legacy mission, discardCleanupLowToHigh left unset
+    expect(state.discardCleanupLowToHigh).toBe(false);
+    const low = suited('D', '2');
+    const high = suited('S', '9');
+    state = rig(state, [high, low]); // enemy attack already 3, no rig override needed
+    const yielded = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    // Select high first, low second — an unsorted push leaves the LAST-selected card (low) on top.
+    const defended = ensureOk(
+      applyAction(yielded.state, { type: 'DEFEND', playerId: yielded.state.players[0].id, cardIds: [high.id, low.id] }),
+    );
+    expect(defended.state.discardPile.map((c) => c.id)).toEqual([high.id, low.id]); // pushed in selection order, unsorted
+  });
+
+  it('caps the following turn\'s pileTopEnemyBonus discard-pile-top component at the lowest defended card, not the highest one that actually covered the hit', () => {
+    // No beast cards — see the note on the previous test for why this isolates the assertion from the OTHER
+    // Mission 11 mechanic (a start-of-turn beast flip firing between the DEFEND and the next YIELD).
+    let state = startMission11(1, { party: buildInitialParty() });
+    const low = suited('H', '2');
+    const high = suited('S', '9');
+    state = rig(state, [high, low], { baseAttack: 3, spadesShield: 0 });
+    const yielded = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    // Select the high card first — the pre-fix bug would leave it landing last if selection order were reversed;
+    // either way, the fix guarantees the LOW card ends up on top regardless.
+    const defended = ensureOk(
+      applyAction(yielded.state, { type: 'DEFEND', playerId: yielded.state.players[0].id, cardIds: [high.id, low.id] }),
+    );
+    expect(defended.state.turnPhase).toBe('AWAIT_PLAY'); // turn advanced, ready for the next hit
+
+    // Force the next turn's attack to resolve immediately with a fresh (empty) hand and yield again.
+    const state2 = rig(defended.state, [], { baseAttack: 5, spadesShield: 0 });
+    const res2 = ensureOk(applyAction(state2, { type: 'YIELD', playerId: state2.players[0].id }));
+
+    // 5 base + 2 (the lowest defended card, now on top of the discard pile) + 0 (banish pile empty) = 7 — not
+    // 5 + 9 = 14, which is what the pre-fix arbitrary ordering could have handed back.
+    expect(res2.state.pendingDamage).toBe(7);
+  });
+});
+
+describe('legacy: mission 11 reward (Esme returns permanently upgraded)', () => {
+  it("completes the mission immediately (WON) when the last enemy falls — no beast-card choice window", () => {
     const beasts = mission4BeastCards();
     let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
     state = structuredClone(state);
-    state.castleDeck = [];
+    state.castleDeck = []; // the current enemy is the last of the 5
     state = rig(state, [suited('D', '9')], { suit: 'S', baseAttack: 0, maxHealth: 9, damageTaken: 0, spadesShield: 0 });
-    const killRes = ensureOk(
-      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
-    );
-    const pool = [...killRes.state.beastDeck, ...killRes.state.beastDeckDiscard];
-    const chosen = pool[0];
 
     const res = ensureOk(
-      applyAction(killRes.state, { type: 'CHOOSE_BEAST_REWARD', playerId: killRes.state.players[0].id, cardId: chosen.id }),
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
     );
 
+    // Sourced correction: no pending choice window anymore — same shape as every other mission's final kill.
     expect(res.state.phase).toBe('WON');
-    expect(res.state.restoredPartyCards.map((c) => c.id)).toEqual([chosen.id]);
-    expect(res.state.beastDeck.length).toBe(0);
-    expect(res.state.beastDeckDiscard.length).toBe(0);
+    expect(res.state.currentEnemy).toBeNull();
   });
 
-  it('rejects CHOOSE_BEAST_REWARD when no window is open, and rejects a card id outside the pool', () => {
-    let state = startMission11(1);
-    const notOpen = applyAction(state, { type: 'CHOOSE_BEAST_REWARD', playerId: state.players[0].id, cardId: 'whatever' });
-    expect(notOpen.ok).toBe(false);
+  it('applyEvergreenUpgrade grants the matching card SuitedCard.evergreen, leaving everything else untouched', () => {
+    const party = buildInitialParty();
+    const esme = party.find((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')!;
 
-    state = structuredClone(state);
-    state.castleDeck = [];
-    state = rig(state, [suited('D', '9')], { suit: 'S', baseAttack: 0, maxHealth: 9, damageTaken: 0, spadesShield: 0 });
-    const killRes = ensureOk(
-      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
-    );
-    const badPick = applyAction(killRes.state, {
-      type: 'CHOOSE_BEAST_REWARD',
-      playerId: killRes.state.players[0].id,
-      cardId: 'not-in-the-pool',
-    });
-    expect(badPick.ok).toBe(false);
+    const next = applyEvergreenUpgrade(party, { suit: 'C', rank: '6' });
+
+    const upgraded = next.find((c) => c.id === esme.id) as SuitedCard;
+    expect(upgraded.evergreen).toBe(true);
+    expect(upgraded.name).toBe('Esme');
+    // Nothing else in the party was touched — same length, same other ids, no other card upgraded.
+    expect(next.length).toBe(party.length);
+    expect(next.filter((c) => c.kind === 'suited' && (c as SuitedCard).evergreen).map((c) => c.id)).toEqual([esme.id]);
   });
 
-  it('applyBeastCardChoice replaces the whole beast-card slate with just the chosen card', () => {
+  it('applyEvergreenUpgrade is a no-op (same reference) with no identity given', () => {
+    const party = buildInitialParty();
+    expect(applyEvergreenUpgrade(party, undefined)).toBe(party);
+  });
+
+  it('applyEvergreenUpgrade is a no-op (same reference) when no card matches the identity', () => {
+    const party = buildInitialParty().filter((c) => !(c.kind === 'suited' && c.suit === 'C' && c.rank === '6'));
+    expect(applyEvergreenUpgrade(party, { suit: 'C', rank: '6' })).toBe(party);
+  });
+
+  it("applyReward wires the mission's own reward.upgradeSidelinedCard through to Esme, and Beast Companions return unpruned", () => {
+    const mission11 = getMission(11)!;
     const beasts = mission4BeastCards();
     const party = [...buildInitialParty(), ...beasts];
-    const chosen = beasts[0];
 
-    const next = applyBeastCardChoice(party, [chosen]);
+    const next = applyReward(party, mission11.reward);
 
+    const esme = next.find((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6') as SuitedCard;
+    expect(esme.evergreen).toBe(true);
+    // Sourced correction: the previously-shipped version pruned the beast-card slate down to one choice at reward
+    // time (see the removed applyBeastCardChoice) — the real reward doesn't touch it, so all 4 survive untouched.
     const beastIdsInNext = next.filter((c) => c.kind === 'suited' && (c as SuitedCard).beast).map((c) => c.id);
-    expect(beastIdsInNext).toEqual([chosen.id]);
-    expect(next.length).toBe(party.length - 3); // the other 3 beast cards are pruned; the chosen one was already present
-  });
-
-  it('applyBeastCardChoice is a no-op (same reference) when nothing was restored', () => {
-    const party = [...buildInitialParty(), ...mission4BeastCards()];
-    expect(applyBeastCardChoice(party, [])).toBe(party);
+    expect(new Set(beastIdsInNext)).toEqual(new Set(beasts.map((c) => c.id)));
+    expect(next.length).toBe(party.length);
   });
 });
 
@@ -2744,7 +3400,9 @@ describe('legacy: mission 12 restored-card redirect (can never land in the banis
 describe('legacy: mission 12 start-of-turn banish-pile zone flip', () => {
   it('moves the top of the banish pile into the mission zone, buffing the current enemy\'s attack and granting immunity to its class', () => {
     let state = startMission12(1);
-    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    // A throwaway card the player never plays — just enough that yielding with a 0-damage attack doesn't read as
+    // a genuinely stuck solo player (see checkForStuckLoss's solo-play condition).
+    state = rig(state, [suited('C', '2')], { baseAttack: 0, spadesShield: 999 });
     const bottomOfPile = suited('D', '3');
     const topOfPile = suited('H', '7');
     state.banishPile = [bottomOfPile, topOfPile];
@@ -2763,7 +3421,8 @@ describe('legacy: mission 12 start-of-turn banish-pile zone flip', () => {
 
   it("grants the enemy immunity to the flipped card's class, blocking a matching play", () => {
     let state = startMission12(1);
-    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    // Same throwaway-card reasoning as the test above.
+    state = rig(state, [suited('C', '2')], { baseAttack: 0, spadesShield: 999 });
     state.banishPile = [suited('D', '9')]; // Diamonds (Bard) on top
 
     const flipRes = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));

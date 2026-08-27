@@ -26,6 +26,14 @@ export interface Mission {
   endOfTurnZoneFlip?: boolean;
   /** When set, this many random current party members sit out this mission (excluded from the reserve deck; unaffected in the campaign roster). */
   sidelineCount?: number;
+  /**
+   * When set, this exact card (by suit + rank, not a random pick) sits out this mission — excluded from the
+   * reserve deck for the fight, unaffected in the persisted campaign roster (see RoomManager's
+   * startLegacyMission), same "sits out, comes back automatically" shape as `sidelineCount` above. Currently
+   * Mission 11 only, for Esme (6 of Clubs) — see this mission's own `reward.upgradeSidelinedCard`, which targets
+   * the same identity at mission end.
+   */
+  sidelineIdentity?: { suit: Suit; rank: Rank };
   /** See GameState.jesterClaimNextPlayerOnly. */
   jesterClaimNextPlayerOnly?: boolean;
   /** See GameState.discardTopBuffsAttack. */
@@ -34,6 +42,8 @@ export interface Mission {
   exactKillToReserveDeck?: boolean;
   /** See GameState.corruptedReturnQueue. */
   corruptedReturnQueue?: boolean;
+  /** See GameState.discardCleanupLowToHigh. */
+  discardCleanupLowToHigh?: boolean;
   /** See GameState.exactKillSplashDamage. */
   exactKillSplashDamage?: boolean;
   /** See GameState.START_LEGACY_MISSION action's presetMissionZone. */
@@ -44,7 +54,7 @@ export interface Mission {
   zoneVengeanceOnKill?: boolean;
   /** See GameState.pilgrimMechanic. */
   pilgrimMechanic?: boolean;
-  /** Unshuffled Pilgrim cards seeding GameState.pilgrimDeck (see GameState.pilgrimMechanic). */
+  /** Vestigial — Mission 7's Pilgrim cards are seeded via `extraReserveCards` now (see GameState.pilgrimMechanic). No mission sets this anymore. */
   pilgrimCards?: Card[];
   /** See GameState.ascendingZone. */
   ascendingZone?: boolean;
@@ -92,11 +102,24 @@ function zoneCompanion(name: string, suit: Suit, rank: Rank): Card {
 }
 
 /**
- * A named survivor card, shared by Mission 7's pilgrimCards (see GameState.pilgrimMechanic) and Mission 8's
+ * A named one-off card seeded straight into a mission's extraReserveCards: an ordinary, drawable, playable
+ * reserve-deck card with no special zone mechanic of its own — contrast zoneCompanion above, which instead
+ * anchors a card permanently in the mission zone. Introduced for Mission 5's Myla (see GameState.rollingZoneBonus
+ * / this mission's own entry below): sourced research found she was wrongly modeled as a permanent
+ * presetMissionZone immunity fixture in the shipped version — the real rule has her as just another card in the
+ * fight's reserve deck.
+ */
+function reserveCompanion(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `reserve-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name };
+}
+
+/**
+ * A named survivor card, shared by Mission 7's extraReserveCards (see GameState.pilgrimMechanic) and Mission 8's
  * ascending mission zone (see GameState.ascendingZone) — both missions independently reused "Pilgrim" as flavor
- * for stranded survivors. The `pilgrim` flag only matters to Mission 8 (placing one in its zone never buffs the
- * current enemy's attack the way an ordinary card bridging a gap does); Mission 7 never reads the flag, since it
- * tracks its own Pilgrims through the separate pilgrimDeck/pilgrimZone state instead.
+ * for stranded survivors, and both read the `pilgrim` flag, gated by their own separate mission flag so the two
+ * never collide: Mission 7 turns it into a permanent hand-trap once drawn (see SuitedCard.pilgrim); Mission 8
+ * only cares that one placed in its zone never buffs the current enemy's attack the way an ordinary card
+ * bridging a gap does.
  */
 function pilgrim(name: string, suit: Suit, rank: Rank): Card {
   return { id: `pilgrim-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, pilgrim: true };
@@ -208,14 +231,34 @@ export const MISSIONS: Mission[] = [
     // 40/15 x2, 60/20 x1) — mirrors the base game's own J/Q/K stat table, tripled into a mission-specific lineup.
     // Names are a placeholder invention (no verified source for them); the stat tiers and gauntlet shape came from
     // the user's own research into the physical Regicide Legacy campaign, not the tutorial transcript, which only
-    // ever refers to "the enemy" singular.
+    // ever refers to "the enemy" singular. A fan box-inventory (talkingshelfspace.com) actually lists 7 enemy
+    // cards here (4/2/1 across the same three tiers, one more bottom-tier enemy than shipped) — left as-is rather
+    // than made harder, since the reported problem is this mission playing too hard, not too easy.
+    //
+    // These enemies used to also carry a permanent secondClass immunity (e.g. The Grand Mage immune to Bard AND
+    // Paladin from turn one) on top of endOfTurnZoneFlip's own escalating immunity below — removed per two BGG
+    // strategy threads (boardgamegeek.com/thread/3590127, /thread/3569333) that describe immunity as something
+    // the enemy "gains... midway" through the fight, language consistent only with the zone as the sole immunity
+    // source, plus no source anywhere corroborating a fixed dual immunity. Stacking a permanent second immunity
+    // on top of an unbounded, only-clears-on-a-kill zone (see engine.ts's dealDamageAndCheckDefeat) was the main
+    // driver of this mission being disproportionately harder than its neighbors — Mission 12's final boss had the
+    // identical bug (see that mission's comment).
+    //
+    // SECOND PASS: removing that baked-in secondClass wasn't enough on its own — a follow-up playtest still found
+    // a ~0% simulated win rate, because endOfTurnZoneFlip's own escalation was still uncapped: it kept adding a
+    // NEW class of immunity on nearly every non-kill turn, and with only 4 classes total that reliably walled off
+    // Hearts and/or Diamonds (the only two hand-refill tools) within a handful of turns, after which a shrinking
+    // hand had no way to ever grow back for the rest of that enemy's fight. Unsourced (no source covers this
+    // specific interaction) — see engine.ts's flipMissionZoneCard for the fix (the zone now never pushes an
+    // enemy's immunity past however many classes it already had on its own) and the simulated before/after numbers
+    // that justified it.
     enemies: [
-      enemy('Midnight the Cat', 'CLERIC', 30, 10, 'BARD'),
-      enemy('Japat', 'BARD', 30, 10, 'WARRIOR'),
-      enemy('Blast', 'WARRIOR', 30, 10, 'PALADIN'),
-      enemy('Senior Instructor Vail', 'PALADIN', 40, 15, 'CLERIC'),
-      enemy('Senior Instructor Rowe', 'CLERIC', 40, 15, 'WARRIOR'),
-      enemy('The Grand Mage', 'BARD', 60, 20, 'PALADIN'),
+      enemy('Midnight the Cat', 'CLERIC', 30, 10),
+      enemy('Japat', 'BARD', 30, 10),
+      enemy('Blast', 'WARRIOR', 30, 10),
+      enemy('Senior Instructor Vail', 'PALADIN', 40, 15),
+      enemy('Senior Instructor Rowe', 'CLERIC', 40, 15),
+      enemy('The Grand Mage', 'BARD', 60, 20),
     ],
     // Only an exact-damage kill actually removes an enemy from the gauntlet — an overkill just recycles it to the
     // back of the line, wounds healed (same mechanic Mission 2 already uses; see GameState.exactKillOnly).
@@ -268,10 +311,18 @@ export const MISSIONS: Mission[] = [
     // The mission's key mechanic: whatever card currently sits on top of the discard pile adds its value
     // straight onto the active experiment's attack, recalculated live all the way through the turn — a Cleric
     // heal reshuffling the pile mid-turn can change the number before it's even resolved.
+    //
+    // SOURCED FIX (playtest-confirmed unwinnable without it — see legacy-mission-playtest-findings): both a
+    // normal DEFEND discard and any enemy kill (exact or overkill) dump cards straight onto this same discard
+    // pile, so surviving a hit and finishing a kill are exactly what hand the NEXT experiment its own attack
+    // bonus — self-reinforcing regardless of strategy or player count, confirmed unwinnable in simulated play.
+    // An independent fan digital-reimplementation's rules doc documents a permanent rule introduced at this
+    // mission ("M4+ Cleanup discard ordering: when discarding played cards during cleanup, place them
+    // low-to-high, lowest value on top") that is exactly the missing piece — see discardCleanupLowToHigh below.
     discardTopBuffsAttack: true,
     // An exact kill seals the specimen's card atop the reserve deck instead of the discard pile; any other
-    // kill sends the played cards to the discard pile as normal, in the order the attacker chose to play them
-    // — letting the party bury their high cards and leave a low one on top to blunt the next buff.
+    // kill still sends the played cards to the discard pile as normal — see discardCleanupLowToHigh for the
+    // ordering fix that now governs exactly how "as normal" is defined.
     exactKillToReserveDeck: true,
     // The transcript's other named mechanic: a defeated specimen doesn't stay gone — it rejoins the back of the
     // fight queue corrupted, following the same rule an ordinary corrupted party card does (ignores immunity,
@@ -279,6 +330,12 @@ export const MISSIONS: Mission[] = [
     // version never had this at all; a 12-enemy mission could in principle grow past 12 fights if every specimen
     // requeues once, which is exactly the transcript's intent.
     corruptedReturnQueue: true,
+    // SOURCED FIX, cited above: an independent fan digital-reimplementation's rules doc's "M4+ Cleanup discard
+    // ordering" rule — cards discarded during cleanup (both a covered DEFEND and an enemy kill's played cards)
+    // are placed low-to-high, so the LOWEST-value card of that batch ends up on top of the discard pile (see
+    // GameState.discardCleanupLowToHigh / engine.ts's pushToDiscardPile), instead of an arbitrary order that let
+    // the highest card played land on top and hand discardTopBuffsAttack its own worst-case buff right back.
+    discardCleanupLowToHigh: true,
     // Reward: two relics, not the Mage/Cleric recruits the shipped version originally granted here. Beast
     // Companions (x4) play by the same Animal Companion pairing rule but copy the paired card's strength instead
     // of contributing their own flat value (see rules.ts's validatePlayShape); the Scarlet Whistle then extends
@@ -313,17 +370,22 @@ export const MISSIONS: Mission[] = [
       enemy('Elder Sporeling Wailer', 'CLERIC', 30, 15),
       enemy('Elder Sporeling Bulwark', 'PALADIN', 30, 15),
     ],
-    // Myla (value 7) sits permanently in the mission zone for the whole fight, immune to her own class the same
-    // way Mission 3's zone grants immunity — she's the zone's fixed anchor, never flipped or banished, which is
-    // what lets her still plausibly be "in the mission zone" again come Mission 6.
-    presetMissionZone: [zoneCompanion('Myla', 'H', '7')],
-    // The grove's *other* zone slot is what actually rolls: per the tutorial transcript ("a rolling mission
-    // zone/banish-pile cycle each turn feeds bonus strength to the current enemy"), a single card cycles through
-    // a second, separate slot every turn — last turn's card banished for good, a fresh one flipped in off the
-    // reserve deck to replace it, its value buffing whatever Sporeling is currently being fought (see
-    // GameState.rollingZoneBonus / engine.ts's rollMissionZoneBonusCard). Keeping this as its own slot instead of
-    // folding it into Myla's presetMissionZone is deliberate: it satisfies the transcript's "rolling... feeds
-    // bonus strength" mechanic without disturbing Myla's static presence, which Mission 6's story leans on.
+    // Myla (value 7) rides along in the reserve deck for this fight as an ordinary, drawable, playable card —
+    // NOT a permanent presetMissionZone immunity anchor the way the mission originally shipped. Sourced research
+    // (regicidelegacy.com compendium / BGG threads / a fan digital reimplementation's rules doc — see this repo's
+    // legacy-missions-transcript-mismatches memory note) found no basis for a static Hearts-immunity fixture
+    // here; she's just another reserve-deck body this mission, same shape as Mission 9/12's own one-off flavor
+    // cards (see reserveCompanion above). She only becomes a real permanent party member starting Mission 6,
+    // via this mission's reward below.
+    extraReserveCards: [reserveCompanion('Myla', 'H', '7')],
+    // The grove's rolling zone, per the tutorial transcript ("a rolling mission zone/banish-pile cycle each turn
+    // feeds bonus strength to the current enemy"): every turn, the top card of the BANISH pile recycles into the
+    // rolling zone, accumulating there — never replaced, never cleared on its own — until the next kill banishes
+    // the whole pile-up and resets it. Sourced research corrected this from the shipped "one fresh card per turn
+    // off the reserve deck, single slot, no cap" reading, which let the buff climb forever without ever
+    // shrinking (see GameState.rollingZoneBonus / engine.ts's rollMissionZoneBonusCard). The corrected version is
+    // still uncapped in principle, but bounded in practice by the banish pile's own recycling rate and reset by
+    // every kill, instead of guaranteed to grow every single turn all fight long.
     rollingZoneBonus: true,
     // An exact kill on a Sporeling bursts outward: the enemy's own base attack is dealt as splash damage
     // straight into whatever's newly revealed — occasionally strong enough to chain into a second kill. This is
@@ -331,20 +393,21 @@ export const MISSIONS: Mission[] = [
     // next fight, equal to the fallen enemy's base strength") — already covered by this existing flag, no
     // separate implementation needed.
     exactKillSplashDamage: true,
-    // Reward: the Reaver faction — 4 permanent new recruits (playing one tears the top card off the reserve
-    // deck for bonus damage, banished either way, and doubles the whole attack, stacking to quadruple with a
-    // Warrior card in the same play) — plus a second round of Dual-class Stickers, and Myla herself (value 7),
-    // who spent this whole fight locked to the mission zone as a fixed immunity and now joins the party for
-    // real: a normal, drawable, playable Cleric card from Mission 6 onward.
+    // Reward: sourced research found the shipped version over-granted here — keeping all 4 new Reaver recruits
+    // permanently, when the source (and this repo's own mission-5.md transcript note: "how to permanently retire
+    // cards from the party roster, used here to trim the new Reavers back down after the mission") keeps only
+    // rank 5 (Haror) for good. Implemented as a straight, permanent single-recruit grant rather than
+    // modeling "recruit all 4, then retire 3" as two separate steps — this campaign's reward model elsewhere
+    // (e.g. Mission 11's applyBeastCardChoice) only ever tracks the FINAL kept roster, never an intermediate
+    // grant-then-retire history, so the net effect (only Haror ends up in the permanent party) is the same either
+    // way. Also adds the sourced-but-missing "corrupt another card" effect (see party.ts's
+    // applyCorruptAnotherCard) and a second round of Dual-class Stickers. Myla (value 7) — who spent this fight
+    // as an ordinary reserve-deck card, not a mission-zone fixture (see extraReserveCards above) — now joins the
+    // party for real: a normal, drawable, playable Cleric card from Mission 6 onward.
     reward: {
-      recruits: [
-        recruit('Oaken', 'REAVER', '3', 'D'),
-        recruit('Haror', 'REAVER', '5', 'C'),
-        recruit('Vena', 'REAVER', '7', 'S'),
-        recruit('Kina', 'REAVER', '10', 'H'),
-        recruit('Myla', 'CLERIC', '7'),
-      ],
+      recruits: [recruit('Haror', 'REAVER', '5', 'C'), recruit('Myla', 'CLERIC', '7')],
       dualClassStickers: 4,
+      corruptAnotherCard: true,
     },
   },
   {
@@ -371,23 +434,24 @@ export const MISSIONS: Mission[] = [
     // as Mission 5's presetMissionZone, but this time nothing keeps the zone fixed: zoneVengeanceOnKill grows
     // it permanently with every kill and has her strike the party for the zone's live total each time.
     presetMissionZone: [zoneCompanion('Myla', 'H', '7')],
-    // Every kill sacrifices the lowest-value card left on the enemy's table into the mission zone (never
-    // cleared for the rest of the mission), then Myla strikes for the zone's full value — exact kills spare
-    // the zone's single highest-value card from that one strike (see GameState.zoneVengeanceOnKill).
+    // Every kill lets a player choose one card from the play area just committed to the kill (the defeated
+    // enemy's own table) to sacrifice permanently into the mission zone, then Myla strikes for the zone's full
+    // value — exact kills spare the zone's single highest-value card from that one strike, and a winning attack
+    // that includes a Guardian cancels the strike entirely (see GameState.zoneVengeanceOnKill; both the
+    // player-choice shape and the Guardian cancellation are sourced fixes over the original shipped
+    // auto-sacrifice-with-no-Guardian-interaction — see legacy-missions-transcript-mismatches.md).
     zoneVengeanceOnKill: true,
-    // Reward: the Guardian faction — 4 permanent new recruits, statues themselves once, freed as the garden's
-    // stone cracks open around them. Playing one raises an absolute shield, blocking the enemy's very next
-    // attack entirely (spent instantly) — Dorna's Aegis holds it permanently instead, same final effect as
-    // Bulwark. Plus the Azure Emblem relic: whenever a Mage joins an attack from here on, every other player
-    // gets one chance to silently place a card from hand atop the reserve deck, stocking it for later.
+    // Reward, sourced fix (legacy-missions-transcript-mismatches.md): the Guardian faction, but only Ferro
+    // (rank 3) is kept as a permanent new recruit — the shipped version over-granted all 4 (Kesh, Ambrey, and
+    // Dorna's special Aegis are dropped). Playing a Guardian card raises an absolute shield, blocking the
+    // enemy's very next attack entirely (spent instantly). Plus a bonus Guardian sticker on one random existing
+    // rank-8 party card (see party.ts's applyGuardianSticker), and the Azure Emblem relic — sourced fix: whenever
+    // a Mage joins an attack from here on, the Mage's OWN player gets one chance to bank one of that play's Mage
+    // card(s) onto the reserve deck instead of losing it to the discard pile.
     reward: {
-      recruits: [
-        recruit('Ferro', 'GUARDIAN', '3', 'S'),
-        recruit('Kesh', 'GUARDIAN', '5', 'H'),
-        recruit('Ambrey', 'GUARDIAN', '7', 'D'),
-        specialRecruit('Dorna', 'GUARDIAN', '9', 'C'),
-      ],
+      recruits: [recruit('Ferro', 'GUARDIAN', '3', 'S')],
       relics: ['AZURE_EMBLEM'],
+      guardianSticker: true,
     },
   },
   {
@@ -414,12 +478,13 @@ export const MISSIONS: Mission[] = [
       enemy('Abyssal: Hollowfang', 'CLERIC', 40, 20),
       enemy('Abyssal: Leadmaw', 'PALADIN', 40, 20),
     ],
-    // The Pilgrim mechanic: a survivor flips face-up into the mission zone at the start of every turn. Playing
-    // an attack whose total value exactly matches a waiting Pilgrim rescues them (banished for good); every
-    // enemy kill instead burns cards off the top of the reserve deck equal to whatever's still left unrescued
-    // (see GameState.pilgrimMechanic).
+    // The Pilgrim mechanic (sourced from the official compendium FAQ — see GameState.pilgrimMechanic): 8 survivor
+    // cards shuffled into the reserve deck alongside the party, drawn normally like any other card. Once one
+    // lands in a hand it's a permanent hand-trap for the rest of the mission — dead weight that can't be played
+    // or discarded for any purpose, and blocks Feign Death while held — until an exact-damage kill frees one for
+    // free.
     pilgrimMechanic: true,
-    pilgrimCards: [
+    extraReserveCards: [
       pilgrim('Old Fenwick', 'H', '2'),
       pilgrim('Little Sae', 'D', '3'),
       pilgrim('Bettina the Ferrywoman', 'C', '4'),
@@ -570,10 +635,16 @@ export const MISSIONS: Mission[] = [
     // The fixed 8-enemy queue isn't a static MissionEnemySpec list like every earlier mission — per the
     // transcript, it's built at mission start from 8 of the campaign's OWN party members (see
     // GameState.corruptedPartyEnemies / deck.ts's buildCorruptedPartyEnemies), corrupted and sorted
-    // weakest-to-strongest by card value, each with health fixed at 5x its (base, pre-zone-bonus) strength. Which
-    // 8 members get pulled isn't specified by the transcript beyond "eight" — this picks randomly (via the
-    // mission's own seeded RNG, so still reproducible) rather than, say, the 8 lowest-value party cards; a
-    // judgment call, not a transcript detail.
+    // weakest-to-strongest by card value, each with health fixed at 5x its (base, pre-zone-bonus) strength.
+    // SOURCED CORRECTION (regicidelegacy.com's compendium, corroborated by BGG threads and an independent fan
+    // digital reimplementation — see the legacy-missions-transcript-mismatches memory doc's Mission 10 section):
+    // these 8 should be drawn from party members ALREADY marked corrupted earlier in the campaign, not sampled
+    // fresh at random — this shipped ignoring SuitedCard.corrupted entirely at first. deck.ts's
+    // buildCorruptedPartyEnemies now prioritizes already-corrupted members and only falls back to a random
+    // sample to fill any remaining slots — see that function's own comment for why the fallback path is, in
+    // today's actual campaign, still doing essentially all of the work (no earlier mission's reward path sets
+    // that flag on a party card yet). Which members get pulled beyond "prefer corrupted" isn't specified by the
+    // transcript beyond "eight" — the random tie-break remains a judgment call, not a transcript detail.
     enemies: [],
     corruptedPartyEnemies: true,
     // Start-of-turn (not end-of-turn) mission-zone flip, feeding bonus STRENGTH onto the current enemy's own
@@ -581,6 +652,19 @@ export const MISSIONS: Mission[] = [
     // endOfTurnZoneFlip (end-of-turn timing, grants suit immunity instead of an attack buff). The transcript is
     // explicit about the start-of-turn timing; a community-research claim that this flip happens at the END of
     // the turn instead contradicts the transcript and was NOT used.
+    //
+    // UNSOURCED BALANCE JUDGMENT CALL, added after real simulated play (see the legacy-mission-playtest-findings
+    // memory doc's Mission 10 section): as shipped, this zone's combined value had no decay and no ceiling, so a
+    // boss fight that ran long fed an ever-growing buff onto that enemy's live attack — doubled again on top of
+    // that for a Warrior-suited enemy — and collapsed every one of 13 simulated games across 1p/2p/4p. Neither
+    // sourced correction on this mission (the enemy-selection fix above; the Bard-choice fix on
+    // resolveCorruptedEnemyEndOfTurnEffect in engine.ts) touches this mechanism, and re-simulating after both
+    // still produced 0 wins across 24 fresh seeded games. See engine.ts's MISSION_10_ZONE_BONUS_CAP for the
+    // resulting fix (a flat ceiling on the zone's contribution) — it has no source backing it at all, unlike
+    // everything else in this file's comments, and simulated play confirms it measurably improves how far a run
+    // gets (deeper into the 8-enemy queue on average) without on its own making the mission reliably winnable
+    // against a simple heuristic bot; this mission's own sourced baseline (8 sequential 5x-health fights, with
+    // Warrior-doubling) is independently very hard, likely by intentional design this late in the campaign.
     startOfTurnZoneFlip: true,
     // Reward: no reward was transcribed for this mission (no reward video/segment exists in the source
     // transcript) — everything below is best-effort from community research alone, flagged uncertain per this
@@ -599,7 +683,12 @@ export const MISSIONS: Mission[] = [
     //    It's implemented instead as GameState.restoredPartyCards, populated by engine.ts's
     //    dealDamageAndCheckDefeat on every exact kill and folded into the campaign party by party.ts's
     //    applyRestoredPartyCards at mission end (see RoomManager.completeLegacyMission). Marked uncertain the
-    //    same way the flavor beats above are — community research, not transcript-confirmed.
+    //    same way the flavor beats above are — community research, not transcript-confirmed. NOTE: the same
+    //    research pass that produced the two sourced corrections above (enemy selection; the Bard choice) also
+    //    flagged this exact-kill gate itself as a possible mismatch — unconditional restoration, not gated on an
+    //    exact hit — but at a lower confidence than those two (this shipped implementation was already an
+    //    explicit community-research guess, not a transcript detail, before that research pass). Left unchanged
+    //    by this pass rather than folded in silently; a candidate for a future, separately-scoped correction.
     reward: {
       recruits: [],
     },
@@ -608,24 +697,44 @@ export const MISSIONS: Mission[] = [
     id: 11,
     title: 'Descent into Darkness',
     story:
-      "The party's underground pursuit leads to a cavern where their old ally is found bound to a corrupting " +
-      'machine, guarded by four elite enemies.',
-    // Four elite guardians, one per base class — the transcript names no stats for this mission at all, so these
-    // are an invented judgment call (like every other mission's raw numbers), pitched one tier past Mission 8's
-    // Wyverns (50/25) to match how deep into the campaign this fight sits.
+      "The party's underground pursuit leads to a cavern where Esme — the ally who's fought at their side since " +
+      'the very first mission — is found bound to a corrupting machine, guarded by four exhausted watchers and ' +
+      "the corrupted overseer running the whole operation: Evil Goran. Esme can't stand with the party this " +
+      'time; freeing her is the whole point of the fight.',
+    // Sourced correction (see the user's own research memo, legacy-missions-transcript-mismatches.md's Mission 11
+    // section, cross-checked against regicidelegacy.com's compendium, BGG threads, a fan box-repacking inventory,
+    // and a fan digital reimplementation's rules doc): the previously-shipped 4 uniform 60/30 "elite" enemies were
+    // wrong — simulated playtesting independently confirmed they collapse almost every game within 1-3 turns. The
+    // real roster is 5 enemies: 4 weak mooks plus one much bigger final boss, "Evil Goran" — the 10/30 (mooks) and
+    // 20/90 (boss) stats below are exactly the sourced figures. Which base class each mook carries, and which
+    // single class the boss carries, is NOT specified by the source (only the two stat tiers and the boss's name
+    // are) — one mook per base class (matching every other mission's own convention) and a single, non-dual-immune
+    // class on the boss are both unsourced judgment calls, deliberately kept simple so the roster fix isn't
+    // quietly undone by an invented immunity stack.
     enemies: [
-      enemy('Warden of the Depths: Ashclad', 'WARRIOR', 60, 30),
-      enemy('Warden of the Depths: Bellsong', 'BARD', 60, 30),
-      enemy('Warden of the Depths: Hollowmourn', 'CLERIC', 60, 30),
-      enemy('Warden of the Depths: Ironvow', 'PALADIN', 60, 30),
+      enemy('Warden of the Depths: Ashclad', 'WARRIOR', 30, 10),
+      enemy('Warden of the Depths: Bellsong', 'BARD', 30, 10),
+      enemy('Warden of the Depths: Hollowmourn', 'CLERIC', 30, 10),
+      enemy('Warden of the Depths: Ironvow', 'PALADIN', 30, 10),
+      enemy('Evil Goran', 'PALADIN', 90, 20),
     ],
+    // Sourced correction: the source names a specific card pulled from the party for this mission entirely — Esme,
+    // the 6 of Clubs (see party.ts's STARTING_NAMES, renamed from the placeholder "Ulra Bloodfang" — a name never
+    // referenced by any other mission — to match). Unlike sidelineCount's random pick (Mission 3), this needs a
+    // specific identity: RoomManager's startLegacyMission excludes exactly this card from the mission's active
+    // party, same "sits out, comes back automatically" shape sidelineCount already uses (the persisted campaign
+    // roster itself is never touched) — she simply isn't available to draw, hold, or play this mission. See
+    // `reward.upgradeSidelinedCard` below, which targets this same identity once the mission is won.
+    sidelineIdentity: { suit: 'C', rank: '6' },
     // Mission 4's Beast Companion cards are pulled out of the campaign party and shuffled into a face-down deck
     // that sits in the mission zone for this fight only — no Beast card is available to draw or play this
     // mission (an unrelated Mage-aligned party member is still usable as normal; see deck.ts's buildBeastDeck).
-    // At the start of every turn its top card flips for a one-shot effect keyed to its class (see engine.ts's
-    // flipBeastDeckCard — Mission 10's flipStartOfTurnZoneCard is the closest precedent for this shape); once it
-    // runs out it reshuffles from its own used-card pile and the cycle continues. An exact kill spares the very
-    // next turn's flip (see GameState.skipNextBeastDeckFlip).
+    // At the start of every turn its top card flips for a one-shot effect keyed to its SUIT (sourced correction —
+    // the previously-shipped version keyed this off the card's derived CLASS instead; see engine.ts's
+    // flipBeastDeckCard). Once it runs out it reshuffles from its own used-card pile and the cycle continues —
+    // since the beast deck is always exactly the 4 base-suited Beast Companions, one full cycle always flips all 4
+    // exactly once before clearing and restarting. An exact kill spares the very next turn's flip (see
+    // GameState.skipNextBeastDeckFlip).
     beastDeckMechanic: true,
     // The current enemy draws bonus strength AND class-immunity from whatever cards currently sit on top of the
     // discard pile and the banish pile — both recomputed live, so a Cleric heal reshuffling the discard pile (or
@@ -635,16 +744,31 @@ export const MISSIONS: Mission[] = [
     // always banishes it, never recycled or discarded"), they go to the banish pile instead of the discard pile —
     // which is exactly what keeps feeding this same mechanic forward through the rest of the fight.
     pileTopEnemyBonus: true,
-    // Reward: the party picks ONE of the four Beast Companion cards that spent this whole fight locked in the
-    // mission-zone beast deck to carry into Mission 12 — the other three don't return to the party. Modeled as a
-    // genuine pending choice (AWAIT_BEAST_REWARD_CHOICE / CHOOSE_BEAST_REWARD) instead of resolving automatically,
-    // the closest existing precedent being Mission 9's AWAIT_RESCUE_CHOICE window; the pick is folded into the
-    // campaign roster via the same GameState.restoredPartyCards field Mission 10's "deck rehabilitation" reward
-    // already threads through to RoomManager.completeLegacyMission, just with pruning logic of its own (see
-    // party.ts's applyBeastCardChoice) since Mission 11's choice REPLACES the party's beast-card slate rather than
-    // just adding to it.
+    // SOURCED FIX (playtest-confirmed, see legacy-mission-playtest-findings): a normal covered DEFEND dumps the
+    // defending player's chosen cards onto the discard pile in whatever order they were selected — the ONLY
+    // multi-card discard-pile push this mission has, since pileTopEnemyBonus (above) already routes every
+    // defeated enemy's played cards to the BANISH pile instead. Without an ordering rule, surviving a hit is
+    // exactly what hands the next attack an unpredictable, potentially large discard-pile-top bonus — the same
+    // self-reinforcing shape independently found and fixed for Mission 4's discardTopBuffsAttack. The same
+    // independent fan digital-reimplementation's rules doc documents this as a permanent rule introduced at
+    // Mission 4 ("M4+ Cleanup discard ordering: place them low-to-high, lowest value on top") that stays in
+    // effect for every later mission — including this one, which reads the identical discard-pile-top value (see
+    // GameState.discardCleanupLowToHigh / engine.ts's pushToDiscardPile). This also restores the player agency an
+    // independent player-review blog explicitly describes using in this exact mission ("banish a low card...
+    // reducing the strength of the enemy") — the low-to-high sort is what guarantees that choice actually lands
+    // on top instead of being overwritten by whichever card the player happened to select last.
+    discardCleanupLowToHigh: true,
+    // Sourced correction: the reward is NOT a beast-card pick — the previously-shipped AWAIT_BEAST_REWARD_CHOICE
+    // window and CHOOSE_BEAST_REWARD action (and party.ts's applyBeastCardChoice) have been removed entirely, no
+    // longer reachable from anywhere. The real reward is Esme herself: freed and returned to the party permanently
+    // upgraded to carry all four base suits — reusing the same SuitedCard.evergreen mechanic Mission 9's Gøran
+    // reward already grants (all four class powers resolve at once, ignoring immunity, whenever she's played — see
+    // party.ts's applyEvergreenUpgrade). The 4 Beast Companion cards were never removed from the persisted roster
+    // to begin with (same as Esme, they only sat out this one mission's active fight), so they simply return
+    // unchanged — the source describes no further pruning or pick for them at this mission.
     reward: {
       recruits: [],
+      upgradeSidelinedCard: { suit: 'C', rank: '6' },
     },
   },
   {

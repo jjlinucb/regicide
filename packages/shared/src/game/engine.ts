@@ -1,4 +1,4 @@
-import type { Card, CapturedPile, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit } from './types.js';
+import type { Card, CapturedPile, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit } from './types.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,
@@ -111,33 +111,67 @@ function allOtherPlayersYieldedLastTurn(state: GameState): boolean {
   return true;
 }
 
-function checkForStuckLoss(state: GameState): void {
+/**
+ * `idleYield` is true only when the turn now ending was a yield that resolved with zero enemy attack — the one
+ * genuinely-idle path (see yieldTurn), as opposed to every other way a turn can end (a successful defend, a
+ * kill, a rescue, a zone placement, feign death, ...), all of which represent real progress even when they
+ * happen to leave the hand empty too. Callers that aren't yieldTurn's own zero-attack branch always omit this
+ * (defaulting to false) — see every other call site of advanceToNextPlayer/endTurnOrAwaitRescue/finishAdvanceToNextPlayer.
+ */
+function checkForStuckLoss(state: GameState, idleYield = false): void {
   if (state.phase !== 'IN_PROGRESS') return;
   const p = currentPlayer(state);
-  if (p.hand.length === 0 && allOtherPlayersYieldedLastTurn(state)) {
+  if (p.hand.length !== 0) return;
+  // Solo play has no "other players" for allOtherPlayersYieldedLastTurn to ever be true about (it hard-returns
+  // false below player count 2, which is also the correct answer for yieldTurn's own unrelated use of the same
+  // helper — yielding alone is always legitimate). An empty hand alone isn't fatal there either: a play that
+  // spends the last card to defeat an enemy, feign death, successfully defend, or place a card still deserves its
+  // shot at whatever that action set up next — `idleYield` is what tells those genuinely-productive cases apart
+  // from a truly wasted turn (lastActionWasYield can't be reused here: it deliberately stays true through a
+  // successful non-feign-death defend, for the "cannot yield if everyone else just yielded" rule's own unrelated
+  // bookkeeping — see defend()'s comment). What's genuinely terminal is a *forced*, zero-effect yield — the only
+  // legal move once the hand is empty — that changes nothing: with no one else at the table, that's the solo
+  // equivalent of every other player having already yielded. Without this, a solo game can wedge forever: an
+  // empty hand plus a fully-shielded (0-attack) enemy lets YIELD keep advancing the turn indefinitely with no way
+  // to ever draw another card.
+  const stuck = state.players.length <= 1 ? idleYield : allOtherPlayersYieldedLastTurn(state);
+  if (stuck) {
     state.phase = 'LOST';
     state.lossReason = `${p.name} has no cards left and cannot yield — the party has fallen.`;
     log(state, state.lossReason);
   }
 }
 
-function advanceToNextPlayer(state: GameState): void {
+function advanceToNextPlayer(state: GameState, idleYield = false): void {
   // Mission 10: the current enemy's end-of-turn power fires for the turn that's ending, before the
   // current-player pointer moves on to whoever's turn is starting next (see resolveCorruptedEnemyEndOfTurnEffect).
+  // An enemy Bard's power opens a real player choice (AWAIT_BARD_SURRENDER) rather than resolving immediately —
+  // when that happens, pause here without advancing anything further; finishAdvanceToNextPlayer picks the rest of
+  // this back up once SURRENDER_CARD_TO_ZONE resolves it (see surrenderCardToZone). That resumption is always a
+  // genuine player action, never idle, so it's fine that idleYield doesn't carry across the pause.
   resolveCorruptedEnemyEndOfTurnEffect(state);
+  if (state.turnPhase === 'AWAIT_BARD_SURRENDER') return;
+  finishAdvanceToNextPlayer(state, idleYield);
+}
+
+/**
+ * The actual turn-advancement work — split out of advanceToNextPlayer so a Mission 10 Bard-surrender choice can
+ * pause partway through and resume later (see surrenderCardToZone) instead of forcing that choice to resolve
+ * synchronously inside a single engine call, the same way Mission 9's AWAIT_END_OF_TURN pauses endTurnOrAwaitRescue.
+ */
+function finishAdvanceToNextPlayer(state: GameState, idleYield = false): void {
   state.pendingDamage = 0;
   state.turnPhase = 'AWAIT_PLAY';
   state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
   flipMissionZoneCard(state);
   rollMissionZoneBonusCard(state);
-  flipPilgrimCard(state);
   flipStartOfTurnZoneCard(state);
   flipBeastDeckCard(state);
   flipBanishPileZoneCard(state);
   // Mission 8's placement window only ever covers the turn a kill happened on (or the continued turn right
   // after it) — once play moves on to a fresh turn with no kill behind it, close the window back up.
   state.zoneOpenForPlacement = false;
-  checkForStuckLoss(state);
+  checkForStuckLoss(state, idleYield);
 }
 
 /**
@@ -146,21 +180,51 @@ function advanceToNextPlayer(state: GameState): void {
  * as long as at least one captured pile still has a face-up card to offer. Never called when a kill lets the
  * same player continue their turn (dealDamageAndCheckDefeat's "continue" path calls neither this nor
  * advanceToNextPlayer directly), which is exactly how the mission's "no end-of-turn effects after a kill" rule
- * falls out for free.
+ * falls out for free. `idleYield` — see checkForStuckLoss — only ever arrives true from yieldTurn's own
+ * zero-attack branch; every other caller omits it.
  */
-function endTurnOrAwaitRescue(state: GameState): void {
+function endTurnOrAwaitRescue(state: GameState, idleYield = false): void {
   if (state.ruleset === 'legacy' && state.capturedPilesActive && state.capturedPiles.some((p) => p.faceUp)) {
     state.turnPhase = 'AWAIT_END_OF_TURN';
     return;
   }
-  advanceToNextPlayer(state);
+  advanceToNextPlayer(state, idleYield);
 }
 
 /**
  * Mission 3 ("Lessons in Flames") only: end of every turn, the top of the reserve deck flips face-up into a
- * shared mission zone, and the enemy becomes immune to that card's class(es) too — stacking with each further
- * flip. Only called from advanceToNextPlayer, so defeating an enemy (which skips straight back to AWAIT_PLAY
- * without advancing) naturally skips this turn's flip, per the mission's rule.
+ * shared mission zone, and the enemy becomes immune to that card's class(es) too. Only called from
+ * advanceToNextPlayer, so defeating an enemy (which skips straight back to AWAIT_PLAY without advancing)
+ * naturally skips this turn's flip, per the mission's rule.
+ *
+ * SECOND-PASS BALANCE FIX (2026-08-26, unsourced — no compendium/BGG text covers this specific interaction, see
+ * legacy/missions.ts's Mission 3 comment for the citations that DO exist): a 12-agent playtest pass found this
+ * mission still simulated a ~0% win rate even after the first pass removed the enemies' own baked-in dual
+ * immunity — the zone alone was still adding a NEW class of immunity on nearly every non-kill turn, uncapped,
+ * across a 6-enemy exactKillOnly gauntlet where landing a precise hit every turn is already hard. With only 4
+ * classes to go around, that reliably walls off Hearts and/or Diamonds (the only two hand-refill tools — Diamonds
+ * draws, Hearts just recycles the discard pile back into the reserve deck) within 3-4 non-kill turns, and once
+ * refill is gone it's gone for the rest of that enemy's fight: nothing in this engine ever grows a hand except a
+ * live Diamonds play, so a walled-off hand only ever shrinks from there while full unmitigated attack keeps
+ * landing every turn.
+ *
+ * A second simulation pass (packages/shared/src/legacy/_verify_mission_3.test.ts, deleted after use) measured
+ * this directly rather than guessing: capping the zone at letting through one MORE class beyond the enemy's own
+ * inherent immunity (i.e. the enemy ever ends up immune to at most 2 classes at once) moved the needle
+ * essentially not at all — the party still hits a full Hearts+Diamonds lockout almost as often, because with
+ * only 4 classes total, "one more" has better than even odds of completing that exact pair. Only capping the
+ * zone at contributing NOTHING beyond the enemy's own inherent immunity (i.e. this flip keeps happening, keeps
+ * feeding the mission-zone flavor and the exact-kill-save/banish-on-defeat cleanup below, but stops actually
+ * compounding the enemy's immunity further) produced a real, measured improvement: total enemies defeated across
+ * 60 seeded 1p/2p/4p games went from 70/360 to 92/360 (+31%), and average turns survived per game went from 12.6
+ * to 39.4 (+213%), versus the uncapped version, using the same heuristic (not optimal) bot both times. Every
+ * intermediate cap tested (allowing 1 or 2 MORE classes beyond the enemy's own) performed close to the uncapped
+ * baseline, not partway to this result — the failure mode is a binary "did this hit complete the Hearts+Diamonds
+ * lockout," not a smooth gradient, so a partial cap barely helps. The literal win rate stayed at 0% in both
+ * configurations across all 60 games — the same heuristic bot also can't beat plain Mission 1 (classic Regicide,
+ * zero Legacy quirks) in 40/40 tries, so it's a real bot-skill ceiling, not evidence against this fix; the
+ * turns/kills deltas above are the meaningful signal here, matching this repo's own established caveat for this
+ * kind of verification (see the memory note that gave rise to this fix).
  */
 function flipMissionZoneCard(state: GameState): void {
   if (!state.endOfTurnZoneFlip || !state.currentEnemy) return;
@@ -168,64 +232,47 @@ function flipMissionZoneCard(state: GameState): void {
   if (!card) return;
   state.missionZone.push(card);
   if (card.kind === 'suited') {
+    const enemy = state.currentEnemy;
+    const totalImmuneSuits = new Set([enemy.suit, ...(enemy.secondSuit ? [enemy.secondSuit] : []), ...state.zoneImmuneSuits]);
+    const inherentImmunityCount = 1 + (enemy.secondSuit ? 1 : 0);
+    const added: string[] = [];
     for (const s of cardSuits(card)) {
-      if (!state.zoneImmuneSuits.includes(s)) state.zoneImmuneSuits.push(s);
+      if (totalImmuneSuits.size >= inherentImmunityCount) break;
+      if (!state.zoneImmuneSuits.includes(s)) {
+        state.zoneImmuneSuits.push(s);
+        totalImmuneSuits.add(s);
+        added.push(s);
+      }
     }
-    log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the enemy is now also immune to ${cardSuits(card).map((s) => classForSuit(s).name).join(' & ')}.`);
+    if (added.length > 0) {
+      log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the enemy is now also immune to ${added.map((s) => classForSuit(s as Suit).name).join(' & ')}.`);
+    } else {
+      log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the fire catches, but the enemy's resistance is already spent.`);
+    }
   } else {
     log(state, 'The mission zone flips a Jester.');
   }
 }
 
 /**
- * Mission 5 ("High and Mighty") only: a single "rolling" card cycles through its own zone slot every turn,
- * separate from `missionZone` (which here holds only Myla's static presetMissionZone seat — a fixed immunity
- * that never flips or banishes, preserving her narrative presence across Missions 5 and 6). Whatever card
- * currently occupies the rolling slot is banished for good, and a fresh one flips in off the reserve deck to
- * replace it — its value buffs the current enemy's attack for as long as it sits there (see resolvedEnemyAttack).
+ * Mission 5 ("High and Mighty") only: every turn, the top card of the BANISH pile (not the reserve deck) recycles
+ * into `rollingZoneCards`, where it accumulates alongside whatever's already sitting there — nothing is banished
+ * or replaced here, unlike every other zone-flip in this file. The accumulator keeps growing until the next enemy
+ * kill resets it (see dealDamageAndCheckDefeat), so its rate of growth is naturally bounded by how often the
+ * banish pile actually receives fresh cards, not guaranteed every turn — sourced research's "accumulates ALL
+ * cards recycled from the banish pile since the last kill and sums their total value," correcting the earlier
+ * shipped "one fresh card per turn off the reserve deck, single-slot" reading. `missionZone` itself is untouched
+ * by this mission (Myla is an ordinary reserve-deck card, not a zone fixture — see missions.ts's Mission 5 entry).
  * Only called from advanceToNextPlayer, so a kill that lets the same player continue their turn naturally skips
  * a cycle that turn, same as flipMissionZoneCard.
  */
 function rollMissionZoneBonusCard(state: GameState): void {
   if (!state.rollingZoneBonus) return;
-  if (state.rollingZoneCard) {
-    banishCards(state, [state.rollingZoneCard]);
-  }
-  const card = state.tavernDeck.shift();
-  state.rollingZoneCard = card ?? null;
-  if (card) {
-    const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester';
-    log(state, `The mission zone cycles ${label} in — last turn's card is banished for good, and the enemy grows bolder while this one sits there.`);
-  }
-}
-
-/**
- * Mission 7 ("Tales of Rebirth") only: at the start of every turn, the top of the face-down Pilgrim deck flips
- * face-up into the shared Pilgrim zone — a rescue puzzle separate from missionZone's suit-immunity mechanic (see
- * GameState.pilgrimZone). Called both once at mission start (the first player's first turn) and from
- * advanceToNextPlayer; like flipMissionZoneCard, it's naturally skipped when a kill lets the same player
- * continue their turn against a new enemy, since that path doesn't call advanceToNextPlayer.
- */
-function flipPilgrimCard(state: GameState): void {
-  if (!state.pilgrimMechanic) return;
-  const card = state.pilgrimDeck.shift();
+  const card = state.banishPile.pop(); // top of the banish pile
   if (!card) return;
-  state.pilgrimZone.push(card);
-  log(state, `A Pilgrim surfaces in the mission zone: ${card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester'}.`);
-}
-
-/**
- * Mission 7 only: an attack whose total played value exactly matches a Pilgrim currently sitting in the zone
- * rescues them — permanently banished (out of the burn-penalty math for good), not sent to the discard pile.
- * Uses the play's raw totalValue (the cards' own printed sum), before any class-power multiplier or bonus.
- */
-function checkPilgrimRescue(state: GameState, totalValue: number): void {
-  if (!state.pilgrimMechanic) return;
-  const idx = state.pilgrimZone.findIndex((c) => cardValue(c) === totalValue);
-  if (idx === -1) return;
-  const [rescued] = state.pilgrimZone.splice(idx, 1);
-  banishCards(state, [rescued]);
-  log(state, `${rescued.kind === 'suited' ? rescued.name ?? `the ${rescued.rank}` : 'A Jester'} is rescued from the mission zone — banished safely, for good.`);
+  state.rollingZoneCards.push(card);
+  const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester';
+  log(state, `${label} recycles out of the banish pile into the rolling zone — the enemy grows bolder while it (and everything else piled up there) sits.`);
 }
 
 /**
@@ -250,9 +297,16 @@ function flipStartOfTurnZoneCard(state: GameState): void {
  * Mission 10 only: the current enemy's end-of-turn class power, for the turn that's ending — called from
  * advanceToNextPlayer BEFORE the current-player pointer advances, so "current player" here still means whoever's
  * turn just ended (per the transcript's "current player must move a card from hand"). A Cleric enemy drags the
- * discard pile's top card into the mission zone; a Bard enemy forces that player to move a card from hand into
- * the zone, skipped entirely if their hand is empty — this picks their lowest-value card, since the transcript
- * gives the player no choice in the matter ("must move a card"), a judgment call rather than a transcript detail.
+ * discard pile's top card into the mission zone — no player choice involved, so it resolves immediately.
+ *
+ * A Bard enemy forces that same player to move a card from hand into the zone instead, skipped entirely if their
+ * hand is empty. Sourced correction (regicidelegacy.com's compendium, corroborated by BGG threads and a working
+ * fan digital reimplementation's own UI — see the legacy-missions-transcript-mismatches memory doc's Mission 10
+ * section): this used to auto-pick the player's lowest-value card, on the theory that the transcript's "must move
+ * a card" left the player no say in the matter — but the sourced material says which card is a real player
+ * choice. This now opens AWAIT_BARD_SURRENDER and returns without touching the hand; advanceToNextPlayer sees
+ * that phase and pauses mid-advance (see finishAdvanceToNextPlayer) until SURRENDER_CARD_TO_ZONE resolves it.
+ *
  * Warrior and Paladin enemies have no end-of-turn effect of their own — see resolvedEnemyAttack and
  * applyEnemyPaladinDamageReduction for their always-on powers instead. Naturally skipped on a turn a kill
  * happened on, since dealDamageAndCheckDefeat's same-player-continues path never calls advanceToNextPlayer —
@@ -270,15 +324,32 @@ function resolveCorruptedEnemyEndOfTurnEffect(state: GameState): void {
   } else if (cls === 'BARD') {
     const player = currentPlayer(state);
     if (player.hand.length === 0) return;
-    let lowestIdx = 0;
-    for (let i = 1; i < player.hand.length; i++) {
-      if (cardValue(player.hand[i]) < cardValue(player.hand[lowestIdx])) lowestIdx = i;
-    }
-    const [moved] = player.hand.splice(lowestIdx, 1);
-    state.missionZone.push(moved);
-    const label = moved.kind === 'suited' ? moved.name ?? `the ${moved.rank}` : 'the Jester';
-    log(state, `${enemyLabel(state.currentEnemy)} forces ${player.name} to surrender ${label} into the mission zone.`);
+    state.turnPhase = 'AWAIT_BARD_SURRENDER';
+    log(state, `${enemyLabel(state.currentEnemy)} demands ${player.name} surrender a card from hand into the mission zone.`);
   }
+}
+
+/**
+ * Mission 10, from AWAIT_BARD_SURRENDER: the ending player's chosen answer to an enemy Bard's forced move (see
+ * resolveCorruptedEnemyEndOfTurnEffect) — moves `cardId` out of their hand into the mission zone, then resumes
+ * the turn-advancement that paused to open this choice (see finishAdvanceToNextPlayer). Validated against the
+ * same player whose turn is ending, not whoever's about to go next — requireCurrentPlayerTurn still reads
+ * currentPlayerIndex, which this phase deliberately leaves unmoved until it resolves.
+ */
+function surrenderCardToZone(state: GameState, action: Extract<GameAction, { type: 'SURRENDER_CARD_TO_ZONE' }>): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_BARD_SURRENDER');
+  if (err) return fail(err);
+
+  const player = currentPlayer(state);
+  const card = player.hand.find((c) => c.id === action.cardId);
+  if (!card) return fail(`Card ${action.cardId} is not in your hand.`);
+
+  player.hand = player.hand.filter((c) => c.id !== card.id);
+  state.missionZone.push(card);
+  const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'the Jester';
+  log(state, `${player.name} surrenders ${label} into the mission zone.`);
+  finishAdvanceToNextPlayer(state);
+  return ok(state);
 }
 
 /**
@@ -295,15 +366,20 @@ function applyEnemyPaladinDamageReduction(state: GameState, damage: number): num
 
 /**
  * Mission 11 ("Descent into Darkness") only: at the start of every turn, flip the top card of the beast deck
- * (see GameState.beastDeck / deck.ts's buildBeastDeck) for a one-shot effect keyed to its class — Warrior
- * banishes the discard pile's top card, Paladin discards the reserve deck's top card, Cleric has the current
- * player discard from hand, Bard has the current player banish from hand (skipped entirely if their hand is
- * empty). Which card the current player gives up isn't specified by the transcript for Cleric/Bard — same
- * judgment call as Mission 10's enemy-Bard forced move (see resolveCorruptedEnemyEndOfTurnEffect) — so this
- * always picks their lowest-value card. Once the deck runs dry it reshuffles from its own used-card pile
- * (GameState.beastDeckDiscard) and the cycle continues; skipped entirely for the turn right after an exact kill
- * (see GameState.skipNextBeastDeckFlip, consumed here). Called both once at mission start (the first player's
- * first turn) and from advanceToNextPlayer, same as every other start-of-turn flip in this file.
+ * (see GameState.beastDeck / deck.ts's buildBeastDeck) for a one-shot effect keyed to its SUIT (sourced
+ * correction — the previously-shipped version keyed this off the card's derived CLASS via classForSuit instead;
+ * the two happen to coincide for every Beast Companion card that currently exists, since each one's `class` and
+ * `suit` are always the matching pair, but the sourced rule is explicit that this reads the printed suit
+ * directly) — Clubs (Warrior) banishes the discard pile's top card, Spades (Paladin) discards the reserve deck's
+ * top card, Hearts (Cleric) has the current player discard from hand, Diamonds (Bard) has the current player
+ * banish from hand (skipped entirely if their hand is empty). Which card the current player gives up isn't
+ * specified by the transcript for Hearts/Diamonds — same judgment call as Mission 10's enemy-Bard forced move
+ * (see resolveCorruptedEnemyEndOfTurnEffect) — so this always picks their lowest-value card. Once the deck runs
+ * dry it reshuffles from its own used-card pile (GameState.beastDeckDiscard) and the cycle continues — since the
+ * beast deck is always exactly the 4 base-suited Beast Companions, one full cycle always flips all 4 suits
+ * exactly once before clearing and restarting; skipped entirely for the turn right after an exact kill (see
+ * GameState.skipNextBeastDeckFlip, consumed here). Called both once at mission start (the first player's first
+ * turn) and from advanceToNextPlayer, same as every other start-of-turn flip in this file.
  */
 function flipBeastDeckCard(state: GameState): void {
   if (!state.beastDeckMechanic) return;
@@ -322,9 +398,9 @@ function flipBeastDeckCard(state: GameState): void {
   state.beastDeckDiscard.push(card);
   if (card.kind !== 'suited') return; // the beast pool is always suited cards — guarded defensively
   const label = card.name ?? `the ${card.rank}`;
-  const cls = classForSuit(card.suit).id;
+  const suit = card.suit;
 
-  if (cls === 'WARRIOR') {
+  if (suit === 'C') {
     const banished = state.discardPile.pop();
     if (banished) {
       banishCards(state, [banished]);
@@ -334,7 +410,7 @@ function flipBeastDeckCard(state: GameState): void {
     }
     return;
   }
-  if (cls === 'PALADIN') {
+  if (suit === 'S') {
     const discarded = state.tavernDeck.shift();
     if (discarded) {
       state.discardPile.push(discarded);
@@ -345,7 +421,7 @@ function flipBeastDeckCard(state: GameState): void {
     return;
   }
   const player = currentPlayer(state);
-  if (cls === 'CLERIC') {
+  if (suit === 'H') {
     if (player.hand.length === 0) {
       log(state, `${label} flips (Cleric) — ${player.name} has no cards to discard.`);
       return;
@@ -357,7 +433,7 @@ function flipBeastDeckCard(state: GameState): void {
     const [discarded] = player.hand.splice(idx, 1);
     state.discardPile.push(discarded);
     log(state, `${label} flips (Cleric) — ${player.name} discards a card from hand.`);
-  } else if (cls === 'BARD') {
+  } else if (suit === 'D') {
     if (player.hand.length === 0) {
       log(state, `${label} flips (Bard) — ${player.name} has no cards to banish, skipped.`);
       return;
@@ -501,6 +577,27 @@ function toReserveDeck(state: GameState, cards: Card[], position: 'top' | 'botto
     else if (position === 'top') state.tavernDeck.unshift(c);
     else state.tavernDeck.push(c);
   }
+}
+
+/**
+ * Legacy-only (Missions 4 and 11): pushes `cards` onto the discard pile — the shared tail for both a covered
+ * DEFEND and an enemy's played table cards on defeat (exact or overkill). When GameState.discardCleanupLowToHigh
+ * is set, sorts the batch so the LOWEST-value card ends up on top (the array's last element, matching how
+ * rules.ts's discardPileTopValue reads "top") instead of whatever order the caller collected them in — sourced
+ * from an independent fan digital-reimplementation's rules doc's "M4+ Cleanup discard ordering: when discarding
+ * played cards during cleanup, place them low-to-high, lowest value on top." A no-op wrapper (behaves exactly
+ * like `state.discardPile.push(...)`) for every mission that doesn't set the flag, or for a single-card push
+ * (nothing to order), same shape as banishCards/toReserveDeck above.
+ */
+function pushToDiscardPile(state: GameState, cards: Card[]): void {
+  if (cards.length === 0) return;
+  if (!state.discardCleanupLowToHigh || cards.length === 1) {
+    state.discardPile.push(...cards);
+    return;
+  }
+  // Descending by value: the highest card is pushed first, the lowest last — so the lowest ends up on top.
+  const ordered = [...cards].sort((a, b) => cardValue(b) - cardValue(a));
+  state.discardPile.push(...ordered);
 }
 
 /**
@@ -674,6 +771,22 @@ function applyPlayerCourtTier(state: GameState, tier: number): void {
 }
 
 /**
+ * UNSOURCED BALANCE JUDGMENT CALL — not from the transcript or any community research (see the
+ * legacy-mission-playtest-findings memory doc's Mission 10 section, and this mission's own regression tests for
+ * the reasoning). Neither of this pass's two sourced corrections (drawing enemies from already-corrupted party
+ * cards; the Bard's forced move becoming a player choice) touches the actual collapse mechanism playtesting
+ * found: `missionZone`'s combined value has no decay and no ceiling, so it grows by a fresh card every single
+ * turn a boss fight drags on — feeding straight onto that enemy's live attack, then doubled again on top of that
+ * for a Warrior-suited enemy — and simulated play still collapsed to a 0% win rate across 8 fresh seeded games
+ * (1p/2p/4p) even with both sourced fixes applied. Capping the zone's contribution keeps the mission's own
+ * escalating-corruption flavor (the zone still visibly grows every turn) while stopping a boss fight that runs
+ * long from becoming mathematically unsurvivable. The cap's specific value (10 — one average card's worth of
+ * "extra" strength past whatever a fight opens with) is a judgment call with no source backing it at all; treat
+ * it as a starting point for real playtesting, not a confirmed number.
+ */
+const MISSION_10_ZONE_BONUS_CAP = 10;
+
+/**
  * The current enemy's attack, live — folds in Mission 4's discard-pile buff (see GameState.discardTopBuffsAttack)
  * and/or Mission 8's ascending-zone buff (see GameState.ascendingZone) when active.
  */
@@ -685,8 +798,10 @@ export function resolvedEnemyAttack(state: GameState): number {
     // Mission 10: "double total strength (base + mission-zone bonus) BEFORE any Paladin [Spades] reduction is
     // subtracted" — a different formula shape from every other mission's buff (which all fold their buff into
     // baseAttack before spadesShield is subtracted, with no multiplier step in between), so this doesn't reuse
-    // currentEnemyAttackWithDiscardBuff.
-    const zoneBonus = state.startOfTurnZoneFlip ? state.missionZone.reduce((sum, c) => sum + cardValue(c), 0) : 0;
+    // currentEnemyAttackWithDiscardBuff. The raw zone sum is capped at MISSION_10_ZONE_BONUS_CAP — see that
+    // constant's own comment for why this line exists at all; it has no source, unlike the formula shape above.
+    const rawZoneBonus = state.startOfTurnZoneFlip ? state.missionZone.reduce((sum, c) => sum + cardValue(c), 0) : 0;
+    const zoneBonus = Math.min(rawZoneBonus, MISSION_10_ZONE_BONUS_CAP);
     const totalStrength = enemy.baseAttack + zoneBonus;
     const isWarrior = classForSuit(enemy.suit).id === 'WARRIOR';
     const multiplied = isWarrior ? totalStrength * 2 : totalStrength;
@@ -695,7 +810,9 @@ export function resolvedEnemyAttack(state: GameState): number {
   let buff = 0;
   if (state.discardTopBuffsAttack) buff += discardPileTopValue(state.discardPile);
   if (state.ascendingZone) buff += ascendingZoneAttackBuff(state.missionZone);
-  if (state.rollingZoneBonus && state.rollingZoneCard) buff += cardValue(state.rollingZoneCard);
+  // Mission 5: bonus strength from every card recycled into the rolling zone since the last kill, summed
+  // together (see GameState.rollingZoneBonus / rollMissionZoneBonusCard) — not just the single most-recent one.
+  if (state.rollingZoneBonus) buff += missionZoneValueSum(state.rollingZoneCards);
   // Mission 11: bonus strength from the discard pile's AND banish pile's top cards combined (see
   // GameState.pileTopEnemyBonus / rules.ts's banishPileTopValue).
   if (state.pileTopEnemyBonus) buff += discardPileTopValue(state.discardPile) + banishPileTopValue(state.banishPile);
@@ -736,8 +853,15 @@ function finishDeferredAttackTurn(state: GameState, blockNextAttack: boolean): E
   return finishNonAttackTurn(state);
 }
 
-/** Returns true if the enemy was defeated by this hit (win or new enemy revealed either way). */
-function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
+/**
+ * Returns true if the enemy was defeated by this hit (win or new enemy revealed either way).
+ * `attackIncludesGuardian` is Legacy-only (Mission 6, sourced from the official rules card): true when the play
+ * that landed this kill included a Guardian card — cancels Myla's team-damage step entirely for this kill (see
+ * GameState.zoneVengeanceOnKill / finishEnemyDefeatTail). Absent for the recursive splash-damage self-call
+ * (Mission 5's exactKillSplashDamage — never combined with Mission 6's zoneVengeanceOnKill in practice, but
+ * threaded through anyway so a chained kill from the same play stays covered by the same shield).
+ */
+function dealDamageAndCheckDefeat(state: GameState, damage: number, attackIncludesGuardian = false): boolean {
   const enemy = state.currentEnemy!;
   enemy.damageTaken += damage;
   const remaining = enemy.maxHealth - enemy.damageTaken;
@@ -756,6 +880,18 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
     state.castleDeck.push(enemy);
     state.currentEnemy = state.castleDeck.shift()!;
     log(state, `A new enemy is revealed: ${enemyLabel(state.currentEnemy)}.`);
+    if (state.endOfTurnZoneFlip && state.missionZone.length > 0) {
+      // Mission 3: without this, a run of overkills lets the escalating immunity zone snowball indefinitely across
+      // the whole gauntlet (the zone otherwise only ever clears on an exact kill, at the bottom of this function) —
+      // stacking with each recycled enemy until immunity walls off most of the party's usable classes before a
+      // single kill lands. Clearing it here bounds the worst case to "however many turns spent on the current
+      // enemy," same as an exact kill would. No source describes this specific edge case; it's a defensive fix for
+      // an interaction the physical single-enemy mission likely never has to handle.
+      banishCards(state, state.missionZone);
+      state.missionZone = [];
+      state.zoneImmuneSuits = [];
+      log(state, 'The mission zone is banished as the fight resets.');
+    }
     state.turnPhase = 'AWAIT_PLAY';
     state.pendingDamage = 0;
     checkForStuckLoss(state);
@@ -795,6 +931,14 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       state.missionZone = [];
       state.zoneImmuneSuits = [];
     }
+    if (state.rollingZoneBonus && state.rollingZoneCards.length > 0) {
+      // Mission 5: a kill resets the "since the last kill" accumulation window — every card recycled into the
+      // rolling zone this stretch goes back to the banish pile (available to recycle out again later), and the
+      // buff it was feeding the just-defeated enemy doesn't carry over to whatever's revealed next.
+      banishCards(state, state.rollingZoneCards);
+      state.rollingZoneCards = [];
+      log(state, 'The rolling zone is banished — its buff resets for the next foe.');
+    }
     if (state.corruptedPartyEnemies) {
       // Mission 10: "Mission-zone cards go to the banish pile normally, or to the discard pile instead on an
       // exact kill" — unlike Mission 3's endOfTurnZoneFlip (which saves only the single most-recently-flipped
@@ -822,31 +966,42 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       }
     }
     if (state.zoneVengeanceOnKill) {
-      // Mission 6: whatever's left on the enemy's table after this kill doesn't just fall to the discard pile —
-      // its lowest-value card is sacrificed permanently into the (never-cleared) mission zone alongside Myla.
+      // Mission 6, sourced fix (regicidelegacy.com compendium + a fan digital-reimplementation's rules doc —
+      // see legacy-missions-transcript-mismatches.md): whatever's left on the enemy's table after this kill
+      // doesn't fall to the discard pile automatically — a PLAYER chooses which single card, from the play area
+      // just committed to this kill, is sacrificed permanently into the (never-cleared) mission zone alongside
+      // Myla. The shipped version instead auto-picked the lowest-value card, taking the choice away from the
+      // player entirely and routinely dragging a second or third suit into Myla's permanent immunity on the very
+      // first kill. Modeled as a genuine pending choice (see CHOOSE_ZONE_VENGEANCE_SACRIFICE /
+      // chooseZoneVengeanceSacrifice), the same shape as Mission 9's AWAIT_RESCUE_CHOICE — the rest of this
+      // kill's resolution (finishEnemyDefeatTail) waits for it.
       if (enemy.tableCards.length > 0) {
-        let lowestIdx = 0;
-        for (let i = 1; i < enemy.tableCards.length; i++) {
-          if (cardValue(enemy.tableCards[i]) < cardValue(enemy.tableCards[lowestIdx])) lowestIdx = i;
-        }
-        const [sacrificed] = enemy.tableCards.splice(lowestIdx, 1);
-        state.missionZone.push(sacrificed);
-        state.zoneImmuneSuits = Array.from(
-          new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))),
-        );
-        log(state, `${sacrificed.kind === 'suited' ? sacrificed.name ?? `the ${sacrificed.rank}` : 'the Jester'} is drawn permanently into the mission zone.`);
+        state.zoneVengeanceChoice = { remaining, attackIncludesGuardian };
+        state.turnPhase = 'AWAIT_ZONE_VENGEANCE_CHOICE';
+        log(state, 'Choose one card from the play area to sacrifice permanently into the mission zone.');
+        return true;
       }
+      // No card left on the enemy's table to sacrifice this kill (rare) — the zone doesn't grow, straight on to
+      // the rest of the defeat resolution.
+      return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian);
     }
-    if (state.pilgrimMechanic) {
-      // Mission 7: every kill burns cards off the top of the reserve deck straight into the discard pile, equal
-      // to the combined value of every Pilgrim still waiting (unrescued) in the mission zone.
-      const burnTotal = state.pilgrimZone.reduce((sum, c) => sum + cardValue(c), 0);
-      if (burnTotal > 0) {
-        const burned = state.tavernDeck.splice(0, burnTotal);
-        if (burned.length > 0) {
-          state.discardPile.push(...burned);
-          log(state, `The ${state.pilgrimZone.length} Pilgrim(s) still waiting (combined strength ${burnTotal}) burn ${burned.length} card(s) off the reserve deck into the discard pile.`);
-        }
+    if (state.pilgrimMechanic && remaining === 0) {
+      // Mission 7: sourced even by this mission's own transcript (though never actually coded until now) — an
+      // exact-damage kill banishes one Pilgrim for free, releasing it from whichever hand has been carrying it as
+      // dead weight (see SuitedCard.pilgrim / this mission's PLAY_CARDS/DEFEND hand-trap rejection). Scoped
+      // judgment call, not itself sourced: which Pilgrim/whose hand isn't specified anywhere, so this picks the
+      // first one found scanning hands in turn order starting from the current player. A no-op if nobody's
+      // holding one yet.
+      const n = state.players.length;
+      let freed: Card | null = null;
+      for (let i = 0; i < n && !freed; i++) {
+        const p = state.players[(state.currentPlayerIndex + i) % n];
+        const idx = p.hand.findIndex((c) => c.kind === 'suited' && c.pilgrim);
+        if (idx !== -1) [freed] = p.hand.splice(idx, 1);
+      }
+      if (freed) {
+        banishCards(state, [freed]);
+        log(state, `The exact hit frees ${freed.kind === 'suited' ? freed.name ?? 'a Pilgrim' : 'a Pilgrim'} from a weary hand — banished for good.`);
       }
     }
     if (state.beastDeckMechanic && remaining === 0) {
@@ -917,6 +1072,17 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
       log(state, `${enemyLabel(enemy)} defeated${upgradeNote || '!'}`);
     }
   }
+  return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian);
+}
+
+/**
+ * The shared tail of a confirmed enemy defeat, once every ruleset/mission-specific inline effect above has run
+ * (or, for Mission 6's zoneVengeanceOnKill, once its AWAIT_ZONE_VENGEANCE_CHOICE has been resolved — see
+ * chooseZoneVengeanceSacrifice). Split out of dealDamageAndCheckDefeat so that choice can pause mid-resolution
+ * and resume here afterward, the same way CHOOSE_EXACT_KILL_RESCUE resumes its own
+ * mission's flow from a dedicated resolve function. `attackIncludesGuardian` — see dealDamageAndCheckDefeat.
+ */
+function finishEnemyDefeatTail(state: GameState, enemy: EnemyState, remaining: number, attackIncludesGuardian: boolean): boolean {
   if (state.ruleset === 'legacy' && (state.pileTopEnemyBonus || state.restoredCardMechanic)) {
     // Mission 11: "defeating the enemy always banishes it" — its played cards go to the banish pile instead of
     // the discard pile, directly feeding the very pile-top bonus/immunity mechanic this flag names (see
@@ -924,7 +1090,7 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
     // own three-step cleanup (see the restoredCardMechanic block above for step one, and just below for step three).
     banishCards(state, enemy.tableCards);
   } else {
-    state.discardPile.push(...enemy.tableCards);
+    pushToDiscardPile(state, enemy.tableCards);
   }
   if (state.ruleset === 'legacy' && state.restoredCardMechanic) {
     // Mission 12's cleanup, step three: banish the ENTIRE discard pile too — order preserved, right after the
@@ -934,19 +1100,10 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
   }
 
   if (state.castleDeck.length === 0) {
-    if (state.ruleset === 'legacy' && state.beastDeckMechanic) {
-      const beastRewardPool = [...state.beastDeck, ...state.beastDeckDiscard];
-      if (beastRewardPool.length > 0) {
-        // Mission 11's reward: the party picks ONE of the beast-deck cards to carry into Mission 12 — modeled as
-        // a genuine pending choice (see CHOOSE_BEAST_REWARD / chooseBeastReward) instead of resolving
-        // automatically, the closest existing precedent being Mission 9's AWAIT_RESCUE_CHOICE window. The
-        // mission doesn't actually complete (phase -> WON) until the party resolves it.
-        state.currentEnemy = null;
-        state.turnPhase = 'AWAIT_BEAST_REWARD_CHOICE';
-        log(state, `All enemies defeated! The party may choose one of the ${beastRewardPool.length} beast card(s) to carry forward.`);
-        return true;
-      }
-    }
+    // Mission 11's reward (Esme's permanent evergreen upgrade, see party.ts's applyEvergreenUpgrade) resolves
+    // entirely outside GameState at mission-grant time — sourced correction: the previously-shipped version
+    // opened a pending AWAIT_BEAST_REWARD_CHOICE window here for the party to pick one of the beast-deck cards to
+    // carry forward, which no longer happens (the beast cards simply return to the party untouched instead).
     state.phase = 'WON';
     state.currentEnemy = null;
     if (state.ruleset === 'regicide' && state.players.length === 1) {
@@ -964,27 +1121,35 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number): boolean {
     // kill (and its own effects) if it's strong enough.
     const splash = enemy.baseAttack;
     log(state, `${enemyLabel(enemy)}'s death throes burst outward — ${splash} splash damage crashes into ${enemyLabel(state.currentEnemy)}!`);
-    dealDamageAndCheckDefeat(state, splash);
+    dealDamageAndCheckDefeat(state, splash, attackIncludesGuardian);
     return true;
   }
 
   if (state.ruleset === 'legacy' && state.zoneVengeanceOnKill && state.missionZone.length > 0) {
-    // Mission 6: Myla, permanently seated in the mission zone, strikes right after it grows — team damage equal
-    // to the live sum of every card resting there (her own base value of 7 included). An exact-damage kill
-    // excludes the single highest-value zone card from this one strike's total. Routed through the existing
-    // AWAIT_DEFEND/defend() flow, so an uncovered hit ends the mission exactly like any other undefended attack.
-    const exact = remaining === 0;
-    const values = state.missionZone.map(cardValue);
-    let total = values.reduce((a, b) => a + b, 0);
-    if (exact) {
-      total -= Math.max(...values);
-      log(state, `An exact hit spares the mission zone's strongest card from Myla's wrath this time.`);
-    }
-    if (total > 0) {
-      log(state, `Myla lashes out for ${total} damage from the ${state.missionZone.length} card(s) haunting the mission zone!`);
-      state.pendingDamage = total;
-      state.turnPhase = 'AWAIT_DEFEND';
-      return true;
+    if (attackIncludesGuardian) {
+      // Mission 6, sourced fix (official rules card, per legacy-missions-transcript-mismatches.md): a winning
+      // attack that includes a Guardian cancels Myla's team-damage step entirely — the shield the Guardian
+      // raises against the enemy also holds against the garden's own retaliation this kill. Not implemented at
+      // all in the shipped version.
+      log(state, "A Guardian's shield holds against the garden itself — Myla's strike is cancelled this time.");
+    } else {
+      // Mission 6: Myla, permanently seated in the mission zone, strikes right after it grows — team damage equal
+      // to the live sum of every card resting there (her own base value of 7 included). An exact-damage kill
+      // excludes the single highest-value zone card from this one strike's total. Routed through the existing
+      // AWAIT_DEFEND/defend() flow, so an uncovered hit ends the mission exactly like any other undefended attack.
+      const exact = remaining === 0;
+      const values = state.missionZone.map(cardValue);
+      let total = values.reduce((a, b) => a + b, 0);
+      if (exact) {
+        total -= Math.max(...values);
+        log(state, `An exact hit spares the mission zone's strongest card from Myla's wrath this time.`);
+      }
+      if (total > 0) {
+        log(state, `Myla lashes out for ${total} damage from the ${state.missionZone.length} card(s) haunting the mission zone!`);
+        state.pendingDamage = total;
+        state.turnPhase = 'AWAIT_DEFEND';
+        return true;
+      }
     }
   }
 
@@ -1065,9 +1230,10 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.discardTopBuffsAttack = false;
   state.exactKillToReserveDeck = false;
   state.corruptedReturnQueue = false;
+  state.discardCleanupLowToHigh = false;
   state.exactKillSplashDamage = false;
   state.rollingZoneBonus = false;
-  state.rollingZoneCard = null;
+  state.rollingZoneCards = [];
   state.zoneVengeanceOnKill = false;
   state.pilgrimMechanic = false;
   state.pilgrimDeck = [];
@@ -1191,13 +1357,16 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.discardTopBuffsAttack = action.discardTopBuffsAttack ?? false;
   state.exactKillToReserveDeck = action.exactKillToReserveDeck ?? false;
   state.corruptedReturnQueue = action.corruptedReturnQueue ?? false;
+  state.discardCleanupLowToHigh = action.discardCleanupLowToHigh ?? false;
   state.exactKillSplashDamage = action.exactKillSplashDamage ?? false;
   state.rollingZoneBonus = action.rollingZoneBonus ?? false;
-  state.rollingZoneCard = null;
+  state.rollingZoneCards = [];
   state.zoneVengeanceOnKill = action.zoneVengeanceOnKill ?? false;
+  state.zoneVengeanceChoice = null;
   state.pilgrimMechanic = action.pilgrimMechanic ?? false;
-  // A small, fixed set of named survivors (not shuffled) — they surface in the same narrative order every time,
-  // like Mission 5/6's presetMissionZone.
+  // Vestigial (see GameState.pilgrimMechanic) — no mission sets action.pilgrimCards anymore, so this is always
+  // empty; Mission 7's actual Pilgrim cards ride in through extraReserveCards below, shuffled into the reserve
+  // deck like any other card.
   state.pilgrimDeck = action.pilgrimCards ? [...action.pilgrimCards] : [];
   state.pilgrimZone = [];
   state.ascendingZone = action.ascendingZone ?? false;
@@ -1219,7 +1388,6 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.skipNextBanishZoneFlip = false;
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
-  flipPilgrimCard(state); // the first player's turn is starting right now, so the Mission 7 flip applies here too
   flipStartOfTurnZoneCard(state); // Mission 10: same reasoning — the first turn's start-of-turn flip fires here too
   flipBeastDeckCard(state); // Mission 11: same reasoning — the first turn's beast-deck flip fires here too
   flipBanishPileZoneCard(state); // Mission 12: same reasoning — the first turn's flip fires here too (a no-op, the banish pile starts empty)
@@ -1293,7 +1461,6 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     state,
     `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${shape.totalValue}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
   );
-  if (state.ruleset === 'legacy') checkPilgrimRescue(state, shape.totalValue);
   const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
   // Mage, Reaver, Guardian, Druid, Chanter, and Evergreen cards' printed suits don't join the combined
   // suit-power resolution below — a Mage's (or a secondClassArcane card's bonus) class power is the arcane bolt
@@ -1366,7 +1533,12 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   // entirely, regardless of the card's own value — spent the instant it's used, not a stacking reduction.
   // Aegis instead holds the shield permanently, zeroing the enemy's attack for the rest of the fight (same
   // final effect as Bulwark, but from a Guardian's suit-less card).
-  const guardianCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian));
+  // Mission 6 reward, sourced fix: a secondClassGuardian card (the Guardian sticker granted to an existing
+  // rank-8 party card, see party.ts's applyGuardianSticker) fires this same shield ability on top of its own
+  // suit power, exactly like a secondClassArcane card's bonus arcane bolt fires on top of its own suit power.
+  const guardianCards = cards.filter(
+    (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian || c.secondClassGuardian),
+  );
   let guardianBlocksNextAttack = false;
   if (state.ruleset === 'legacy' && guardianCards.length > 0) {
     const enemy = state.currentEnemy!;
@@ -1437,7 +1609,10 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   const damage = applyEnemyPaladinDamageReduction(state, rawDamage);
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
-  const defeated = dealDamageAndCheckDefeat(state, damage);
+  // Mission 6, sourced fix: a winning attack that includes a Guardian cancels Myla's zoneVengeanceOnKill
+  // team-damage step entirely (see finishEnemyDefeatTail) — a documented mechanic missing from the shipped
+  // version. Inert on every other mission, since guardianCards is always empty there.
+  const defeated = dealDamageAndCheckDefeat(state, damage, guardianCards.length > 0);
 
   if (state.phase !== 'IN_PROGRESS') return ok(state);
   if (defeated) return ok(state); // enemy was defeated, same player continues against the next one
@@ -1446,11 +1621,17 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     return beginChant(state, chantCount, guardianBlocksNextAttack);
   }
 
-  // Azure Emblem (Mission 6 relic): whenever a Mage joins the attack, every other player gets one chance to
-  // silently stock the reserve deck. Skipped if a Chanter also fired in the same play (see chantCount above) —
-  // the two mission-specific windows never need to stack in practice, since each faction's cards are unique.
-  if (state.ruleset === 'legacy' && state.relics.includes('AZURE_EMBLEM') && cards.some((c) => c.kind === 'suited' && c.arcane)) {
-    return beginAzureEmblem(state, player.id, guardianBlocksNextAttack);
+  // Azure Emblem (Mission 6 relic), sourced fix: whenever a Mage joins the attack, the Mage's OWN player gets
+  // one chance to bank one of this play's Mage card(s) onto the reserve deck instead of losing it to the
+  // discard pile whenever the enemy is eventually defeated — the shipped version had this backwards (every
+  // OTHER player silently placing a card from hand). Skipped if a Chanter also fired in the same play (see
+  // chantCount above) — the two mission-specific windows never need to stack in practice, since each faction's
+  // cards are unique.
+  const mageCardIds = state.ruleset === 'legacy' && state.relics.includes('AZURE_EMBLEM')
+    ? cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.arcane)).map((c) => c.id)
+    : [];
+  if (mageCardIds.length > 0) {
+    return beginAzureEmblem(state, player.id, mageCardIds, guardianBlocksNextAttack);
   }
 
   const enemyAttack = guardianBlocksNextAttack ? 0 : resolvedEnemyAttack(state);
@@ -1477,6 +1658,11 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
   }
   if (cards.some((c) => c.kind === 'jester')) {
     return fail('Use the Jester action to play the Jester.');
+  }
+  // Mission 7's Pilgrim hand-trap: once drawn into a hand, a Pilgrim card can never be played, for any reason
+  // (see SuitedCard.pilgrim / GameState.pilgrimMechanic) — reject the whole play rather than silently dropping it.
+  if (state.pilgrimMechanic && cards.some((c) => c.kind === 'suited' && c.pilgrim)) {
+    return fail('A Pilgrim card is dead weight — it cannot be played.');
   }
 
   const shape = validatePlayShape(cards, state.endlessLoop);
@@ -1543,6 +1729,11 @@ function assistCombo(state: GameState, action: Extract<GameAction, { type: 'ASSI
   const card = assister.hand.find((c) => c.id === action.cardId);
   if (!card) return fail('Card is not in your hand.');
   if (card.kind !== 'suited') return fail('Only a suited card can be added to a combo.');
+  // Mission 7's Pilgrim hand-trap extends to a silent Kinfolk Flute/Scarlet Whistle assist too — slipping one in
+  // is still "playing" it (see GameState.pilgrimMechanic / playCards' own rejection).
+  if (state.pilgrimMechanic && card.pilgrim) {
+    return fail('A Pilgrim card is dead weight — it cannot be played, even silently assisted in.');
+  }
 
   const existing = state.currentEnemy!.tableCards.filter((c) => state.comboAssist!.cardIds.includes(c.id));
   const combined = validatePlayShape([...existing, card], state.endlessLoop);
@@ -1584,7 +1775,9 @@ function yieldTurn(state: GameState, action: Extract<GameAction, { type: 'YIELD'
 
   const enemyAttack = resolvedEnemyAttack(state);
   if (enemyAttack <= 0) {
-    endTurnOrAwaitRescue(state);
+    // This yield resolved with nothing to defend against — genuinely idle, the one case checkForStuckLoss's solo
+    // branch needs to catch (see its own comment).
+    endTurnOrAwaitRescue(state, true);
     return ok(state);
   }
   state.pendingDamage = enemyAttack;
@@ -1702,10 +1895,19 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
     if (!card) return fail(`Card ${id} is not in your hand.`);
     cards.push(card);
   }
+  // Mission 7's Pilgrim hand-trap: once drawn into a hand, a Pilgrim card can never be discarded either — not to
+  // cover damage, and not as part of a Feign Death (which requires discarding the WHOLE hand; a Pilgrim sitting
+  // there makes that impossible on its own, exactly per the sourced rule that it "blocks Feign Death while held").
+  if (state.pilgrimMechanic && cards.some((c) => c.kind === 'suited' && c.pilgrim)) {
+    return fail('A Pilgrim card is dead weight — it cannot be discarded. Choose other cards to cover the damage.');
+  }
   const discardTotal = cards.reduce((sum, c) => sum + cardValue(c), 0);
   const isEntireHand = cards.length === player.hand.length;
   // Legacy "Feign Death": discarding a full hand always succeeds, but only if you didn't play a card this turn
-  // (so your hand wasn't reduced below your limit) — i.e. you yielded straight into this defend.
+  // (so your hand wasn't reduced below your limit) — i.e. you yielded straight into this defend. Gated on the
+  // literal whole hand (isEntireHand), so a Pilgrim sitting in hand makes Feign Death permanently unreachable —
+  // its dead-weight card can never be part of that whole-hand discard (see the rejection above) — exactly the
+  // sourced rule that Feign Death is blocked while a Pilgrim is held.
   const feignDeath =
     state.ruleset === 'legacy' &&
     isEntireHand &&
@@ -1713,13 +1915,24 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
     player.hand.length === state.maxHandSize &&
     state.lastActionWasYield[state.currentPlayerIndex];
 
-  if (discardTotal < state.pendingDamage && !isEntireHand) {
-    return fail(`That only covers ${discardTotal} of ${state.pendingDamage} damage — select more cards or your whole hand.`);
+  // Mission 7: since a Pilgrim can never be offered up (see the rejection above), "your whole hand" is an
+  // impossible bar to clear whenever one is held — the base insufficient-discard check below would otherwise
+  // reject every possible DEFEND action outright, soft-locking the game. Once every OTHER (non-Pilgrim) card in
+  // hand has been offered, that's the most this player is capable of discarding — treat it the same way the base
+  // rule treats emptying a Pilgrim-free hand, so an insufficient defense still resolves as a normal loss below
+  // instead of being stuck rejecting forever.
+  const maxDischargeableCount = state.pilgrimMechanic
+    ? player.hand.filter((c) => !(c.kind === 'suited' && c.pilgrim)).length
+    : player.hand.length;
+  const offeredEverythingDischargeable = cards.length === maxDischargeableCount;
+
+  if (discardTotal < state.pendingDamage && !offeredEverythingDischargeable) {
+    return fail(`That only covers ${discardTotal} of ${state.pendingDamage} damage — select more cards or everything you're able to discard.`);
   }
 
   const idSet = new Set(action.cardIds);
   player.hand = player.hand.filter((c) => !idSet.has(c.id));
-  state.discardPile.push(...cards);
+  pushToDiscardPile(state, cards);
 
   if (discardTotal < state.pendingDamage && !feignDeath) {
     state.phase = 'LOST';
@@ -1730,6 +1943,13 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
 
   if (feignDeath && discardTotal < state.pendingDamage) {
     log(state, `${player.name} feigns death — discards their whole hand (${discardTotal}) despite ${state.pendingDamage} damage owed!`);
+    // Feigning death is a deliberate rescue, not a no-op — it earns a fresh chance rather than reading as an
+    // extension of the yield that opened this defend window (see checkForStuckLoss's solo-play condition, which
+    // would otherwise treat "hand now empty" plus "last action was a yield" as an immediate, undeserved loss).
+    // A normal defend leaves the flag alone on purpose: completing the SAME yield-opened turn without feigning
+    // death shouldn't erase that the turn started as a yield (see the "cannot yield if everyone else just
+    // yielded" rule, which reads this same flag on the *other* player(s) after their yield-then-defend turn).
+    state.lastActionWasYield[state.currentPlayerIndex] = false;
   } else {
     log(state, `${player.name} discards ${cards.length} card(s) to cover ${state.pendingDamage} damage.`);
   }
@@ -1894,49 +2114,41 @@ function resolveChant(state: GameState, action: Extract<GameAction, { type: 'RES
 }
 
 /**
- * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic: opens (or immediately clears) the Azure Emblem
- * window after a play that included a Mage card — every other player, one at a time, may silently place a
- * single card from hand atop the reserve deck via RESOLVE_AZURE_EMBLEM. `blockNextAttack` mirrors a Guardian
- * shield raised in the same play.
+ * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic, sourced fix: opens the Azure Emblem window after a
+ * play that included a Mage card — the Mage's OWN player (the attacker, `attackerId`) may bank one of
+ * `eligibleCardIds` (this play's Mage card(s), still sitting on the enemy's table) onto the reserve deck via
+ * RESOLVE_AZURE_EMBLEM, instead of losing it to the discard pile whenever the enemy eventually falls. The
+ * shipped version instead opened this for every OTHER player to place a card from their own hand — backwards on
+ * both who benefits and what moves (per the official rules card, see legacy-missions-transcript-mismatches.md).
+ * `blockNextAttack` mirrors a Guardian shield raised in the same play.
  */
-function beginAzureEmblem(state: GameState, attackerId: string, blockNextAttack: boolean): EngineResult {
-  const pendingPlayerIds = state.players.filter((p) => p.id !== attackerId).map((p) => p.id);
-  if (pendingPlayerIds.length === 0) {
-    return finishDeferredAttackTurn(state, blockNextAttack);
-  }
-
-  state.azureEmblemWindow = { pendingPlayerIds, blockNextAttack };
+function beginAzureEmblem(state: GameState, attackerId: string, eligibleCardIds: string[], blockNextAttack: boolean): EngineResult {
+  state.azureEmblemWindow = { pendingPlayerIds: [attackerId], eligibleCardIds, blockNextAttack };
   state.turnPhase = 'AWAIT_AZURE_EMBLEM';
-  log(state, 'Azure Emblem: any other player may silently place a card atop the reserve deck.');
+  log(state, "Azure Emblem: the Mage's own player may bank one of this play's Mage card(s) onto the reserve deck instead of losing it to the discard pile.");
   return ok(state);
 }
 
-/** Legacy-only (Mission 6): the front-of-queue player in an open Azure Emblem window responds (see GameState.azureEmblemWindow). */
+/** Legacy-only (Mission 6): the attacking player resolves their own open Azure Emblem window (see GameState.azureEmblemWindow). */
 function resolveAzureEmblem(state: GameState, action: Extract<GameAction, { type: 'RESOLVE_AZURE_EMBLEM' }>): EngineResult {
   if (state.turnPhase !== 'AWAIT_AZURE_EMBLEM' || !state.azureEmblemWindow) return fail('There is no open Azure Emblem window to resolve.');
-  const [nextId, ...rest] = state.azureEmblemWindow.pendingPlayerIds;
-  if (action.playerId !== nextId) return fail("It's not your turn to respond to the Azure Emblem.");
-
-  const player = findPlayer(state, nextId);
-  if (!player) return fail('Unknown player.');
+  const { pendingPlayerIds, eligibleCardIds, blockNextAttack } = state.azureEmblemWindow;
+  const [attackerId] = pendingPlayerIds;
+  if (action.playerId !== attackerId) return fail("It's not your Azure Emblem window to resolve.");
 
   if (action.cardId) {
-    const card = player.hand.find((c) => c.id === action.cardId);
-    if (!card) return fail('That card is not in your hand.');
-    player.hand = player.hand.filter((c) => c.id !== card.id);
-    toReserveDeck(state, [card], 'top');
-    log(state, `${player.name} silently places a card atop the reserve deck (Azure Emblem).`);
+    if (!eligibleCardIds.includes(action.cardId)) return fail('That card is not eligible to bank via the Azure Emblem.');
+    const enemy = state.currentEnemy!;
+    const idx = enemy.tableCards.findIndex((c) => c.id === action.cardId);
+    if (idx === -1) return fail('That card is no longer available to bank.');
+    const [banked] = enemy.tableCards.splice(idx, 1);
+    toReserveDeck(state, [banked], 'top');
+    log(state, `${banked.kind === 'suited' ? banked.name ?? 'A Mage' : 'A Jester'} is banked onto the reserve deck instead of falling to the discard pile (Azure Emblem).`);
   }
 
-  const { blockNextAttack } = state.azureEmblemWindow;
-  if (rest.length === 0) {
-    state.azureEmblemWindow = null;
-    state.turnPhase = 'AWAIT_PLAY';
-    return finishDeferredAttackTurn(state, blockNextAttack);
-  }
-
-  state.azureEmblemWindow = { pendingPlayerIds: rest, blockNextAttack };
-  return ok(state);
+  state.azureEmblemWindow = null;
+  state.turnPhase = 'AWAIT_PLAY';
+  return finishDeferredAttackTurn(state, blockNextAttack);
 }
 
 /** Mission 9, from AWAIT_END_OF_TURN: declines to banish — every captured pile's face-up card cycles face-down to the bottom of its own pile and the next card flips up, then the turn advances. */
@@ -1973,31 +2185,34 @@ function chooseExactKillRescue(state: GameState, action: Extract<GameAction, { t
 }
 
 /**
- * Mission 11 only: resolves the AWAIT_BEAST_REWARD_CHOICE window opened once the mission's last enemy falls (see
- * dealDamageAndCheckDefeat). Validated against the window being open, not turn ownership — any player may make
- * the pick for the party, same as CLAIM_JESTER. The chosen card is fed into GameState.restoredPartyCards, reusing
- * the same mission-end fold Mission 10's "deck rehabilitation" reward already uses (see party.ts's
- * applyBeastCardChoice / RoomManager's completeLegacyMission) — the mission only actually completes (phase ->
- * WON) once this resolves.
+ * Mission 6 only, sourced fix: resolves the AWAIT_ZONE_VENGEANCE_CHOICE window opened by zoneVengeanceOnKill (see
+ * dealDamageAndCheckDefeat). The official rules card and a fan digital-reimplementation's rules doc agree a
+ * PLAYER chooses which single card, from the play area just committed to the kill (the defeated enemy's own
+ * table), is sacrificed permanently into the mission zone — the shipped version instead auto-picked the
+ * lowest-value card for them. Gated on turn ownership like CHOOSE_EXACT_KILL_RESCUE, since this opens mid-turn
+ * for the player who just landed the kill. Resuming the rest of the defeat resolution is delegated to
+ * finishEnemyDefeatTail, the same tail dealDamageAndCheckDefeat itself falls through to.
  */
-function chooseBeastReward(state: GameState, action: Extract<GameAction, { type: 'CHOOSE_BEAST_REWARD' }>): EngineResult {
-  if (state.phase !== 'IN_PROGRESS' || state.turnPhase !== 'AWAIT_BEAST_REWARD_CHOICE') {
-    return fail('There is no open beast-card reward to choose right now.');
-  }
-  const player = findPlayer(state, action.playerId);
-  if (!player) return fail('Unknown player.');
-  const pool = [...state.beastDeck, ...state.beastDeckDiscard];
-  const chosen = pool.find((c) => c.id === action.cardId);
-  if (!chosen) return fail('That card is not part of the beast-card reward pool.');
+function chooseZoneVengeanceSacrifice(
+  state: GameState,
+  action: Extract<GameAction, { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE' }>,
+): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_ZONE_VENGEANCE_CHOICE');
+  if (err) return fail(err);
+  const pending = state.zoneVengeanceChoice;
+  if (!pending) return fail('There is no open zone-vengeance choice to resolve.');
 
-  state.restoredPartyCards.push(chosen);
-  state.beastDeck = [];
-  state.beastDeckDiscard = [];
-  log(state, `${player.name} chooses ${chosen.kind === 'suited' ? chosen.name ?? `the ${chosen.rank}` : 'a Jester'} to carry into the next mission.`);
+  const enemy = state.currentEnemy!;
+  const idx = enemy.tableCards.findIndex((c) => c.id === action.cardId);
+  if (idx === -1) return fail('That card is not available to sacrifice into the mission zone.');
 
-  state.phase = 'WON';
-  state.currentEnemy = null;
-  log(state, 'All enemies defeated — the mission is complete!');
+  const [sacrificed] = enemy.tableCards.splice(idx, 1);
+  state.missionZone.push(sacrificed);
+  state.zoneImmuneSuits = Array.from(new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))));
+  log(state, `${sacrificed.kind === 'suited' ? sacrificed.name ?? `the ${sacrificed.rank}` : 'the Jester'} is drawn permanently into the mission zone.`);
+
+  state.zoneVengeanceChoice = null;
+  finishEnemyDefeatTail(state, enemy, pending.remaining, pending.attackIncludesGuardian);
   return ok(state);
 }
 
@@ -2035,10 +2250,12 @@ export function createLobbyState(): GameState {
     discardTopBuffsAttack: false,
     exactKillToReserveDeck: false,
     corruptedReturnQueue: false,
+    discardCleanupLowToHigh: false,
     exactKillSplashDamage: false,
     rollingZoneBonus: false,
-    rollingZoneCard: null,
+    rollingZoneCards: [],
     zoneVengeanceOnKill: false,
+    zoneVengeanceChoice: null,
     pilgrimMechanic: false,
     pilgrimDeck: [],
     pilgrimZone: [],
@@ -2101,8 +2318,10 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return declineRescue(draft, action);
     case 'CHOOSE_EXACT_KILL_RESCUE':
       return chooseExactKillRescue(draft, action);
-    case 'CHOOSE_BEAST_REWARD':
-      return chooseBeastReward(draft, action);
+    case 'CHOOSE_ZONE_VENGEANCE_SACRIFICE':
+      return chooseZoneVengeanceSacrifice(draft, action);
+    case 'SURRENDER_CARD_TO_ZONE':
+      return surrenderCardToZone(draft, action);
     case 'START_ENDLESS_ROUND':
       return startEndlessRound(draft);
     default:

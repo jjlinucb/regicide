@@ -7,14 +7,20 @@ const ALL_SUITS: Suit[] = ['H', 'D', 'C', 'S'];
 
 type NonRoyalRank = Exclude<Rank, 'J' | 'Q' | 'K'>;
 
-/** Original names for the Golden Blade Syndicate's 40 starting members, by class and rank. Not the physical game's proprietary character names — invented for this digital campaign. */
+/**
+ * Original names for the Golden Blade Syndicate's 40 starting members, by class and rank. Not the physical game's
+ * proprietary character names — invented for this digital campaign, EXCEPT Clubs-6 ("Esme"), renamed to match a
+ * sourced identity: Mission 11 ("Descent into Darkness") names this specific card as the party member pulled out
+ * for that mission (see legacy/missions.ts's Mission 11 sidelineIdentity/reward.upgradeSidelinedCard). The
+ * placeholder name it replaces ("Ulra Bloodfang") was never referenced anywhere else.
+ */
 const STARTING_NAMES: Record<Suit, Record<NonRoyalRank, string>> = {
   C: {
     '2': 'Bran Ashfist',
     '3': 'Doran Steelhide',
     '4': 'Kessa Ironjaw',
     '5': 'Grael Stormbreaker',
-    '6': 'Ulra Bloodfang',
+    '6': 'Esme',
     '7': 'Torin Oakenshield',
     '8': 'Vessa Grimhammer',
     '9': 'Halric Bonecrusher',
@@ -113,6 +119,27 @@ export interface MissionReward {
   dualClassStickers?: number;
   /** Mission 9's "second Mage sticker" reward: gives one random eligible existing party member a bonus Mage sticker (see applyMageSticker). */
   mageSticker?: boolean;
+  /**
+   * A mixed-bag reward step several missions' sourced material calls for (first implemented for Mission 5, see
+   * legacy/missions.ts): permanently corrupts one random EXISTING party member (never a card this same reward
+   * just granted — see applyCorruptAnotherCard) with SuitedCard.corrupted. Not pure upside: the card's class
+   * power(s) ignore enemy immunity from then on, but every play banishes the reserve deck's top card as a cost.
+   */
+  corruptAnotherCard?: boolean;
+  /**
+   * Mission 6's sourced bonus (see legacy-missions-transcript-mismatches.md): gives one random eligible existing
+   * rank-8 party member a bonus Guardian sticker (see applyGuardianSticker) — replaces the shipped version's
+   * over-grant of all 4 Guardian recruits kept permanently; sourced material keeps only the rank-3 Guardian
+   * (`recruits` below carries just that one) and grants this bonus instead.
+   */
+  guardianSticker?: boolean;
+  /**
+   * Mission 11's reward ("Descent into Darkness"): the sidelined party member matching this identity (see
+   * missions.ts's Mission 11 `sidelineIdentity` — the same identity, kept in sync) permanently gains
+   * SuitedCard.evergreen (see applyEvergreenUpgrade). Not a new recruit — this card was never removed from the
+   * persisted campaign roster, only excluded from this one mission's active fight.
+   */
+  upgradeSidelinedCard?: { suit: Suit; rank: Rank };
 }
 
 /** The "Lucky 4" ranks Dual-class Stickers target — one sticker per rank, matching the physical game's 4-sticker sheets. */
@@ -171,11 +198,76 @@ export function applyMageSticker(party: Card[]): Card[] {
   return party.map((c) => (c.id === pick.id ? { ...c, secondClassArcane: true } : c));
 }
 
-/** Adds a mission's reward — recruits, any Dual-class Stickers, and any Mage sticker — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
+/**
+ * A mixed-bag reward step (see MissionReward.corruptAnotherCard): permanently corrupts one random eligible
+ * existing party member, excluding any card id in `excludeIds` (the recruits this same reward just granted —
+ * "another" card, not the new arrival) and any card already `corrupted` or `restored` (mutually exclusive with
+ * `corrupted` — see SuitedCard.restored). A no-op if nothing is eligible.
+ */
+export function applyCorruptAnotherCard(party: Card[], excludeIds: Set<string> = new Set()): Card[] {
+  const eligible = party.filter(
+    (c) => c.kind === 'suited' && !c.corrupted && !c.restored && !excludeIds.has(c.id),
+  );
+  if (eligible.length === 0) return party;
+  const pick = eligible[Math.floor(Math.random() * eligible.length)];
+  return party.map((c) => (c.id === pick.id ? { ...c, corrupted: true } : c));
+}
+
+/**
+ * Mission 6's sourced bonus (see legacy-missions-transcript-mismatches.md, replacing the shipped over-grant of
+ * all 4 Guardian recruits): picks one random eligible existing rank-8 party member and gives it a bonus Guardian
+ * sticker — unlike a pure Guardian recruit's `guardian` flag (which replaces suit-power resolution entirely),
+ * the card keeps resolving its own suit power AND raises the Guardian's absolute shield when played (see
+ * SuitedCard.secondClassGuardian, engine.ts's resolveCommittedPlay's guardianCards handling). Mirrors
+ * applyMageSticker's eligibility/selection shape, narrowed to rank 8 per the sourced reward.
+ */
+export function applyGuardianSticker(party: Card[]): Card[] {
+  const eligible = party.filter(
+    (c) =>
+      c.kind === 'suited' &&
+      c.rank === '8' &&
+      !c.arcane &&
+      !c.reaver &&
+      !c.guardian &&
+      !c.druid &&
+      !c.chanter &&
+      !c.evergreen &&
+      !c.secondClassGuardian,
+  );
+  if (eligible.length === 0) return party;
+  const pick = eligible[Math.floor(Math.random() * eligible.length)];
+  return party.map((c) => (c.id === pick.id ? { ...c, secondClassGuardian: true } : c));
+}
+
+/**
+ * Mission 11's reward mechanic ("Descent into Darkness"): finds the sidelined party member matching `identity`
+ * (suit + rank) and permanently gives it SuitedCard.evergreen — the same all-four-base-suits-at-once,
+ * immunity-ignoring power Mission 9's Gøran reward already grants (see engine.ts's resolveCommittedPlay's
+ * evergreenActive branch). This card was never removed from the persisted roster to begin with — it only sat out
+ * this one mission's active fight (see missions.ts's Mission 11 sidelineIdentity / RoomManager's
+ * startLegacyMission) — so this is a plain in-place upgrade, not an add. A no-op (same reference) if `identity`
+ * is unset or no matching card is found.
+ */
+export function applyEvergreenUpgrade(party: Card[], identity?: { suit: Suit; rank: Rank }): Card[] {
+  if (!identity) return party;
+  let upgraded = false;
+  const next = party.map((c) => {
+    if (upgraded || c.kind !== 'suited' || c.suit !== identity.suit || c.rank !== identity.rank) return c;
+    upgraded = true;
+    return { ...c, evergreen: true };
+  });
+  return upgraded ? next : party;
+}
+
+/** Adds a mission's reward — recruits, any Dual-class Stickers, any Mage sticker, any corrupt-another-card effect, any Guardian sticker, and any sidelined-card upgrade — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
 export function applyReward(party: Card[], reward: MissionReward): Card[] {
-  let next = [...party, ...reward.recruits.map(buildRecruitCard)];
+  const newRecruits = reward.recruits.map(buildRecruitCard);
+  let next = [...party, ...newRecruits];
   if (reward.dualClassStickers) next = applyDualClassStickers(next, reward.dualClassStickers);
   if (reward.mageSticker) next = applyMageSticker(next);
+  if (reward.corruptAnotherCard) next = applyCorruptAnotherCard(next, new Set(newRecruits.map((c) => c.id)));
+  if (reward.guardianSticker) next = applyGuardianSticker(next);
+  if (reward.upgradeSidelinedCard) next = applyEvergreenUpgrade(next, reward.upgradeSidelinedCard);
   return next;
 }
 
@@ -192,23 +284,4 @@ export function applyRestoredPartyCards(party: Card[], restored: Card[]): Card[]
   const existingIds = new Set(party.map((c) => c.id));
   const toRestore = restored.filter((c) => !existingIds.has(c.id));
   return [...party, ...toRestore];
-}
-
-/**
- * Mission 11's reward mechanic ("Descent into Darkness"): replaces the campaign party's WHOLE beast-card slate
- * (Mission 4's reward pool, see SuitedCard.beast) with just the single card the party chose to carry forward —
- * `restored` here is GameState.restoredPartyCards, populated by engine.ts's chooseBeastReward. The other three,
- * having spent the whole mission locked in the mission-zone beast deck, don't return. Deliberately NOT just
- * applyRestoredPartyCards: that function only ever adds cards missing by id, but every beast card (including the
- * chosen one) is already sitting in `party` the whole time — Mission 11 only pulls them out of the mission's own
- * reserve deck at setup (see deck.ts's buildBeastDeck), never out of the persisted campaign roster — so the
- * chosen card's id is always already present and a plain add would be a no-op. This prunes every beast card out
- * first, then re-adds only the chosen one(s). A no-op if `restored` is empty (the choice was never made, or this
- * mission has no beast cards to begin with).
- */
-export function applyBeastCardChoice(party: Card[], restored: Card[]): Card[] {
-  if (restored.length === 0) return party;
-  const chosenIds = new Set(restored.map((c) => c.id));
-  const pruned = party.filter((c) => !(c.kind === 'suited' && c.beast) || chosenIds.has(c.id));
-  return applyRestoredPartyCards(pruned, restored);
 }

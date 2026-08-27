@@ -31,9 +31,11 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
 
   let caption: string | null = null;
   if (state.rollingZoneBonus) {
-    caption = state.rollingZoneCard
-      ? `Rolling buff — feeds the enemy +${cardValue(state.rollingZoneCard)} attack until it cycles out next turn.`
-      : 'Rolling buff — empty for now.';
+    const rollingTotal = state.rollingZoneCards.reduce((sum, c) => sum + cardValue(c), 0);
+    caption =
+      state.rollingZoneCards.length > 0
+        ? `Recycled from the banish pile — feeds the enemy +${rollingTotal} attack until the next kill resets it.`
+        : 'Rolling buff — empty for now.';
   } else if (state.zoneVengeanceOnKill) {
     caption = `Never cleared — strikes the whole party for ${zoneTotal} on the next kill (an exact hit spares the strongest card).`;
   } else if (state.ascendingZone) {

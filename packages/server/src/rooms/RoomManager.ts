@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { applyAction, createLobbyState } from '@regicide/shared';
 import type { Card, GameAction, GameState, LegacySavePayload } from '@regicide/shared';
 import {
-  applyBeastCardChoice,
   applyRestoredPartyCards,
   applyReward,
   buildInitialParty,
@@ -280,10 +279,11 @@ export class RoomManager {
   }
 
   /**
-   * Grants a single mission's reward (recruits, Dual-class Stickers, relics) and marks it completed. Shared by a
-   * normal win and by jumping ahead into a later mission (see startLegacyMission). `restoredPartyCards` is
-   * Mission 10 only (see GameState.restoredPartyCards) — omitted (or empty) for every other mission, and for a
-   * jumped-ahead grant where no mission was actually played.
+   * Grants a single mission's reward (recruits, Dual-class Stickers, relics, Mission 11's sidelined-card upgrade)
+   * and marks it completed. Shared by a normal win and by jumping ahead into a later mission (see
+   * startLegacyMission). `restoredPartyCards` is Mission 10's "deck rehabilitation" only (see
+   * GameState.restoredPartyCards) — omitted (or empty) for every other mission, and for a jumped-ahead grant where
+   * no mission was actually played.
    */
   private grantMissionReward(
     legacy: LegacyRoomData,
@@ -291,12 +291,7 @@ export class RoomManager {
     restoredPartyCards: Card[] = [],
   ): void {
     legacy.party = applyReward(legacy.party, mission.reward);
-    // Mission 11's beast-card choice REPLACES the party's whole beast-card slate rather than just adding to it
-    // (see party.ts's applyBeastCardChoice) — every other mission's restoredPartyCards (currently just Mission
-    // 10's "deck rehabilitation") is a plain additive fold instead.
-    legacy.party = mission.beastDeckMechanic
-      ? applyBeastCardChoice(legacy.party, restoredPartyCards)
-      : applyRestoredPartyCards(legacy.party, restoredPartyCards);
+    legacy.party = applyRestoredPartyCards(legacy.party, restoredPartyCards);
     if (mission.reward.relics?.length) {
       legacy.permanentRules = [...legacy.permanentRules, ...mission.reward.relics];
     }
@@ -334,6 +329,13 @@ export class RoomManager {
       const sidelinedIds = new Set(shuffled.slice(0, mission.sidelineCount).map((c) => c.id));
       missionParty = missionParty.filter((c) => !sidelinedIds.has(c.id));
     }
+    // Mission 11's own sideline: a specific card by identity (Esme, 6 of Clubs), not a random pick — same
+    // "sits out, comes back automatically" shape as sidelineCount above (see missions.ts's Mission 11
+    // sidelineIdentity / reward.upgradeSidelinedCard).
+    if (mission.sidelineIdentity) {
+      const { suit, rank } = mission.sidelineIdentity;
+      missionParty = missionParty.filter((c) => !(c.kind === 'suited' && c.suit === suit && c.rank === rank));
+    }
 
     const n = room.playerOrder.length;
     const playerNames = room.playerOrder.map((id) => room.players.get(id)!.name);
@@ -352,6 +354,7 @@ export class RoomManager {
       discardTopBuffsAttack: mission.discardTopBuffsAttack,
       exactKillToReserveDeck: mission.exactKillToReserveDeck,
       corruptedReturnQueue: mission.corruptedReturnQueue,
+      discardCleanupLowToHigh: mission.discardCleanupLowToHigh,
       exactKillSplashDamage: mission.exactKillSplashDamage,
       presetMissionZone: mission.presetMissionZone,
       rollingZoneBonus: mission.rollingZoneBonus,
