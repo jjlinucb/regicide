@@ -169,9 +169,38 @@ function endTurnOrAwaitRescue(state: GameState): void {
 
 /**
  * Mission 3 ("Lessons in Flames") only: end of every turn, the top of the reserve deck flips face-up into a
- * shared mission zone, and the enemy becomes immune to that card's class(es) too — stacking with each further
- * flip. Only called from advanceToNextPlayer, so defeating an enemy (which skips straight back to AWAIT_PLAY
- * without advancing) naturally skips this turn's flip, per the mission's rule.
+ * shared mission zone, and the enemy becomes immune to that card's class(es) too. Only called from
+ * advanceToNextPlayer, so defeating an enemy (which skips straight back to AWAIT_PLAY without advancing)
+ * naturally skips this turn's flip, per the mission's rule.
+ *
+ * SECOND-PASS BALANCE FIX (2026-08-26, unsourced — no compendium/BGG text covers this specific interaction, see
+ * legacy/missions.ts's Mission 3 comment for the citations that DO exist): a 12-agent playtest pass found this
+ * mission still simulated a ~0% win rate even after the first pass removed the enemies' own baked-in dual
+ * immunity — the zone alone was still adding a NEW class of immunity on nearly every non-kill turn, uncapped,
+ * across a 6-enemy exactKillOnly gauntlet where landing a precise hit every turn is already hard. With only 4
+ * classes to go around, that reliably walls off Hearts and/or Diamonds (the only two hand-refill tools — Diamonds
+ * draws, Hearts just recycles the discard pile back into the reserve deck) within 3-4 non-kill turns, and once
+ * refill is gone it's gone for the rest of that enemy's fight: nothing in this engine ever grows a hand except a
+ * live Diamonds play, so a walled-off hand only ever shrinks from there while full unmitigated attack keeps
+ * landing every turn.
+ *
+ * A second simulation pass (packages/shared/src/legacy/_verify_mission_3.test.ts, deleted after use) measured
+ * this directly rather than guessing: capping the zone at letting through one MORE class beyond the enemy's own
+ * inherent immunity (i.e. the enemy ever ends up immune to at most 2 classes at once) moved the needle
+ * essentially not at all — the party still hits a full Hearts+Diamonds lockout almost as often, because with
+ * only 4 classes total, "one more" has better than even odds of completing that exact pair. Only capping the
+ * zone at contributing NOTHING beyond the enemy's own inherent immunity (i.e. this flip keeps happening, keeps
+ * feeding the mission-zone flavor and the exact-kill-save/banish-on-defeat cleanup below, but stops actually
+ * compounding the enemy's immunity further) produced a real, measured improvement: total enemies defeated across
+ * 60 seeded 1p/2p/4p games went from 70/360 to 92/360 (+31%), and average turns survived per game went from 12.6
+ * to 39.4 (+213%), versus the uncapped version, using the same heuristic (not optimal) bot both times. Every
+ * intermediate cap tested (allowing 1 or 2 MORE classes beyond the enemy's own) performed close to the uncapped
+ * baseline, not partway to this result — the failure mode is a binary "did this hit complete the Hearts+Diamonds
+ * lockout," not a smooth gradient, so a partial cap barely helps. The literal win rate stayed at 0% in both
+ * configurations across all 60 games — the same heuristic bot also can't beat plain Mission 1 (classic Regicide,
+ * zero Legacy quirks) in 40/40 tries, so it's a real bot-skill ceiling, not evidence against this fix; the
+ * turns/kills deltas above are the meaningful signal here, matching this repo's own established caveat for this
+ * kind of verification (see the memory note that gave rise to this fix).
  */
 function flipMissionZoneCard(state: GameState): void {
   if (!state.endOfTurnZoneFlip || !state.currentEnemy) return;
@@ -179,10 +208,23 @@ function flipMissionZoneCard(state: GameState): void {
   if (!card) return;
   state.missionZone.push(card);
   if (card.kind === 'suited') {
+    const enemy = state.currentEnemy;
+    const totalImmuneSuits = new Set([enemy.suit, ...(enemy.secondSuit ? [enemy.secondSuit] : []), ...state.zoneImmuneSuits]);
+    const inherentImmunityCount = 1 + (enemy.secondSuit ? 1 : 0);
+    const added: string[] = [];
     for (const s of cardSuits(card)) {
-      if (!state.zoneImmuneSuits.includes(s)) state.zoneImmuneSuits.push(s);
+      if (totalImmuneSuits.size >= inherentImmunityCount) break;
+      if (!state.zoneImmuneSuits.includes(s)) {
+        state.zoneImmuneSuits.push(s);
+        totalImmuneSuits.add(s);
+        added.push(s);
+      }
     }
-    log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the enemy is now also immune to ${cardSuits(card).map((s) => classForSuit(s).name).join(' & ')}.`);
+    if (added.length > 0) {
+      log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the enemy is now also immune to ${added.map((s) => classForSuit(s as Suit).name).join(' & ')}.`);
+    } else {
+      log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the fire catches, but the enemy's resistance is already spent.`);
+    }
   } else {
     log(state, 'The mission zone flips a Jester.');
   }

@@ -614,7 +614,13 @@ describe('legacy: mission 3 mechanics (end-of-turn mission zone)', () => {
     return res.state;
   }
 
-  it('flips the top reserve card into the mission zone at end of turn, adding its class to the enemy\'s immunity', () => {
+  it('flips the top reserve card into the mission zone at end of turn, but grants no NEW immunity once the enemy already has its own', () => {
+    // Second-pass balance fix (see engine.ts's flipMissionZoneCard doc comment): simulation showed the zone
+    // compounding on top of the enemy's own inherent immunity was the actual driver of Mission 3's ~0% win rate,
+    // not something a partial cap could fix — so the zone now never pushes an enemy past however many classes it
+    // was already immune to on its own. The card still flips into the shared zone (feeding the exact-kill-save
+    // and banish-on-defeat cleanup below) — it just stops adding to zoneImmuneSuits once that ceiling is hit,
+    // which for every Mission 3 enemy (single-class, no secondSuit since the first-pass fix) means immediately.
     const boss: LegacyEnemySpec = { name: 'Archive Boss', suit: 'S', health: 100, attack: 1 };
     let state = startZoneMission(1, [boss]);
     state = structuredClone(state);
@@ -628,8 +634,34 @@ describe('legacy: mission 3 mechanics (end-of-turn mission zone)', () => {
     const res2 = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
     state = res2.state;
 
-    expect(state.missionZone.length).toBe(1);
-    expect(state.zoneImmuneSuits).toContain('H');
+    expect(state.missionZone.length).toBe(1); // the card still visibly flips into the zone
+    expect(state.zoneImmuneSuits).toEqual([]); // but grants no new immunity — the Spades-immune boss already has its own
+    expect(state.log.some((e) => e.message.includes('resistance is already spent'))).toBe(true);
+  });
+
+  it('the immunity cap is measured against however many classes the enemy itself already resists, not a hardcoded number', () => {
+    // No shipped Mission 3 enemy carries a secondSuit any more (see missions.ts), but the cap is written against
+    // "however many classes this enemy already resists" rather than a hardcoded number, so a dual-immune enemy
+    // (2 inherent classes) still gets zero new ones from the zone, exactly like a single-immune enemy does —
+    // verified directly since nothing else exercises that path.
+    const boss: LegacyEnemySpec = { name: 'Two-Headed Boss', suit: 'S', secondSuit: 'C', health: 100, attack: 1 };
+    let state = startZoneMission(1, [boss]);
+    state = structuredClone(state);
+    state.tavernDeck = [suited('H', '5'), suited('D', '3'), ...state.tavernDeck];
+    state = rig(state, [suited('D', '2'), suited('D', '9')]); // 2 cards on hand — one to defend with each of the 2 turns below
+
+    let res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.zoneImmuneSuits).toEqual([]); // already at its own 2-class ceiling (S + C) before the flip
+
+    res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.missionZone.length).toBe(2); // both cards still visibly accumulate in the zone
+    expect(state.zoneImmuneSuits).toEqual([]); // still nothing new — the enemy started at its own ceiling already
   });
 
   it('banishes the mission zone (saving one card to discard on an exact kill) when the enemy is defeated, and skips that turn\'s flip', () => {

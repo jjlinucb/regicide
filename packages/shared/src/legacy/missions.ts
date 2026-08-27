@@ -220,6 +220,15 @@ export const MISSIONS: Mission[] = [
     // on top of an unbounded, only-clears-on-a-kill zone (see engine.ts's dealDamageAndCheckDefeat) was the main
     // driver of this mission being disproportionately harder than its neighbors — Mission 12's final boss had the
     // identical bug (see that mission's comment).
+    //
+    // SECOND PASS: removing that baked-in secondClass wasn't enough on its own — a follow-up playtest still found
+    // a ~0% simulated win rate, because endOfTurnZoneFlip's own escalation was still uncapped: it kept adding a
+    // NEW class of immunity on nearly every non-kill turn, and with only 4 classes total that reliably walled off
+    // Hearts and/or Diamonds (the only two hand-refill tools) within a handful of turns, after which a shrinking
+    // hand had no way to ever grow back for the rest of that enemy's fight. Unsourced (no source covers this
+    // specific interaction) — see engine.ts's flipMissionZoneCard for the fix (the zone now never pushes an
+    // enemy's immunity past however many classes it already had on its own) and the simulated before/after numbers
+    // that justified it.
     enemies: [
       enemy('Midnight the Cat', 'CLERIC', 30, 10),
       enemy('Japat', 'BARD', 30, 10),
