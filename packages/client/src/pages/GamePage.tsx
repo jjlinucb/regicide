@@ -18,6 +18,7 @@ import { JesterPicker } from '../components/JesterPicker';
 import { VictoryCrest } from '../components/VictoryCrest';
 import { ZonePurgePicker } from '../components/ZonePurgePicker';
 import { CapturedPiles } from '../components/CapturedPiles';
+import { EnemyCardPicker } from '../components/EnemyCardPicker';
 
 const MEDAL_INFO: Record<'gold' | 'silver' | 'bronze', { emoji: string; label: string }> = {
   gold: { emoji: '🥇', label: 'Gold Victory' },
@@ -89,6 +90,12 @@ export function GamePage({
   const isAzureEmblemWindow = state.turnPhase === 'AWAIT_AZURE_EMBLEM' && Boolean(state.azureEmblemWindow);
   const azureEmblemTurnPlayerId = state.azureEmblemWindow?.pendingPlayerIds[0];
   const isMyAzureEmblemTurn = isAzureEmblemWindow && azureEmblemTurnPlayerId === myPlayerId;
+  const azureEmblemEligibleCards = state.currentEnemy?.tableCards.filter((c) => state.azureEmblemWindow?.eligibleCardIds.includes(c.id)) ?? [];
+
+  // Mission 6, sourced fix: the zone-vengeance sacrifice window opened by a kill under zoneVengeanceOnKill —
+  // only the current player (who landed the kill) resolves it.
+  const isZoneVengeanceWindow = state.turnPhase === 'AWAIT_ZONE_VENGEANCE_CHOICE' && Boolean(state.zoneVengeanceChoice);
+  const isMyZoneVengeanceWindow = isZoneVengeanceWindow && isMyTurn;
   const canPlaceInZone =
     isLegacy &&
     state.ascendingZone &&
@@ -159,25 +166,29 @@ export function GamePage({
               : 'An attack is open for the Kinfolk Flute — silently add a matching card, or leave it alone.'
             : isAzureEmblemWindow
               ? isMyAzureEmblemTurn
-                ? 'Azure Emblem: silently place a card atop the reserve deck, or decline.'
+                ? 'Azure Emblem: bank one of your Mage card(s) onto the reserve deck, or decline.'
                 : `${state.players.find((p) => p.id === azureEmblemTurnPlayerId)?.name} is responding to the Azure Emblem...`
-              : isChantWindow
-                ? isMyChantTrim
-                  ? `The chant drew everyone up — discard exactly ${myChantOverflow} card(s) to get back to your hand limit.`
-                  : `${state.players.find((p) => p.id === chantTrimmerId)?.name} is trimming their hand from the chant...`
-                : isZonePurgeWindow
-                  ? isMyZonePurgeWindow
-                    ? 'Choose cards to banish forever from the discard pile, or continue.'
-                    : `${state.players.find((p) => p.id === state.zonePurge!.playerId)?.name} is sorting the Ultimate Banishment...`
-                  : isMyTurn
-                    ? isAwaitEndOfTurn
-                      ? 'End of turn: banish a hand card to rescue a captured pile, or decline and cycle them all.'
-                      : isAwaitRescueChoice
-                        ? 'Exact hit! Choose a captured pile to rescue to the top of the reserve deck.'
-                        : state.turnPhase === 'AWAIT_DEFEND'
-                          ? `Defend! Discard ${state.pendingDamage} damage worth of cards.`
-                          : 'Your turn — play a card, a combo, or yield.'
-                    : `Waiting for ${state.players[state.currentPlayerIndex]?.name}...`}
+              : isZoneVengeanceWindow
+                ? isMyZoneVengeanceWindow
+                  ? 'The kill draws a card permanently into the mission zone — choose one from the table below.'
+                  : `${state.players[state.currentPlayerIndex]?.name} is choosing a card to sacrifice into the mission zone...`
+                : isChantWindow
+                  ? isMyChantTrim
+                    ? `The chant drew everyone up — discard exactly ${myChantOverflow} card(s) to get back to your hand limit.`
+                    : `${state.players.find((p) => p.id === chantTrimmerId)?.name} is trimming their hand from the chant...`
+                  : isZonePurgeWindow
+                    ? isMyZonePurgeWindow
+                      ? 'Choose cards to banish forever from the discard pile, or continue.'
+                      : `${state.players.find((p) => p.id === state.zonePurge!.playerId)?.name} is sorting the Ultimate Banishment...`
+                    : isMyTurn
+                      ? isAwaitEndOfTurn
+                        ? 'End of turn: banish a hand card to rescue a captured pile, or decline and cycle them all.'
+                        : isAwaitRescueChoice
+                          ? 'Exact hit! Choose a captured pile to rescue to the top of the reserve deck.'
+                          : state.turnPhase === 'AWAIT_DEFEND'
+                            ? `Defend! Discard ${state.pendingDamage} damage worth of cards.`
+                            : 'Your turn — play a card, a combo, or yield.'
+                      : `Waiting for ${state.players[state.currentPlayerIndex]?.name}...`}
           {isHost && (
             <button
               type="button"
@@ -216,27 +227,6 @@ export function GamePage({
                 pick a matching card from your hand below to silently add it, or leave it alone.
               </span>
             )}
-          </div>
-        )}
-        {isMyAzureEmblemTurn && (
-          <div className="legacy-jester-claim-banner">
-            <span>🔷 Azure Emblem: pick exactly one card below to place silently atop the reserve deck, or decline.</span>
-            <div className="jester-picker-choices" style={{ display: 'inline-flex', gap: '0.5rem' }}>
-              <button
-                type="button"
-                className="btn"
-                disabled={selectedCards.length !== 1}
-                onClick={() => {
-                  sendAction({ type: 'RESOLVE_AZURE_EMBLEM', playerId: myPlayerId, cardId: selectedCards[0]?.id });
-                  setSelectedIds(new Set());
-                }}
-              >
-                Place it
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={() => sendAction({ type: 'RESOLVE_AZURE_EMBLEM', playerId: myPlayerId })}>
-                Decline
-              </button>
-            </div>
           </div>
         )}
         {isMyChantTrim && (
@@ -298,11 +288,12 @@ export function GamePage({
           interactive={
             canAssistCombo ||
             isMyChantTrim ||
-            isMyAzureEmblemTurn ||
             (isMyTurn &&
               !isComboAssistWindow &&
               state.turnPhase !== 'AWAIT_JESTER_CLAIM' &&
               state.turnPhase !== 'AWAIT_ZONE_PURGE' &&
+              state.turnPhase !== 'AWAIT_AZURE_EMBLEM' &&
+              state.turnPhase !== 'AWAIT_ZONE_VENGEANCE_CHOICE' &&
               !isAwaitRescueChoice)
           }
           enemy={state.currentEnemy}
@@ -362,6 +353,31 @@ export function GamePage({
         />
       )}
 
+      {isMyAzureEmblemTurn && (
+        <div className="jester-picker">
+          <span>🔷 Azure Emblem: pick one of your Mage card(s) below to bank onto the reserve deck, or decline.</span>
+          <EnemyCardPicker
+            cards={azureEmblemEligibleCards}
+            onChoose={(cardId) => sendAction({ type: 'RESOLVE_AZURE_EMBLEM', playerId: myPlayerId, cardId })}
+          />
+          <div className="jester-picker-choices">
+            <button type="button" className="btn-secondary btn" onClick={() => sendAction({ type: 'RESOLVE_AZURE_EMBLEM', playerId: myPlayerId })}>
+              Decline
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isMyZoneVengeanceWindow && (
+        <div className="jester-picker">
+          <span>☠️ The kill draws a card permanently into the mission zone — choose one from the enemy's table below.</span>
+          <EnemyCardPicker
+            cards={state.currentEnemy?.tableCards ?? []}
+            onChoose={(cardId) => sendAction({ type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE', playerId: myPlayerId, cardId })}
+          />
+        </div>
+      )}
+
       {isMyZonePurgeWindow && (
         <ZonePurgePicker
           discardPile={state.discardPile}
@@ -410,6 +426,7 @@ export function GamePage({
       {isMyTurn &&
         !isComboAssistWindow &&
         !isAzureEmblemWindow &&
+        !isZoneVengeanceWindow &&
         !isChantWindow &&
         !isZonePurgeWindow &&
         state.turnPhase !== 'AWAIT_JESTER_CLAIM' &&
