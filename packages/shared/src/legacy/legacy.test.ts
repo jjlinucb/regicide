@@ -2533,6 +2533,37 @@ describe('legacy: mission 10 setup (Pride to Fall)', () => {
     expect(handCount + state.tavernDeck.length).toBe(32);
   });
 
+  it(
+    'prioritizes already-corrupted party members for the enemy queue over a random sample — sourced correction, ' +
+      "see legacy-missions-transcript-mismatches memory doc's Mission 10 section",
+    () => {
+      const party = buildInitialParty();
+      // Mark exactly 3 party cards corrupted (fewer than the 8 the queue needs — realistic today, since no
+      // earlier mission's reward path actually sets this flag yet; see deck.ts's buildCorruptedPartyEnemies).
+      const corruptedIds = new Set(party.slice(0, 3).map((c) => c.id));
+      const seededParty = party.map((c) => (corruptedIds.has(c.id) ? { ...c, corrupted: true } : c));
+
+      const state = startMission10(1, { startOfTurnZoneFlip: false, party: seededParty });
+      const queue = [state.currentEnemy!, ...state.castleDeck];
+      const queueSourceIds = new Set(queue.map((e) => e.sourceCard!.id));
+
+      // All 3 corrupted members were pulled into the queue...
+      for (const id of corruptedIds) expect(queueSourceIds.has(id)).toBe(true);
+      // ...and the remaining 5 slots fell back to the old random-sample-from-the-whole-party behavior to fill
+      // out the queue, exactly as before this fix, since only 3 corrupted members exist to draw from.
+      expect(queue.length).toBe(8);
+    },
+  );
+
+  it('falls back to a random sample from the whole party when no member is corrupted yet (today\'s realistic campaign state)', () => {
+    // buildInitialParty() never marks anything corrupted — no earlier mission's reward path does that yet — so
+    // this is the actual state a real campaign reaches Mission 10 in today, not a hypothetical.
+    const state = startMission10(1, { startOfTurnZoneFlip: false });
+    const queue = [state.currentEnemy!, ...state.castleDeck];
+    expect(queue.length).toBe(8);
+    expect(queue.every((e) => e.sourceCard?.kind === 'suited' && !e.sourceCard.corrupted)).toBe(true);
+  });
+
   it('fails to start when the party has fewer than 8 eligible members to corrupt', () => {
     const res = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',
@@ -2601,6 +2632,22 @@ describe('legacy: mission 10 class powers (corrupted-hero enemies)', () => {
     expect(res.state.pendingDamage).toBe(4);
   });
 
+  it(
+    'caps the mission zone\'s contribution to the enemy\'s attack — UNSOURCED balance judgment call (see ' +
+      'MISSION_10_ZONE_BONUS_CAP\'s own comment in engine.ts and legacy-mission-playtest-findings for why)',
+    () => {
+      let state = startMission10();
+      state = rig(state, [], { suit: 'S', baseAttack: 5, spadesShield: 0 }); // Paladin suit, not Warrior — keeps the math to base + capped zone
+      // Raw zone sum is 4+5+6+8 = 23, far past the cap — only MISSION_10_ZONE_BONUS_CAP (10) of it should count.
+      state.missionZone = [suited('D', '4'), suited('H', '5'), suited('C', '6'), suited('S', '8')];
+
+      const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+      // 5 base + 10 (capped zone, not the raw 23) = 15.
+      expect(res.state.pendingDamage).toBe(15);
+    },
+  );
+
   it('an enemy Paladin reduces damage it takes by its own base strength', () => {
     let state = startMission10();
     state = rig(state, [suited('D', '10')], { suit: 'S', baseAttack: 4, maxHealth: 100, damageTaken: 0 }); // Paladin suit
@@ -2636,17 +2683,56 @@ describe('legacy: mission 10 class powers (corrupted-hero enemies)', () => {
     expect(res.state.missionZone.map((c) => c.id)).toEqual([draggedId]);
   });
 
-  it('an enemy Bard forces the ending player to move their lowest-value hand card into the mission zone', () => {
+  it(
+    'an enemy Bard opens a player CHOICE (AWAIT_BARD_SURRENDER) instead of auto-picking a card — sourced ' +
+      'correction, see legacy-missions-transcript-mismatches memory doc\'s Mission 10 section',
+    () => {
+      let state = startMission10({ startOfTurnZoneFlip: false });
+      const low = suited('C', '2');
+      const mid = suited('H', '5');
+      const high = suited('D', '8');
+      state = rig(state, [mid, low, high], { suit: 'D', baseAttack: 0 }); // Bard suit, 0 attack
+
+      const yielded = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+      // Pauses right here — the whole hand is still intact, nothing has moved to the zone yet, and the
+      // current-player pointer hasn't advanced (still whoever's turn is ending).
+      expect(yielded.state.turnPhase).toBe('AWAIT_BARD_SURRENDER');
+      expect(yielded.state.players[0].hand.map((c) => c.id).sort()).toEqual([high.id, low.id, mid.id].sort());
+      expect(yielded.state.missionZone.length).toBe(0);
+      expect(yielded.state.currentPlayerIndex).toBe(0);
+
+      // The player picks — deliberately NOT the lowest-value card, proving this is a real choice rather than a
+      // relabeled auto-pick.
+      const res = ensureOk(
+        applyAction(yielded.state, { type: 'SURRENDER_CARD_TO_ZONE', playerId: state.players[0].id, cardId: high.id }),
+      );
+
+      expect(res.state.players[0].hand.map((c) => c.id).sort()).toEqual([low.id, mid.id].sort());
+      expect(res.state.missionZone.map((c) => c.id)).toEqual([high.id]);
+      // Turn-advancement resumed and completed once the choice resolved.
+      expect(res.state.turnPhase).toBe('AWAIT_PLAY');
+    },
+  );
+
+  it("SURRENDER_CARD_TO_ZONE rejects a card not in the ending player's hand, and rejects a different player resolving it", () => {
     let state = startMission10({ startOfTurnZoneFlip: false });
-    const low = suited('C', '2');
-    const mid = suited('H', '5');
-    const high = suited('D', '8');
-    state = rig(state, [mid, low, high], { suit: 'D', baseAttack: 0 }); // Bard suit, 0 attack
+    const inHand = suited('H', '4');
+    state = rig(state, [inHand], { suit: 'D', baseAttack: 0 });
+    const yielded = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    expect(yielded.state.turnPhase).toBe('AWAIT_BARD_SURRENDER');
 
-    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    const notInHand = applyAction(yielded.state, {
+      type: 'SURRENDER_CARD_TO_ZONE',
+      playerId: state.players[0].id,
+      cardId: 'not-a-real-card-id',
+    });
+    expect(notInHand.ok).toBe(false);
 
-    expect(res.state.players[0].hand.map((c) => c.id).sort()).toEqual([high.id, mid.id].sort());
-    expect(res.state.missionZone.map((c) => c.id)).toEqual([low.id]);
+    const wrongPlayer = applyAction(yielded.state, { type: 'SURRENDER_CARD_TO_ZONE', playerId: 'someone-else', cardId: inHand.id });
+    expect(wrongPlayer.ok).toBe(false);
+    // Neither rejected attempt actually moved the card.
+    expect(yielded.state.players[0].hand.map((c) => c.id)).toEqual([inHand.id]);
   });
 
   it("an enemy Bard's forced move is skipped entirely when the ending player's hand is empty", () => {

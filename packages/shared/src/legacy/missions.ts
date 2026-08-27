@@ -627,10 +627,16 @@ export const MISSIONS: Mission[] = [
     // The fixed 8-enemy queue isn't a static MissionEnemySpec list like every earlier mission — per the
     // transcript, it's built at mission start from 8 of the campaign's OWN party members (see
     // GameState.corruptedPartyEnemies / deck.ts's buildCorruptedPartyEnemies), corrupted and sorted
-    // weakest-to-strongest by card value, each with health fixed at 5x its (base, pre-zone-bonus) strength. Which
-    // 8 members get pulled isn't specified by the transcript beyond "eight" — this picks randomly (via the
-    // mission's own seeded RNG, so still reproducible) rather than, say, the 8 lowest-value party cards; a
-    // judgment call, not a transcript detail.
+    // weakest-to-strongest by card value, each with health fixed at 5x its (base, pre-zone-bonus) strength.
+    // SOURCED CORRECTION (regicidelegacy.com's compendium, corroborated by BGG threads and an independent fan
+    // digital reimplementation — see the legacy-missions-transcript-mismatches memory doc's Mission 10 section):
+    // these 8 should be drawn from party members ALREADY marked corrupted earlier in the campaign, not sampled
+    // fresh at random — this shipped ignoring SuitedCard.corrupted entirely at first. deck.ts's
+    // buildCorruptedPartyEnemies now prioritizes already-corrupted members and only falls back to a random
+    // sample to fill any remaining slots — see that function's own comment for why the fallback path is, in
+    // today's actual campaign, still doing essentially all of the work (no earlier mission's reward path sets
+    // that flag on a party card yet). Which members get pulled beyond "prefer corrupted" isn't specified by the
+    // transcript beyond "eight" — the random tie-break remains a judgment call, not a transcript detail.
     enemies: [],
     corruptedPartyEnemies: true,
     // Start-of-turn (not end-of-turn) mission-zone flip, feeding bonus STRENGTH onto the current enemy's own
@@ -638,6 +644,19 @@ export const MISSIONS: Mission[] = [
     // endOfTurnZoneFlip (end-of-turn timing, grants suit immunity instead of an attack buff). The transcript is
     // explicit about the start-of-turn timing; a community-research claim that this flip happens at the END of
     // the turn instead contradicts the transcript and was NOT used.
+    //
+    // UNSOURCED BALANCE JUDGMENT CALL, added after real simulated play (see the legacy-mission-playtest-findings
+    // memory doc's Mission 10 section): as shipped, this zone's combined value had no decay and no ceiling, so a
+    // boss fight that ran long fed an ever-growing buff onto that enemy's live attack — doubled again on top of
+    // that for a Warrior-suited enemy — and collapsed every one of 13 simulated games across 1p/2p/4p. Neither
+    // sourced correction on this mission (the enemy-selection fix above; the Bard-choice fix on
+    // resolveCorruptedEnemyEndOfTurnEffect in engine.ts) touches this mechanism, and re-simulating after both
+    // still produced 0 wins across 24 fresh seeded games. See engine.ts's MISSION_10_ZONE_BONUS_CAP for the
+    // resulting fix (a flat ceiling on the zone's contribution) — it has no source backing it at all, unlike
+    // everything else in this file's comments, and simulated play confirms it measurably improves how far a run
+    // gets (deeper into the 8-enemy queue on average) without on its own making the mission reliably winnable
+    // against a simple heuristic bot; this mission's own sourced baseline (8 sequential 5x-health fights, with
+    // Warrior-doubling) is independently very hard, likely by intentional design this late in the campaign.
     startOfTurnZoneFlip: true,
     // Reward: no reward was transcribed for this mission (no reward video/segment exists in the source
     // transcript) — everything below is best-effort from community research alone, flagged uncertain per this
@@ -656,7 +675,12 @@ export const MISSIONS: Mission[] = [
     //    It's implemented instead as GameState.restoredPartyCards, populated by engine.ts's
     //    dealDamageAndCheckDefeat on every exact kill and folded into the campaign party by party.ts's
     //    applyRestoredPartyCards at mission end (see RoomManager.completeLegacyMission). Marked uncertain the
-    //    same way the flavor beats above are — community research, not transcript-confirmed.
+    //    same way the flavor beats above are — community research, not transcript-confirmed. NOTE: the same
+    //    research pass that produced the two sourced corrections above (enemy selection; the Bard choice) also
+    //    flagged this exact-kill gate itself as a possible mismatch — unconditional restoration, not gated on an
+    //    exact hit — but at a lower confidence than those two (this shipped implementation was already an
+    //    explicit community-research guess, not a transcript detail, before that research pass). Left unchanged
+    //    by this pass rather than folded in silently; a candidate for a future, separately-scoped correction.
     reward: {
       recruits: [],
     },

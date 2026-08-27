@@ -217,7 +217,10 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * opened once the mission's last enemy falls, resolved via CHOOSE_BEAST_REWARD; the mission only actually
  * completes (phase -> WON) once it's resolved. AWAIT_ZONE_VENGEANCE_CHOICE is Mission 6 only (see
  * GameState.zoneVengeanceChoice) — opened by a kill under zoneVengeanceOnKill, resolved via
- * CHOOSE_ZONE_VENGEANCE_SACRIFICE.
+ * CHOOSE_ZONE_VENGEANCE_SACRIFICE. AWAIT_BARD_SURRENDER is Mission 10 only (see
+ * GameState.corruptedPartyEnemies) — opened by an enemy Bard's end-of-turn power when the ending player's hand is
+ * non-empty, resolved via SURRENDER_CARD_TO_ZONE; engine.ts's advanceToNextPlayer pauses mid-advance right here
+ * until it resolves, same shape as AWAIT_END_OF_TURN pausing there for Mission 9.
  */
 export type TurnPhase =
   | 'AWAIT_PLAY'
@@ -230,7 +233,8 @@ export type TurnPhase =
   | 'AWAIT_CHANT_TRIM'
   | 'AWAIT_END_OF_TURN'
   | 'AWAIT_RESCUE_CHOICE'
-  | 'AWAIT_BEAST_REWARD_CHOICE';
+  | 'AWAIT_BEAST_REWARD_CHOICE'
+  | 'AWAIT_BARD_SURRENDER';
 
 /**
  * Legacy-only (Mission 9): one of the 3 captured piles seeding GameState.capturedPiles. `faceDown[0]` is the
@@ -467,8 +471,10 @@ export interface GameState {
   /**
    * Legacy-only (Mission 10, "Pride to Fall"): when true, the mission's 8-enemy fight queue is built at mission
    * start from the campaign's own party instead of a static MissionEnemySpec list — 8 cards are pulled from
-   * `party` (see START_LEGACY_MISSION), corrupted, sorted weakest-to-strongest by card value, and each becomes an
-   * enemy with health fixed at 5x its (base, pre-zone-bonus) strength (see deck.ts's buildCorruptedPartyEnemies).
+   * `party` (see START_LEGACY_MISSION, preferring already-`corrupted` party members per sourced research before
+   * falling back to a random sample — see deck.ts's buildCorruptedPartyEnemies for the full reasoning), corrupted,
+   * sorted weakest-to-strongest by card value, and each becomes an enemy with health fixed at 5x its (base,
+   * pre-zone-bonus) strength.
    * Also gates this mission's 2 always-on class powers, resolved via resolvedEnemyAttack /
    * applyEnemyPaladinDamageReduction: an enemy Warrior doubles its total strength (base + mission-zone bonus,
    * see startOfTurnZoneFlip) before any Spades shield is subtracted; an enemy Paladin reduces damage it takes by
@@ -673,6 +679,15 @@ export type GameAction =
    * turn ownership — any player may make the pick for the party, same as CLAIM_JESTER.
    */
   | { type: 'CHOOSE_BEAST_REWARD'; playerId: string; cardId: string }
+  /**
+   * Legacy-only (Mission 10), from AWAIT_BARD_SURRENDER: the ending player picks `cardId` from their own hand to
+   * move into the mission zone, per an enemy Bard's end-of-turn power. Sourced correction (regicidelegacy.com's
+   * compendium, corroborated by BGG threads and a working fan digital reimplementation's own UI — see the
+   * legacy-missions-transcript-mismatches memory doc's Mission 10 section): the shipped version used to auto-pick
+   * the player's lowest-value card instead of offering a real choice. Resuming turn-advancement after this
+   * resolves is engine.ts's surrenderCardToZone's job.
+   */
+  | { type: 'SURRENDER_CARD_TO_ZONE'; playerId: string; cardId: string }
   /** Classic Regicide only, from WON: continues into another round with Kings shuffled into the Tavern deck and enemies scaled up. */
   | { type: 'START_ENDLESS_ROUND' };
 

@@ -135,7 +135,20 @@ function checkForStuckLoss(state: GameState): void {
 function advanceToNextPlayer(state: GameState): void {
   // Mission 10: the current enemy's end-of-turn power fires for the turn that's ending, before the
   // current-player pointer moves on to whoever's turn is starting next (see resolveCorruptedEnemyEndOfTurnEffect).
+  // An enemy Bard's power opens a real player choice (AWAIT_BARD_SURRENDER) rather than resolving immediately —
+  // when that happens, pause here without advancing anything further; finishAdvanceToNextPlayer picks the rest of
+  // this back up once SURRENDER_CARD_TO_ZONE resolves it (see surrenderCardToZone).
   resolveCorruptedEnemyEndOfTurnEffect(state);
+  if (state.turnPhase === 'AWAIT_BARD_SURRENDER') return;
+  finishAdvanceToNextPlayer(state);
+}
+
+/**
+ * The actual turn-advancement work — split out of advanceToNextPlayer so a Mission 10 Bard-surrender choice can
+ * pause partway through and resume later (see surrenderCardToZone) instead of forcing that choice to resolve
+ * synchronously inside a single engine call, the same way Mission 9's AWAIT_END_OF_TURN pauses endTurnOrAwaitRescue.
+ */
+function finishAdvanceToNextPlayer(state: GameState): void {
   state.pendingDamage = 0;
   state.turnPhase = 'AWAIT_PLAY';
   state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
@@ -272,9 +285,16 @@ function flipStartOfTurnZoneCard(state: GameState): void {
  * Mission 10 only: the current enemy's end-of-turn class power, for the turn that's ending — called from
  * advanceToNextPlayer BEFORE the current-player pointer advances, so "current player" here still means whoever's
  * turn just ended (per the transcript's "current player must move a card from hand"). A Cleric enemy drags the
- * discard pile's top card into the mission zone; a Bard enemy forces that player to move a card from hand into
- * the zone, skipped entirely if their hand is empty — this picks their lowest-value card, since the transcript
- * gives the player no choice in the matter ("must move a card"), a judgment call rather than a transcript detail.
+ * discard pile's top card into the mission zone — no player choice involved, so it resolves immediately.
+ *
+ * A Bard enemy forces that same player to move a card from hand into the zone instead, skipped entirely if their
+ * hand is empty. Sourced correction (regicidelegacy.com's compendium, corroborated by BGG threads and a working
+ * fan digital reimplementation's own UI — see the legacy-missions-transcript-mismatches memory doc's Mission 10
+ * section): this used to auto-pick the player's lowest-value card, on the theory that the transcript's "must move
+ * a card" left the player no say in the matter — but the sourced material says which card is a real player
+ * choice. This now opens AWAIT_BARD_SURRENDER and returns without touching the hand; advanceToNextPlayer sees
+ * that phase and pauses mid-advance (see finishAdvanceToNextPlayer) until SURRENDER_CARD_TO_ZONE resolves it.
+ *
  * Warrior and Paladin enemies have no end-of-turn effect of their own — see resolvedEnemyAttack and
  * applyEnemyPaladinDamageReduction for their always-on powers instead. Naturally skipped on a turn a kill
  * happened on, since dealDamageAndCheckDefeat's same-player-continues path never calls advanceToNextPlayer —
@@ -292,15 +312,32 @@ function resolveCorruptedEnemyEndOfTurnEffect(state: GameState): void {
   } else if (cls === 'BARD') {
     const player = currentPlayer(state);
     if (player.hand.length === 0) return;
-    let lowestIdx = 0;
-    for (let i = 1; i < player.hand.length; i++) {
-      if (cardValue(player.hand[i]) < cardValue(player.hand[lowestIdx])) lowestIdx = i;
-    }
-    const [moved] = player.hand.splice(lowestIdx, 1);
-    state.missionZone.push(moved);
-    const label = moved.kind === 'suited' ? moved.name ?? `the ${moved.rank}` : 'the Jester';
-    log(state, `${enemyLabel(state.currentEnemy)} forces ${player.name} to surrender ${label} into the mission zone.`);
+    state.turnPhase = 'AWAIT_BARD_SURRENDER';
+    log(state, `${enemyLabel(state.currentEnemy)} demands ${player.name} surrender a card from hand into the mission zone.`);
   }
+}
+
+/**
+ * Mission 10, from AWAIT_BARD_SURRENDER: the ending player's chosen answer to an enemy Bard's forced move (see
+ * resolveCorruptedEnemyEndOfTurnEffect) — moves `cardId` out of their hand into the mission zone, then resumes
+ * the turn-advancement that paused to open this choice (see finishAdvanceToNextPlayer). Validated against the
+ * same player whose turn is ending, not whoever's about to go next — requireCurrentPlayerTurn still reads
+ * currentPlayerIndex, which this phase deliberately leaves unmoved until it resolves.
+ */
+function surrenderCardToZone(state: GameState, action: Extract<GameAction, { type: 'SURRENDER_CARD_TO_ZONE' }>): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_BARD_SURRENDER');
+  if (err) return fail(err);
+
+  const player = currentPlayer(state);
+  const card = player.hand.find((c) => c.id === action.cardId);
+  if (!card) return fail(`Card ${action.cardId} is not in your hand.`);
+
+  player.hand = player.hand.filter((c) => c.id !== card.id);
+  state.missionZone.push(card);
+  const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'the Jester';
+  log(state, `${player.name} surrenders ${label} into the mission zone.`);
+  finishAdvanceToNextPlayer(state);
+  return ok(state);
 }
 
 /**
@@ -717,6 +754,22 @@ function applyPlayerCourtTier(state: GameState, tier: number): void {
 }
 
 /**
+ * UNSOURCED BALANCE JUDGMENT CALL — not from the transcript or any community research (see the
+ * legacy-mission-playtest-findings memory doc's Mission 10 section, and this mission's own regression tests for
+ * the reasoning). Neither of this pass's two sourced corrections (drawing enemies from already-corrupted party
+ * cards; the Bard's forced move becoming a player choice) touches the actual collapse mechanism playtesting
+ * found: `missionZone`'s combined value has no decay and no ceiling, so it grows by a fresh card every single
+ * turn a boss fight drags on — feeding straight onto that enemy's live attack, then doubled again on top of that
+ * for a Warrior-suited enemy — and simulated play still collapsed to a 0% win rate across 8 fresh seeded games
+ * (1p/2p/4p) even with both sourced fixes applied. Capping the zone's contribution keeps the mission's own
+ * escalating-corruption flavor (the zone still visibly grows every turn) while stopping a boss fight that runs
+ * long from becoming mathematically unsurvivable. The cap's specific value (10 — one average card's worth of
+ * "extra" strength past whatever a fight opens with) is a judgment call with no source backing it at all; treat
+ * it as a starting point for real playtesting, not a confirmed number.
+ */
+const MISSION_10_ZONE_BONUS_CAP = 10;
+
+/**
  * The current enemy's attack, live — folds in Mission 4's discard-pile buff (see GameState.discardTopBuffsAttack)
  * and/or Mission 8's ascending-zone buff (see GameState.ascendingZone) when active.
  */
@@ -728,8 +781,10 @@ export function resolvedEnemyAttack(state: GameState): number {
     // Mission 10: "double total strength (base + mission-zone bonus) BEFORE any Paladin [Spades] reduction is
     // subtracted" — a different formula shape from every other mission's buff (which all fold their buff into
     // baseAttack before spadesShield is subtracted, with no multiplier step in between), so this doesn't reuse
-    // currentEnemyAttackWithDiscardBuff.
-    const zoneBonus = state.startOfTurnZoneFlip ? state.missionZone.reduce((sum, c) => sum + cardValue(c), 0) : 0;
+    // currentEnemyAttackWithDiscardBuff. The raw zone sum is capped at MISSION_10_ZONE_BONUS_CAP — see that
+    // constant's own comment for why this line exists at all; it has no source, unlike the formula shape above.
+    const rawZoneBonus = state.startOfTurnZoneFlip ? state.missionZone.reduce((sum, c) => sum + cardValue(c), 0) : 0;
+    const zoneBonus = Math.min(rawZoneBonus, MISSION_10_ZONE_BONUS_CAP);
     const totalStrength = enemy.baseAttack + zoneBonus;
     const isWarrior = classForSuit(enemy.suit).id === 'WARRIOR';
     const multiplied = isWarrior ? totalStrength * 2 : totalStrength;
@@ -2286,6 +2341,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return chooseZoneVengeanceSacrifice(draft, action);
     case 'CHOOSE_BEAST_REWARD':
       return chooseBeastReward(draft, action);
+    case 'SURRENDER_CARD_TO_ZONE':
+      return surrenderCardToZone(draft, action);
     case 'START_ENDLESS_ROUND':
       return startEndlessRound(draft);
     default:
