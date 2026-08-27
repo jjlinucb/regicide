@@ -6,6 +6,7 @@ import {
   validatePlayShape,
   type ClientGameState,
   type GameAction,
+  type Suit,
 } from '@regicide/shared';
 import { EnemyDisplay } from '../components/EnemyDisplay';
 import { MissionZonePanel } from '../components/MissionZonePanel';
@@ -26,6 +27,8 @@ const MEDAL_INFO: Record<'gold' | 'silver' | 'bronze', { emoji: string; label: s
   bronze: { emoji: '🥉', label: 'Bronze Victory' },
 };
 
+const SUIT_LABEL: Record<Suit, string> = { H: '♥ Hearts', D: '♦ Diamonds', C: '♣ Clubs', S: '♠ Spades' };
+
 export function GamePage({
   state,
   myPlayerId,
@@ -42,9 +45,13 @@ export function GamePage({
   onRestart: () => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // A Mercenary any-suit Ace (see SuitedCard.wildSuit) needs a suit picked client-side before it can be played
+  // or assisted with — cardId -> the player's choice, submitted alongside PLAY_CARDS/ASSIST_COMBO.
+  const [chosenSuits, setChosenSuits] = useState<Record<string, Suit>>({});
 
   useEffect(() => {
     setSelectedIds(new Set());
+    setChosenSuits({});
   }, [state.currentPlayerIndex, state.turnPhase]);
 
   const me = state.players.find((p) => p.id === myPlayerId);
@@ -53,12 +60,16 @@ export function GamePage({
   const selectedCards = myHand.filter((c) => selectedIds.has(c.id));
   const selectedTotal = selectedCards.reduce((sum, c) => sum + cardValue(c), 0);
   const isLoneJester = selectedCards.length === 1 && selectedCards[0].kind === 'jester';
+  const unresolvedWildCard = selectedCards.find((c) => c.kind === 'suited' && c.wildSuit && !chosenSuits[c.id]);
 
   const playError = useMemo(() => {
     if (selectedCards.length === 0 || isLoneJester) return null;
+    if (state.turnPhase === 'AWAIT_PLAY' && unresolvedWildCard) {
+      return 'Choose a suit for the any-suit Ace before playing it.';
+    }
     const shape = validatePlayShape(selectedCards, state.endlessLoop);
     return 'error' in shape ? shape.error : null;
-  }, [selectedCards, isLoneJester]);
+  }, [selectedCards, isLoneJester, state.turnPhase, state.endlessLoop, unresolvedWildCard]);
 
   function toggleCard(cardId: string) {
     setSelectedIds((prev) => {
@@ -306,17 +317,43 @@ export function GamePage({
           <div className="jester-picker-choices">
             <button
               className="btn"
-              disabled={selectedCards.length !== 1}
+              disabled={selectedCards.length !== 1 || Boolean(unresolvedWildCard)}
               onClick={() => {
-                sendAction({ type: 'ASSIST_COMBO', playerId: myPlayerId, cardId: selectedCards[0].id });
+                const card = selectedCards[0];
+                const chosenSuit = card.kind === 'suited' && card.wildSuit ? chosenSuits[card.id] : undefined;
+                sendAction({ type: 'ASSIST_COMBO', playerId: myPlayerId, cardId: card.id, chosenSuit });
                 setSelectedIds(new Set());
+                setChosenSuits({});
               }}
             >
               Add to attack
             </button>
-            <button className="btn-secondary btn" onClick={() => setSelectedIds(new Set())}>
+            <button
+              className="btn-secondary btn"
+              onClick={() => {
+                setSelectedIds(new Set());
+                setChosenSuits({});
+              }}
+            >
               Leave it alone
             </button>
+          </div>
+        </div>
+      )}
+
+      {unresolvedWildCard && isMyTurn && (canAssistCombo || (state.turnPhase === 'AWAIT_PLAY' && !isComboAssistWindow)) && (
+        <div className="jester-picker">
+          <span>Choose a suit for the any-suit Ace.</span>
+          <div className="jester-picker-choices">
+            {(Object.keys(SUIT_LABEL) as Suit[]).map((suit) => (
+              <button
+                key={suit}
+                className="btn-secondary btn"
+                onClick={() => setChosenSuits((prev) => ({ ...prev, [unresolvedWildCard.id]: suit }))}
+              >
+                {SUIT_LABEL[suit]}
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -443,8 +480,14 @@ export function GamePage({
             canYield={true}
             onClear={() => setSelectedIds(new Set())}
             onPlay={() => {
-              sendAction({ type: 'PLAY_CARDS', playerId: myPlayerId, cardIds: selectedCards.map((c) => c.id) });
+              sendAction({
+                type: 'PLAY_CARDS',
+                playerId: myPlayerId,
+                cardIds: selectedCards.map((c) => c.id),
+                chosenSuits: Object.keys(chosenSuits).length > 0 ? chosenSuits : undefined,
+              });
               setSelectedIds(new Set());
+              setChosenSuits({});
             }}
             onYield={() => sendAction({ type: 'YIELD', playerId: myPlayerId })}
             onDefend={() => {

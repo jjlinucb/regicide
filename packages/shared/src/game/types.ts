@@ -1,5 +1,10 @@
 export type Suit = 'H' | 'D' | 'C' | 'S';
-export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'A' | 'J' | 'Q' | 'K';
+/**
+ * '12' and '19' only ever appear on Mercenary cards (see legacy/mercenaries.ts) — no base party/enemy card uses
+ * them. `cardValue()`'s `Number(card.rank)` fallback (rules.ts) already handles them correctly with no dedicated
+ * case needed.
+ */
+export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '12' | '19' | 'A' | 'J' | 'Q' | 'K';
 
 /**
  * A signature ability a Legacy card can carry on top of its base suit power, one per class
@@ -144,6 +149,37 @@ export interface SuitedCard {
    * card value on top of King's 20, mirroring the same +5/loop step the enemies themselves scale by.
    */
   tier?: number;
+  /**
+   * Legacy-only: marks the Mercenary "2/5" card (see legacy/mercenaries.ts). Its printed `rank` is always '5'
+   * (so playing it alone, discarding it, or defending with it is worth 5, matching the sourced "always worth 5
+   * when discarded"), but for COMBO-matching purposes only it can also satisfy this flagged alternate rank,
+   * contributing that alternate's value instead within a combo resolved as that rank (see rules.ts's
+   * validatePlayShape / comboMatchRanks). Always '2' today — kept as a Rank rather than hardcoding '2' in case a
+   * future mercenary needs a different pair.
+   */
+  flexibleComboRank?: Rank;
+  /**
+   * Legacy-only: marks the Mercenary "19" card (see legacy/mercenaries.ts) — genuinely colorless, unlike Mage/
+   * Reaver/Guardian/Druid/Chanter (which opt out of the combined suit-power resolution but substitute their OWN
+   * effect instead). This card does nothing at all beyond contributing its raw value. Carries an arbitrary,
+   * functionally-inert `suit` (never rendered as a real suit — see legacy/classes.ts's classForCard) that must
+   * stay excluded from every suit-immunity-bookkeeping site a suited card would otherwise feed: the combined
+   * suit-power resolution/immunity-blocking (engine.ts's resolveCommittedPlay's nonArcaneCards filter),
+   * Mission 11's pile-top immunity bonus (rules.ts's pileTopImmuneSuits), Mission 3/12's zone-flip immunity
+   * (engine.ts's flipMissionZoneCard/flipBanishPileZoneCard), Mission 6's zone-vengeance sacrifice
+   * (engine.ts's chooseZoneVengeanceSacrifice), and the client's own hand-blocked-by-immunity check (Hand.tsx).
+   */
+  noSuitPower?: boolean;
+  /**
+   * Legacy-only: marks the Mercenary any-suit Ace (see legacy/mercenaries.ts). Carries a placeholder `suit` until
+   * played — the player chooses one of the 4 base suits at the moment it's actually played (never a class/
+   * campaign suit), submitted via PLAY_CARDS's `chosenSuits` or ASSIST_COMBO's `chosenSuit` (see engine.ts's
+   * playCards/assistCombo, which mutate this card's `suit` in place, before validatePlayShape ever reads it, the
+   * only point old enough in the resolution flow this can land). The choice is permanent once played, the same
+   * "locks in" semantics as any other card's suit. Its rank stays 'A', so it's still an ordinary Animal Companion
+   * (see rules.ts's isAnimalCompanion) alongside this.
+   */
+  wildSuit?: boolean;
 }
 
 export interface JesterCard {
@@ -630,7 +666,12 @@ export type GameAction =
       /** See GameState.restoredCardMechanic. */
       restoredCardMechanic?: boolean;
     }
-  | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[] }
+  /**
+   * `chosenSuits` resolves any Mercenary any-suit Ace among `cardIds` (see SuitedCard.wildSuit) — cardId -> one
+   * of the 4 base suits, required for every wildSuit card in the play, validated and applied (mutating that
+   * card's `suit`) before validatePlayShape ever reads it. Omitted/empty when no wildSuit card is being played.
+   */
+  | { type: 'PLAY_CARDS'; playerId: string; cardIds: string[]; chosenSuits?: Record<string, Suit> }
   | { type: 'YIELD'; playerId: string }
   /** Legacy-only (Mission 8): places a card from hand into the ascending mission zone instead of attacking — ends the turn like a Yield, but progresses the chain (see GameState.ascendingZone). */
   | { type: 'PLACE_IN_ZONE'; playerId: string; cardId: string }
@@ -647,8 +688,13 @@ export type GameAction =
   | { type: 'PLAY_JESTER'; playerId: string; cardId: string }
   /** Legacy-only: claim an open Jester window. Validated against the window being open, not turn ownership — any player may claim. */
   | { type: 'CLAIM_JESTER'; playerId: string }
-  /** Legacy-only, gated by the 'KINFOLK_FLUTE' relic: silently add a matching card from hand to the open combo-assist window. Any player except the attacker. */
-  | { type: 'ASSIST_COMBO'; playerId: string; cardId: string }
+  /**
+   * Legacy-only, gated by the 'KINFOLK_FLUTE' relic: silently add a matching card from hand to the open
+   * combo-assist window. Any player except the attacker. `chosenSuit` resolves `cardId` if it's a Mercenary
+   * any-suit Ace (see SuitedCard.wildSuit / PLAY_CARDS's chosenSuits) — this window can open on a lone
+   * Companion-pairing play (see engine.ts's assistCombo), which reads the assisting card's suit too.
+   */
+  | { type: 'ASSIST_COMBO'; playerId: string; cardId: string; chosenSuit?: Suit }
   /** Legacy-only, gated by the 'KINFOLK_FLUTE' relic: the attacker locks in and resolves the open combo-assist window. */
   | { type: 'RESOLVE_COMBO'; playerId: string }
   /**

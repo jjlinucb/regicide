@@ -231,26 +231,33 @@ function flipMissionZoneCard(state: GameState): void {
   const card = state.tavernDeck.shift();
   if (!card) return;
   state.missionZone.push(card);
-  if (card.kind === 'suited') {
-    const enemy = state.currentEnemy;
-    const totalImmuneSuits = new Set([enemy.suit, ...(enemy.secondSuit ? [enemy.secondSuit] : []), ...state.zoneImmuneSuits]);
-    const inherentImmunityCount = 1 + (enemy.secondSuit ? 1 : 0);
-    const added: string[] = [];
-    for (const s of cardSuits(card)) {
-      if (totalImmuneSuits.size >= inherentImmunityCount) break;
-      if (!state.zoneImmuneSuits.includes(s)) {
-        state.zoneImmuneSuits.push(s);
-        totalImmuneSuits.add(s);
-        added.push(s);
-      }
-    }
-    if (added.length > 0) {
-      log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the enemy is now also immune to ${added.map((s) => classForSuit(s as Suit).name).join(' & ')}.`);
-    } else {
-      log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the fire catches, but the enemy's resistance is already spent.`);
-    }
-  } else {
+  if (card.kind !== 'suited') {
     log(state, 'The mission zone flips a Jester.');
+    return;
+  }
+  // A Mercenary "19" (see SuitedCard.noSuitPower) carries an inert placeholder suit and must never grant zone
+  // immunity, same as every other suit-immunity-bookkeeping site it's excluded from — it still flips normally,
+  // it just never adds to zoneImmuneSuits.
+  if (card.noSuitPower) {
+    log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — it carries no class of its own, so nothing changes.`);
+    return;
+  }
+  const enemy = state.currentEnemy;
+  const totalImmuneSuits = new Set([enemy.suit, ...(enemy.secondSuit ? [enemy.secondSuit] : []), ...state.zoneImmuneSuits]);
+  const inherentImmunityCount = 1 + (enemy.secondSuit ? 1 : 0);
+  const added: string[] = [];
+  for (const s of cardSuits(card)) {
+    if (totalImmuneSuits.size >= inherentImmunityCount) break;
+    if (!state.zoneImmuneSuits.includes(s)) {
+      state.zoneImmuneSuits.push(s);
+      totalImmuneSuits.add(s);
+      added.push(s);
+    }
+  }
+  if (added.length > 0) {
+    log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the enemy is now also immune to ${added.map((s) => classForSuit(s as Suit).name).join(' & ')}.`);
+  } else {
+    log(state, `The mission zone flips ${card.name ?? `a ${card.rank}`} — the fire catches, but the enemy's resistance is already spent.`);
   }
 }
 
@@ -472,13 +479,19 @@ function flipBanishPileZoneCard(state: GameState): void {
   const card = state.banishPile.pop(); // top of the banish pile
   if (!card) return;
   state.missionZone.push(card);
-  if (card.kind === 'suited') {
+  // A Mercenary "19" (see SuitedCard.noSuitPower) carries an inert placeholder suit and must never grant zone
+  // immunity, same as every other suit-immunity-bookkeeping site it's excluded from.
+  if (card.kind === 'suited' && !card.noSuitPower) {
     for (const s of cardSuits(card)) {
       if (!state.zoneImmuneSuits.includes(s)) state.zoneImmuneSuits.push(s);
     }
   }
   const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester';
-  log(state, `The mission zone pulls ${label} from the top of the banish pile — the enemy grows bolder and gains its immunity.`);
+  const outcome =
+    card.kind === 'suited' && card.noSuitPower
+      ? 'the enemy grows bolder, but it carries no class of its own to grant.'
+      : 'the enemy grows bolder and gains its immunity.';
+  log(state, `The mission zone pulls ${label} from the top of the banish pile — ${outcome}`);
 }
 
 function drawOneCard(state: GameState, player: PlayerState): boolean {
@@ -1469,10 +1482,12 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   // after that, a Chanter's is the chant resolved further down, and an Evergreen card's is the all-four-powers
   // resolution forced further down still (Mage always goes first, per legacy/classes.ts). A secondClassArcane
   // card is deliberately NOT excluded here — it keeps its own suit power on top of the arcane bolt it already
-  // triggered above (see SuitedCard.secondClassArcane).
+  // triggered above (see SuitedCard.secondClassArcane). A Mercenary "19" (noSuitPower) is excluded for a
+  // different reason than the rest — it doesn't substitute its own effect, it genuinely has none — which is also
+  // what keeps it out of immunity-blocking, since that's computed only from cards that reach this filter.
   const nonArcaneCards = cards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> =>
-      c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.chanter && !c.evergreen,
+      c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.chanter && !c.evergreen && !c.noSuitPower,
   );
   const nonArcaneSuits = Array.from(new Set(nonArcaneCards.flatMap(cardSuits)));
 
@@ -1645,6 +1660,26 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   return ok(state);
 }
 
+const BASE_SUITS: Suit[] = ['H', 'D', 'C', 'S'];
+
+/**
+ * Resolves any Mercenary any-suit Ace(s) among `cards` (see SuitedCard.wildSuit) by mutating each one's `suit` to
+ * its chosen value from `chosenSuits` (cardId -> one of the 4 base suits) — the earliest point in a play's
+ * resolution a suit is ever needed, before validatePlayShape/cardSuits reads it. `cards` holds direct references
+ * into the owning player's hand (or, from assistCombo, the assister's), so mutating in place here is visible
+ * everywhere downstream. Returns an error string if a wildSuit card has no (or an invalid) choice, null otherwise.
+ */
+function applyChosenSuits(cards: Card[], chosenSuits: Record<string, Suit> | undefined): string | null {
+  for (const card of cards) {
+    if (card.kind !== 'suited' || !card.wildSuit) continue;
+    const chosen = chosenSuits?.[card.id];
+    if (!chosen) return 'Choose a suit for the any-suit Ace before playing it.';
+    if (!BASE_SUITS.includes(chosen)) return 'Invalid suit choice for the any-suit Ace — must be Hearts, Diamonds, Clubs, or Spades.';
+    card.suit = chosen;
+  }
+  return null;
+}
+
 function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_CARDS' }>): EngineResult {
   const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_PLAY');
   if (err) return fail(err);
@@ -1664,6 +1699,12 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
   if (state.pilgrimMechanic && cards.some((c) => c.kind === 'suited' && c.pilgrim)) {
     return fail('A Pilgrim card is dead weight — it cannot be played.');
   }
+
+  // A Mercenary any-suit Ace (see SuitedCard.wildSuit) needs its suit resolved before validatePlayShape ever
+  // reads it — the earliest point in this play's resolution a suit is needed at all. `cards` holds direct
+  // references into player.hand, so mutating `.suit` here is visible everywhere downstream (tableCards, etc.).
+  const wildSuitErr = applyChosenSuits(cards, action.chosenSuits);
+  if (wildSuitErr) return fail(wildSuitErr);
 
   const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
@@ -1734,6 +1775,12 @@ function assistCombo(state: GameState, action: Extract<GameAction, { type: 'ASSI
   if (state.pilgrimMechanic && card.pilgrim) {
     return fail('A Pilgrim card is dead weight — it cannot be played, even silently assisted in.');
   }
+
+  // A Mercenary any-suit Ace (see SuitedCard.wildSuit) can be the assisting card too — this window can open on a
+  // lone Companion-pairing play, whose validatePlayShape branch reads suits immediately (see playCards's own
+  // applyChosenSuits call for why this must happen before validatePlayShape, not after).
+  const wildSuitErr = applyChosenSuits([card], action.chosenSuit ? { [card.id]: action.chosenSuit } : undefined);
+  if (wildSuitErr) return fail(wildSuitErr);
 
   const existing = state.currentEnemy!.tableCards.filter((c) => state.comboAssist!.cardIds.includes(c.id));
   const combined = validatePlayShape([...existing, card], state.endlessLoop);
@@ -2208,7 +2255,11 @@ function chooseZoneVengeanceSacrifice(
 
   const [sacrificed] = enemy.tableCards.splice(idx, 1);
   state.missionZone.push(sacrificed);
-  state.zoneImmuneSuits = Array.from(new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))));
+  // A Mercenary "19" (see SuitedCard.noSuitPower) carries an inert placeholder suit and must never grant zone
+  // immunity, same as every other suit-immunity-bookkeeping site it's excluded from.
+  state.zoneImmuneSuits = Array.from(
+    new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' && !c.noSuitPower ? cardSuits(c) : []))),
+  );
   log(state, `${sacrificed.kind === 'suited' ? sacrificed.name ?? `the ${sacrificed.rank}` : 'the Jester'} is drawn permanently into the mission zone.`);
 
   state.zoneVengeanceChoice = null;

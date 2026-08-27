@@ -42,6 +42,7 @@ export function App() {
     resumeLegacyCampaign,
     restoreLegacyCampaign,
     startLegacyMission,
+    setMercenaryLoadout,
   } = useGameConnection();
 
   // A page reload can only rejoin by stored token, so this component has no local memory of which
@@ -112,6 +113,7 @@ export function App() {
           legacyState={legacyState}
           myPlayerId={session.playerId}
           onStartMission={startLegacyMission}
+          onSetMercenaryLoadout={setMercenaryLoadout}
           onLeave={handleLeave}
         />
       );

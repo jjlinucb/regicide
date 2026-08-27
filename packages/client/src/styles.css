@@ -880,6 +880,62 @@ button {
   font-size: 1rem;
 }
 
+.mercenary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.mercenary-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 2px solid;
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: var(--bg-elevated);
+  font-size: 0.8rem;
+}
+
+.mercenary-glyph {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+.mercenary-label {
+  flex: 1;
+  line-height: 1.3;
+}
+
+.mercenary-stepper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mercenary-stepper .btn {
+  padding: 4px 10px;
+  font-size: 0.9rem;
+  border-radius: 8px;
+}
+
+.mercenary-qty {
+  min-width: 1.5em;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .legacy-jester-claim-banner {
   display: flex;
   align-items: center;

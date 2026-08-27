@@ -8,3 +8,4 @@ export * from './socketEvents.js';
 export * from './legacy/classes.js';
 export * from './legacy/party.js';
 export * from './legacy/missions.js';
+export * from './legacy/mercenaries.js';

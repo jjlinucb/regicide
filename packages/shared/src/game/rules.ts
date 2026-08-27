@@ -1,4 +1,4 @@
-import type { Card, EnemyState, Suit } from './types.js';
+import type { Card, EnemyState, Rank, Suit } from './types.js';
 
 /** Value of a card both as an attack value and as a discard-to-defend value (rules are identical for both uses). */
 export function cardValue(card: Card): number {
@@ -38,6 +38,11 @@ export function isCompanionCard(card: Card): boolean {
 /** A card's class suit(s) — two for a Dual-class Stickers card (see SuitedCard.secondSuit), one otherwise. */
 export function cardSuits(card: Extract<Card, { kind: 'suited' }>): Suit[] {
   return card.secondSuit ? [card.suit, card.secondSuit] : [card.suit];
+}
+
+/** Ranks a card can satisfy for combo-matching: its own printed rank, plus a Mercenary "2/5"'s flagged alternate (see SuitedCard.flexibleComboRank). */
+function comboMatchRanks(card: Extract<Card, { kind: 'suited' }>): Rank[] {
+  return card.flexibleComboRank ? [card.rank, card.flexibleComboRank] : [card.rank];
 }
 
 export interface PlayShape {
@@ -83,15 +88,20 @@ export function validatePlayShape(cards: Card[], loop = 0): PlayShape | { error:
     return { error: 'Animal/Beast Companions can only be played alone or paired with exactly one other card.' };
   }
 
-  // Combo: 2-4 cards of the same rank, summing to 10 or less.
-  const rank = suited[0].rank;
-  if (!suited.every((c) => c.rank === rank)) {
+  // Combo: 2-4 cards of the same rank, summing to 10 or less. A Mercenary "2/5" (see SuitedCard.flexibleComboRank)
+  // can satisfy either its own printed rank or its flagged alternate — resolved to whichever single rank every
+  // card in the play can agree on, preferring each card's own printed rank first (so an all-flexible combo
+  // defaults to its cards' shared printed identity rather than the alternate) over order-dependent comparison.
+  const resolvedRank = comboMatchRanks(suited[0]).find((candidate) =>
+    suited.every((c) => comboMatchRanks(c).includes(candidate)),
+  );
+  if (!resolvedRank) {
     return { error: 'Combo cards must all be the same rank.' };
   }
   if (cards.length > 4) {
     return { error: 'Combos are limited to 4 cards.' };
   }
-  const totalValue = suited.reduce((sum, c) => sum + cardValue(c), 0);
+  const totalValue = suited.reduce((sum, c) => sum + (c.rank === resolvedRank ? cardValue(c) : Number(c.flexibleComboRank)), 0);
   const comboCap = 10 + 2 * Math.max(0, loop);
   if (totalValue > comboCap) {
     return { error: `Combo total must be ${comboCap} or less.` };
@@ -166,8 +176,10 @@ export function pileTopImmuneSuits(discardPile: Card[], banishPile: Card[]): Sui
   const suits = new Set<Suit>();
   const discardTop = discardPile[discardPile.length - 1];
   const banishTop = banishPile[banishPile.length - 1];
-  if (discardTop?.kind === 'suited') for (const s of cardSuits(discardTop)) suits.add(s);
-  if (banishTop?.kind === 'suited') for (const s of cardSuits(banishTop)) suits.add(s);
+  // A Mercenary "19" (see SuitedCard.noSuitPower) carries an inert placeholder suit and must never contribute
+  // immunity here, same as it's excluded from the combined suit-power resolution when actually played.
+  if (discardTop?.kind === 'suited' && !discardTop.noSuitPower) for (const s of cardSuits(discardTop)) suits.add(s);
+  if (banishTop?.kind === 'suited' && !banishTop.noSuitPower) for (const s of cardSuits(banishTop)) suits.add(s);
   return Array.from(suits);
 }
 

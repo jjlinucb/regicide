@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { applyAction, createLobbyState } from '@regicide/shared';
-import type { Card, GameAction, GameState, LegacySavePayload } from '@regicide/shared';
+import type { Card, GameAction, GameState, LegacySavePayload, MercenaryProgress, MercenaryTypeId } from '@regicide/shared';
 import {
   applyRestoredPartyCards,
   applyReward,
   buildInitialParty,
+  buildMercenaryLoadout,
   getMission,
   JESTERS_BY_PLAYER_COUNT,
+  mercenaryCoinsForLosses,
   missionEnemiesToSpecs,
 } from '@regicide/shared';
 import { generateRoomCode } from './roomCode.js';
@@ -27,6 +29,7 @@ export interface LegacyRoomData {
   missionsCompleted: number[];
   currentMission: number;
   permanentRules: string[];
+  mercenaryProgress: MercenaryProgress | null;
 }
 
 export interface Room {
@@ -49,6 +52,7 @@ function toRecord(room: Room): CampaignRecord {
     missionsCompleted: legacy.missionsCompleted,
     currentMission: legacy.currentMission,
     permanentRules: legacy.permanentRules,
+    mercenaryProgress: legacy.mercenaryProgress,
     updatedAt: Date.now(),
   };
 }
@@ -189,6 +193,7 @@ export class RoomManager {
       missionsCompleted: [],
       currentMission: 1,
       permanentRules: [],
+      mercenaryProgress: null,
     };
     const player: RoomPlayer = { id: randomUUID(), token: randomUUID(), name: hostName, socketId: null, connected: true };
     const room: Room = {
@@ -226,6 +231,8 @@ export class RoomManager {
       missionsCompleted: save.missionsCompleted,
       currentMission: save.currentMission,
       permanentRules: Array.isArray(save.permanentRules) ? save.permanentRules : [],
+      // Older save files predate this field — a fresh mission carries no stale loss/coin progress either way.
+      mercenaryProgress: save.mercenaryProgress ?? null,
     };
     const player: RoomPlayer = { id: randomUUID(), token: randomUUID(), name: hostName, socketId: null, connected: true };
     const room: Room = {
@@ -263,6 +270,7 @@ export class RoomManager {
       missionsCompleted: record.missionsCompleted,
       currentMission: record.currentMission,
       permanentRules: record.permanentRules,
+      mercenaryProgress: record.mercenaryProgress,
     };
     const player: RoomPlayer = { id: randomUUID(), token: randomUUID(), name, socketId: null, connected: true };
     const room: Room = {
@@ -321,6 +329,21 @@ export class RoomManager {
       room.legacy.currentMission = missionId;
     }
 
+    // Mercenary loadout (see shared/legacy/mercenaries.ts): a different mission than whatever mercenaryProgress
+    // was tracking means its loss streak is over one way or another (won, skipped past, or simply abandoned for
+    // another mission) — coins never carry across missions, so clear it. Otherwise carry the equipped loadout
+    // (already coin-budget-validated when it was set, see setMercenaryLoadout) into this attempt's deck.
+    let mercenaryCards: Card[] = [];
+    if (room.legacy.mercenaryProgress?.missionId !== missionId) {
+      room.legacy.mercenaryProgress = null;
+    } else {
+      const built = buildMercenaryLoadout(room.legacy.mercenaryProgress.loadout, mercenaryCoinsForLosses(room.legacy.mercenaryProgress.lossCount));
+      // A stored loadout was already validated when set — a re-validation failure here would mean the catalog
+      // itself changed underneath a persisted campaign, not a real user-facing error. Fall back to no mercenaries
+      // rather than blocking the mission from starting at all.
+      mercenaryCards = Array.isArray(built) ? built : [];
+    }
+
     // Mission-specific sideline: pull `sidelineCount` random members out of the reserve deck for this fight only
     // — the campaign's persisted roster (room.legacy.party) is untouched, so they're back next mission.
     let missionParty = room.legacy.party;
@@ -363,7 +386,7 @@ export class RoomManager {
       pilgrimCards: mission.pilgrimCards,
       ascendingZone: mission.ascendingZone,
       capturedPilesActive: mission.capturedPilesActive,
-      extraReserveCards: mission.extraReserveCards,
+      extraReserveCards: mercenaryCards.length > 0 ? [...(mission.extraReserveCards ?? []), ...mercenaryCards] : mission.extraReserveCards,
       corruptedPartyEnemies: mission.corruptedPartyEnemies,
       startOfTurnZoneFlip: mission.startOfTurnZoneFlip,
       beastDeckMechanic: mission.beastDeckMechanic,
@@ -376,7 +399,14 @@ export class RoomManager {
     return { room };
   }
 
-  /** Applies a mission's outcome to the campaign: on a win, grants the reward and advances; on a loss, nothing changes (retry). */
+  /**
+   * Applies a mission's outcome to the campaign: on a win, grants the reward, advances, and clears any mercenary
+   * progress (coins never carry to the next mission). On a loss, the party/mission pointer are untouched (the
+   * group can retry) but a loss now DOES persist — it's the sourced mercenary mechanic's whole trigger (see
+   * shared/legacy/mercenaries.ts): increments this mission's loss streak, from which the next attempt's coin
+   * budget is derived (mercenaryCoinsForLosses). Previously "on loss, nothing to persist" was correct; it no
+   * longer is, now that a loss is itself progress worth remembering.
+   */
   private async completeLegacyMission(room: Room, outcome: 'won' | 'lost'): Promise<void> {
     const legacy = room.legacy!;
     const missionId = legacy.currentMission;
@@ -386,8 +416,35 @@ export class RoomManager {
         this.grantMissionReward(legacy, mission, room.gameState.restoredPartyCards);
         legacy.currentMission = missionId + 1;
       }
-      await this.campaignStore.save(toRecord(room));
+      legacy.mercenaryProgress = null;
+    } else {
+      const priorLosses = legacy.mercenaryProgress?.missionId === missionId ? legacy.mercenaryProgress.lossCount : 0;
+      const priorLoadout = legacy.mercenaryProgress?.missionId === missionId ? legacy.mercenaryProgress.loadout : {};
+      legacy.mercenaryProgress = { missionId, lossCount: priorLosses + 1, loadout: priorLoadout };
     }
-    // On loss, nothing to persist — the party and mission pointer are untouched, so the group can retry.
+    await this.campaignStore.save(toRecord(room));
+  }
+
+  /**
+   * Sets the party's mercenary loadout for the mission mercenaryProgress is currently tracking a loss streak on
+   * (see startLegacyMission, which consumes this at the next attempt). Re-validates the FULL loadout against the
+   * mission's current coin budget every time — a free re-pick each call, not an incremental add/swap (see the
+   * sourced "budget ceiling" framing in mercenaryCoinsForLosses's doc).
+   */
+  async setMercenaryLoadout(
+    code: string,
+    requestingPlayerId: string,
+    loadout: Partial<Record<MercenaryTypeId, number>>,
+  ): Promise<{ room: Room } | { error: string }> {
+    const room = this.getRoom(code);
+    if (!room || !room.legacy) return { error: 'Campaign not found.' };
+    if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can set the mercenary loadout.' };
+    const progress = room.legacy.mercenaryProgress;
+    if (!progress) return { error: 'No mercenaries are available right now — that mission has no loss streak.' };
+    const validated = buildMercenaryLoadout(loadout, mercenaryCoinsForLosses(progress.lossCount));
+    if (!Array.isArray(validated)) return { error: validated.error };
+    progress.loadout = loadout;
+    await this.campaignStore.save(toRecord(room));
+    return { room };
   }
 }
