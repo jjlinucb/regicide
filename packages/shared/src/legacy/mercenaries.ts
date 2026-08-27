@@ -3,14 +3,20 @@ import { classForSuit } from './classes.js';
 
 const ALL_SUITS: Suit[] = ['H', 'D', 'C', 'S'];
 
+/** The four value-12 mercenaries' printed names, one per suit (see MERCENARY_CATALOG's doc for the photo source). */
+const TWELVE_NAME: Record<Suit, string> = { H: 'Ghali', D: 'Pàviõ', C: 'Argo', S: 'Hella' };
+
 /**
  * Legacy-only sourced mechanic ("Box M — Mercenaries"): losing a mission grants coins toward hiring one of 14
  * fixed cards into the deck for the NEXT attempt at that same mission (see RoomManager's mercenary handling).
  * Sourced from a physical box-inventory reset guide (talkingshelfspace.com: "Mercenary 4x12, 4x 2/5, 2x 19, 2x A,
  * 2x jester"), a BGG designer/moderator confirmation of the exact 14-card count (thread 3617520), and a fan
  * digital reimplementation's own shop data (github.com/DorkDad141/regicide-js's initShop) independently agreeing
- * on the same 5 types/costs. The mercenary cards carry no flavor names in any source — displayed by type/suit
- * only, unlike the campaign's 40 named party members (see party.ts's STARTING_NAMES).
+ * on the same 5 types/costs. The four "12" cards DO carry flavor names — confirmed by a photo of the physical
+ * cards in a session report (hiewandboardgames.blogspot.com, "Regicide Legacy review and photo book", 2026-08-08):
+ * Argo (Warrior), Hella (Paladin), Ghali (Cleric), Pàviõ (Bard), each captioned "[suit] Mercenary". The other
+ * three types (2/5, 19, any-suit Ace, Jester) were not shown close enough to confirm printed names one way or
+ * the other, so they stay unnamed rather than guessing.
  */
 export type MercenaryTypeId =
   | 'TWELVE_H'
@@ -39,7 +45,7 @@ export interface MercenaryTypeSpec {
  * 2x "19", 2x any-suit Ace, and 2x Jester, each a single maxQty-2 entry for its 2 identical copies).
  */
 export const MERCENARY_CATALOG: MercenaryTypeSpec[] = [
-  ...ALL_SUITS.map((suit) => ({ id: `TWELVE_${suit}` as MercenaryTypeId, cost: 1, maxQty: 1, label: `12 (${classForSuit(suit).name})` })),
+  ...ALL_SUITS.map((suit) => ({ id: `TWELVE_${suit}` as MercenaryTypeId, cost: 1, maxQty: 1, label: `${TWELVE_NAME[suit]} — 12 (${classForSuit(suit).name})` })),
   ...ALL_SUITS.map((suit) => ({ id: `TWO_FIVE_${suit}` as MercenaryTypeId, cost: 1, maxQty: 1, label: `2/5 (${classForSuit(suit).name})` })),
   { id: 'NINETEEN', cost: 3, maxQty: 2, label: '19' },
   { id: 'WILD_ACE', cost: 3, maxQty: 2, label: 'Any-Suit Ace' },
@@ -51,13 +57,16 @@ const MERCENARY_BY_ID: Record<MercenaryTypeId, MercenaryTypeSpec> = Object.fromE
 ) as Record<MercenaryTypeId, MercenaryTypeSpec>;
 
 /**
- * Sourced coin formula (BGG designer confirmation, thread 3578234): losing a mission grants a triangular-scaling
- * total budget — 1st loss = 1, 2nd loss = +2 (3 total), 3rd loss = +3 (6 total), and so on. This is a growing
- * BUDGET CEILING re-spendable as a whole on every retry, not a wallet that depletes — see RoomManager's
- * mercenary-loadout handling, which lets the party freely re-pick any combination up to this total each time.
+ * Sourced coin formula — linear, one coin per loss (corrected from an earlier, wrong triangular guess): a real
+ * session report's numbers confirm this exactly (hiewandboardgames.blogspot.com, "Regicide Legacy review and
+ * photo book", 2026-08-08) — "It took us 6 attempts to beat [Mission 9] ... by that game we managed to win, we
+ * had 5 coins to employ mercenaries," i.e. 5 losses before the winning 6th attempt = 5 coins, not the 15 a
+ * triangular formula would give. This is a growing BUDGET CEILING re-spendable as a whole on every retry, not a
+ * wallet that depletes — see RoomManager's mercenary-loadout handling, which lets the party freely re-pick any
+ * combination up to this total each time.
  */
 export function mercenaryCoinsForLosses(losses: number): number {
-  return (losses * (losses + 1)) / 2;
+  return losses;
 }
 
 /**
@@ -84,8 +93,10 @@ export function buildMercenaryCard(typeId: MercenaryTypeId): Card {
     case 'TWELVE_H':
     case 'TWELVE_D':
     case 'TWELVE_C':
-    case 'TWELVE_S':
-      return { id, kind: 'suited', suit: typeId.slice(-1) as Suit, rank: '12' };
+    case 'TWELVE_S': {
+      const suit = typeId.slice(-1) as Suit;
+      return { id, kind: 'suited', suit, rank: '12', name: TWELVE_NAME[suit] };
+    }
     case 'TWO_FIVE_H':
     case 'TWO_FIVE_D':
     case 'TWO_FIVE_C':

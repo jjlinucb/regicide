@@ -81,8 +81,8 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
             <span className="mission-zone-caption">Flips one card at the start of each turn for a one-shot effect.</span>
           </div>
           <div className="mission-zone-beast-row">
-            <CardPile label="Left" icon="🂠" count={state.beastDeckCount} />
-            <CardPile label="Flipped" icon="🦅" cards={state.beastDeckDiscard} emptyLabel="none yet" />
+            <CardPile label="Left" count={state.beastDeckCount} />
+            <CardPile label="Flipped" cards={state.beastDeckDiscard} emptyLabel="none yet" />
           </div>
         </div>
       )}
