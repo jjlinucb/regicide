@@ -14,6 +14,14 @@
   --spade: #25134d;
   --border: #d7ddc7;
   --success: #3f8f52;
+  /* The physical playmat's own navy/purple field + sage-green terrain line art (photo-confirmed via
+     hiewandboardgames.blogspot.com's session photos) — used for the table surface piles sit on. */
+  --mat-bg-a: #2a1a5e;
+  --mat-bg-b: #170f38;
+  --mat-line: rgba(151, 191, 120, 0.28);
+  --mat-border: #0e0a24;
+  --mat-ink: #f1ecff;
+  --mat-ink-dim: #b8adda;
   color-scheme: light;
 }
 
@@ -315,61 +323,195 @@ button {
   color: var(--success);
 }
 
-.deck-row {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  flex-wrap: wrap;
+/* ---------- Table mat (the physical playmat's navy/purple field — see hiewandboardgames.blogspot.com's
+   session photos) — grounds the deck/discard/banish/enemies-left piles as sitting on the table, not floating
+   on the page background. ---------- */
+
+.table-mat {
+  background: linear-gradient(160deg, var(--mat-bg-a), var(--mat-bg-b));
+  border: 1px solid var(--mat-border);
+  border-radius: 20px;
+  padding: 22px 16px 16px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 2px 14px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(23, 15, 56, 0.25);
 }
 
-/* ---------- Card piles (reserve/discard/banish/etc.) ---------- */
+.table-mat::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(135deg, var(--mat-line) 0, var(--mat-line) 1px, transparent 1px, transparent 34px);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.deck-row {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+  position: relative;
+}
+
+/* ---------- Card piles (reserve/discard/banish/etc.) — a fanned stack of real cards for face-up piles, a
+   stack of card backs for face-down ones, sized and tilted like cards actually sitting on a table rather than
+   a labeled pill button. ---------- */
 
 .card-pile {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
 
-.card-pile-summary {
+.card-pile-face {
+  padding: 6px;
+  margin: 0;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 6px 14px;
-  font-size: 0.85rem;
-  color: var(--ink-dim);
+  cursor: pointer;
+  position: relative;
+  border-radius: 12px;
 }
 
-.card-pile-summary:disabled {
+.card-pile-face[aria-disabled='true'] {
   cursor: default;
 }
 
-.card-pile.empty .card-pile-summary {
-  opacity: 0.7;
+.card-pile-face:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-.card-pile-stack {
-  font-size: 1rem;
+.card-pile-fan {
+  position: relative;
+  width: 82px;
+  height: 114px;
+}
+
+.card-pile-fan-card {
+  position: absolute;
+  inset: 0;
+  transform: translate(calc(var(--fan-depth) * 4px), calc(var(--fan-depth) * -3px)) rotate(var(--fan-rotate));
+  z-index: calc(10 - var(--fan-depth));
+}
+
+.card-pile-fan-card .playing-card {
+  cursor: pointer;
+}
+
+.card-back-stack {
+  position: relative;
+  width: 82px;
+  height: 114px;
+}
+
+.card-back {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  border: 2px solid var(--mat-line);
+  background: linear-gradient(135deg, #3d2678, #221350);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
+}
+
+.card-back::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border: 1px solid var(--mat-line);
+  border-radius: 8px;
+}
+
+.card-back:nth-child(1) {
+  transform: translate(5px, 5px) rotate(2deg);
+  z-index: 1;
+}
+
+.card-back:nth-child(2) {
+  transform: translate(2px, 2px) rotate(-1.5deg);
+  z-index: 2;
+}
+
+.card-back:nth-child(3) {
+  z-index: 3;
+}
+
+.card-pile-count {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  background: var(--mat-bg-b);
+  color: var(--mat-ink);
+  border: 1.5px solid var(--mat-line);
+  border-radius: 999px;
+  min-width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0 5px;
+  font-variant-numeric: tabular-nums;
+  z-index: 11;
+}
+
+.card-pile-empty-slot {
+  width: 82px;
+  height: 114px;
+  border: 2px dashed var(--mat-line);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mat-ink-dim);
+  font-size: 0.68rem;
+  text-align: center;
+  padding: 6px;
+}
+
+.card-pile-label {
+  font-size: 0.72rem;
+  color: var(--mat-ink-dim);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .card-pile-toggle {
   font-size: 0.65rem;
 }
 
-.card-pile-empty-note {
-  font-size: 0.7rem;
+/* Outside a table-mat (e.g. the Mission 11 beast-deck row, on the page's light background) the piles read
+   against a light surface, so fall back to the standard ink tokens instead of the mat's light-on-dark ones. */
+.card-pile-count,
+.card-pile-label {
   color: var(--ink-dim);
+  background: var(--bg-elevated);
+  border-color: var(--border);
 }
 
-.card-pile-top-hint {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.7rem;
+.card-pile-empty-slot {
   color: var(--ink-dim);
+  border-color: var(--border);
+}
+
+.table-mat .card-pile-count,
+.table-mat .card-pile-label {
+  color: var(--mat-ink-dim);
+  background: var(--mat-bg-b);
+  border-color: var(--mat-line);
+}
+
+.table-mat .card-pile-label {
+  background: none;
+  border: none;
+}
+
+.table-mat .card-pile-empty-slot {
+  color: var(--mat-ink-dim);
+  border-color: var(--mat-line);
 }
 
 .card-pile-contents {

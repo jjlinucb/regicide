@@ -3555,11 +3555,11 @@ describe('legacy: Mercenary Camp catalog & coin formula', () => {
     expect(total).toBe(14);
   });
 
-  it('mercenaryCoinsForLosses grows triangularly with the loss count', () => {
+  it('mercenaryCoinsForLosses grows linearly, one coin per loss (confirmed by a real session\'s numbers: 5 losses = 5 coins)', () => {
     expect(mercenaryCoinsForLosses(1)).toBe(1);
-    expect(mercenaryCoinsForLosses(2)).toBe(3);
-    expect(mercenaryCoinsForLosses(3)).toBe(6);
-    expect(mercenaryCoinsForLosses(4)).toBe(10);
+    expect(mercenaryCoinsForLosses(2)).toBe(2);
+    expect(mercenaryCoinsForLosses(3)).toBe(3);
+    expect(mercenaryCoinsForLosses(5)).toBe(5);
   });
 
   it('buildMercenaryLoadout returns the concrete cards for a selection that fits the budget', () => {
