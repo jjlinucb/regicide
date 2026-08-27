@@ -719,6 +719,24 @@ button {
   cursor: default;
 }
 
+.kinfolk-slot-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.kinfolk-include-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+  cursor: pointer;
+  margin: 4px 0;
+}
+
 .victory-crest {
   width: 160px;
   margin: 0 auto;
