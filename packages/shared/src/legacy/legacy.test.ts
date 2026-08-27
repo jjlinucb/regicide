@@ -4,9 +4,9 @@ import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from 
 import { CLASS_THEME } from './classes.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs } from './missions.js';
 import {
-  applyBeastCardChoice,
   applyCorruptAnotherCard,
   applyDualClassStickers,
+  applyEvergreenUpgrade,
   applyGuardianSticker,
   applyMageSticker,
   applyReward,
@@ -2858,14 +2858,30 @@ function startMission11(n: number, opts: { party?: Card[] } = {}): GameState {
 }
 
 describe('legacy: mission 11 setup (Descent into Darkness)', () => {
-  it('the mission entry has 4 elite enemies (one per base class), the beast-deck and pile-top-bonus flags, and no separate recruit reward', () => {
+  it('the mission entry has 5 enemies (4 weak mooks, one per base class, plus the final boss Evil Goran), the beast-deck and pile-top-bonus flags, sidelines Esme by identity, and rewards her upgrade instead of a recruit', () => {
     const mission11 = getMission(11)!;
     expect(mission11.title).toBe('Descent into Darkness');
-    expect(mission11.enemies.length).toBe(4);
+    expect(mission11.enemies.length).toBe(5);
     expect(new Set(mission11.enemies.map((e) => e.class))).toEqual(new Set(['WARRIOR', 'BARD', 'CLERIC', 'PALADIN']));
+
+    const mooks = mission11.enemies.slice(0, 4);
+    expect(mooks.every((e) => e.health === 30 && e.attack === 10)).toBe(true);
+
+    const boss = mission11.enemies[4];
+    expect(boss.name).toBe('Evil Goran');
+    expect(boss.health).toBe(90);
+    expect(boss.attack).toBe(20);
+
     expect(mission11.beastDeckMechanic).toBe(true);
     expect(mission11.pileTopEnemyBonus).toBe(true);
+    expect(mission11.sidelineIdentity).toEqual({ suit: 'C', rank: '6' });
     expect(mission11.reward.recruits).toEqual([]);
+    expect(mission11.reward.upgradeSidelinedCard).toEqual({ suit: 'C', rank: '6' });
+  });
+
+  it('the starting party names the sidelined identity (6 of Clubs) "Esme"', () => {
+    const esme = buildInitialParty().find((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6');
+    expect(esme?.name).toBe('Esme');
   });
 
   it('builds the beast deck from the mission-4 beast cards in the party, and none of them are available to draw or play this mission', () => {
@@ -3064,80 +3080,61 @@ describe('legacy: mission 11 pile-top bonus strength & immunity, and banish-on-d
   });
 });
 
-describe('legacy: mission 11 reward (pick one beast card to carry forward)', () => {
-  it("opens AWAIT_BEAST_REWARD_CHOICE (not an immediate WON) when the mission's last enemy falls", () => {
+describe('legacy: mission 11 reward (Esme returns permanently upgraded)', () => {
+  it("completes the mission immediately (WON) when the last enemy falls — no beast-card choice window", () => {
     const beasts = mission4BeastCards();
     let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
     state = structuredClone(state);
-    state.castleDeck = []; // the current enemy is the last of the 4
+    state.castleDeck = []; // the current enemy is the last of the 5
     state = rig(state, [suited('D', '9')], { suit: 'S', baseAttack: 0, maxHealth: 9, damageTaken: 0, spadesShield: 0 });
 
     const res = ensureOk(
       applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
     );
 
-    expect(res.state.phase).toBe('IN_PROGRESS'); // not WON yet — the party still has to choose
-    expect(res.state.turnPhase).toBe('AWAIT_BEAST_REWARD_CHOICE');
-    const pool = [...res.state.beastDeck, ...res.state.beastDeckDiscard];
-    expect(pool.length).toBe(4);
-  });
-
-  it('CHOOSE_BEAST_REWARD resolves the choice into restoredPartyCards and completes the mission', () => {
-    const beasts = mission4BeastCards();
-    let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
-    state = structuredClone(state);
-    state.castleDeck = [];
-    state = rig(state, [suited('D', '9')], { suit: 'S', baseAttack: 0, maxHealth: 9, damageTaken: 0, spadesShield: 0 });
-    const killRes = ensureOk(
-      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
-    );
-    const pool = [...killRes.state.beastDeck, ...killRes.state.beastDeckDiscard];
-    const chosen = pool[0];
-
-    const res = ensureOk(
-      applyAction(killRes.state, { type: 'CHOOSE_BEAST_REWARD', playerId: killRes.state.players[0].id, cardId: chosen.id }),
-    );
-
+    // Sourced correction: no pending choice window anymore — same shape as every other mission's final kill.
     expect(res.state.phase).toBe('WON');
-    expect(res.state.restoredPartyCards.map((c) => c.id)).toEqual([chosen.id]);
-    expect(res.state.beastDeck.length).toBe(0);
-    expect(res.state.beastDeckDiscard.length).toBe(0);
+    expect(res.state.currentEnemy).toBeNull();
   });
 
-  it('rejects CHOOSE_BEAST_REWARD when no window is open, and rejects a card id outside the pool', () => {
-    let state = startMission11(1);
-    const notOpen = applyAction(state, { type: 'CHOOSE_BEAST_REWARD', playerId: state.players[0].id, cardId: 'whatever' });
-    expect(notOpen.ok).toBe(false);
+  it('applyEvergreenUpgrade grants the matching card SuitedCard.evergreen, leaving everything else untouched', () => {
+    const party = buildInitialParty();
+    const esme = party.find((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')!;
 
-    state = structuredClone(state);
-    state.castleDeck = [];
-    state = rig(state, [suited('D', '9')], { suit: 'S', baseAttack: 0, maxHealth: 9, damageTaken: 0, spadesShield: 0 });
-    const killRes = ensureOk(
-      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
-    );
-    const badPick = applyAction(killRes.state, {
-      type: 'CHOOSE_BEAST_REWARD',
-      playerId: killRes.state.players[0].id,
-      cardId: 'not-in-the-pool',
-    });
-    expect(badPick.ok).toBe(false);
+    const next = applyEvergreenUpgrade(party, { suit: 'C', rank: '6' });
+
+    const upgraded = next.find((c) => c.id === esme.id) as SuitedCard;
+    expect(upgraded.evergreen).toBe(true);
+    expect(upgraded.name).toBe('Esme');
+    // Nothing else in the party was touched — same length, same other ids, no other card upgraded.
+    expect(next.length).toBe(party.length);
+    expect(next.filter((c) => c.kind === 'suited' && (c as SuitedCard).evergreen).map((c) => c.id)).toEqual([esme.id]);
   });
 
-  it('applyBeastCardChoice replaces the whole beast-card slate with just the chosen card', () => {
+  it('applyEvergreenUpgrade is a no-op (same reference) with no identity given', () => {
+    const party = buildInitialParty();
+    expect(applyEvergreenUpgrade(party, undefined)).toBe(party);
+  });
+
+  it('applyEvergreenUpgrade is a no-op (same reference) when no card matches the identity', () => {
+    const party = buildInitialParty().filter((c) => !(c.kind === 'suited' && c.suit === 'C' && c.rank === '6'));
+    expect(applyEvergreenUpgrade(party, { suit: 'C', rank: '6' })).toBe(party);
+  });
+
+  it("applyReward wires the mission's own reward.upgradeSidelinedCard through to Esme, and Beast Companions return unpruned", () => {
+    const mission11 = getMission(11)!;
     const beasts = mission4BeastCards();
     const party = [...buildInitialParty(), ...beasts];
-    const chosen = beasts[0];
 
-    const next = applyBeastCardChoice(party, [chosen]);
+    const next = applyReward(party, mission11.reward);
 
+    const esme = next.find((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6') as SuitedCard;
+    expect(esme.evergreen).toBe(true);
+    // Sourced correction: the previously-shipped version pruned the beast-card slate down to one choice at reward
+    // time (see the removed applyBeastCardChoice) — the real reward doesn't touch it, so all 4 survive untouched.
     const beastIdsInNext = next.filter((c) => c.kind === 'suited' && (c as SuitedCard).beast).map((c) => c.id);
-    expect(beastIdsInNext).toEqual([chosen.id]);
-    expect(next.length).toBe(party.length - 3); // the other 3 beast cards are pruned; the chosen one was already present
-  });
-
-  it('applyBeastCardChoice is a no-op (same reference) when nothing was restored', () => {
-    const party = [...buildInitialParty(), ...mission4BeastCards()];
-    expect(applyBeastCardChoice(party, [])).toBe(party);
+    expect(new Set(beastIdsInNext)).toEqual(new Set(beasts.map((c) => c.id)));
+    expect(next.length).toBe(party.length);
   });
 });
 

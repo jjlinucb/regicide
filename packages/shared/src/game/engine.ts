@@ -354,15 +354,20 @@ function applyEnemyPaladinDamageReduction(state: GameState, damage: number): num
 
 /**
  * Mission 11 ("Descent into Darkness") only: at the start of every turn, flip the top card of the beast deck
- * (see GameState.beastDeck / deck.ts's buildBeastDeck) for a one-shot effect keyed to its class — Warrior
- * banishes the discard pile's top card, Paladin discards the reserve deck's top card, Cleric has the current
- * player discard from hand, Bard has the current player banish from hand (skipped entirely if their hand is
- * empty). Which card the current player gives up isn't specified by the transcript for Cleric/Bard — same
- * judgment call as Mission 10's enemy-Bard forced move (see resolveCorruptedEnemyEndOfTurnEffect) — so this
- * always picks their lowest-value card. Once the deck runs dry it reshuffles from its own used-card pile
- * (GameState.beastDeckDiscard) and the cycle continues; skipped entirely for the turn right after an exact kill
- * (see GameState.skipNextBeastDeckFlip, consumed here). Called both once at mission start (the first player's
- * first turn) and from advanceToNextPlayer, same as every other start-of-turn flip in this file.
+ * (see GameState.beastDeck / deck.ts's buildBeastDeck) for a one-shot effect keyed to its SUIT (sourced
+ * correction — the previously-shipped version keyed this off the card's derived CLASS via classForSuit instead;
+ * the two happen to coincide for every Beast Companion card that currently exists, since each one's `class` and
+ * `suit` are always the matching pair, but the sourced rule is explicit that this reads the printed suit
+ * directly) — Clubs (Warrior) banishes the discard pile's top card, Spades (Paladin) discards the reserve deck's
+ * top card, Hearts (Cleric) has the current player discard from hand, Diamonds (Bard) has the current player
+ * banish from hand (skipped entirely if their hand is empty). Which card the current player gives up isn't
+ * specified by the transcript for Hearts/Diamonds — same judgment call as Mission 10's enemy-Bard forced move
+ * (see resolveCorruptedEnemyEndOfTurnEffect) — so this always picks their lowest-value card. Once the deck runs
+ * dry it reshuffles from its own used-card pile (GameState.beastDeckDiscard) and the cycle continues — since the
+ * beast deck is always exactly the 4 base-suited Beast Companions, one full cycle always flips all 4 suits
+ * exactly once before clearing and restarting; skipped entirely for the turn right after an exact kill (see
+ * GameState.skipNextBeastDeckFlip, consumed here). Called both once at mission start (the first player's first
+ * turn) and from advanceToNextPlayer, same as every other start-of-turn flip in this file.
  */
 function flipBeastDeckCard(state: GameState): void {
   if (!state.beastDeckMechanic) return;
@@ -381,9 +386,9 @@ function flipBeastDeckCard(state: GameState): void {
   state.beastDeckDiscard.push(card);
   if (card.kind !== 'suited') return; // the beast pool is always suited cards — guarded defensively
   const label = card.name ?? `the ${card.rank}`;
-  const cls = classForSuit(card.suit).id;
+  const suit = card.suit;
 
-  if (cls === 'WARRIOR') {
+  if (suit === 'C') {
     const banished = state.discardPile.pop();
     if (banished) {
       banishCards(state, [banished]);
@@ -393,7 +398,7 @@ function flipBeastDeckCard(state: GameState): void {
     }
     return;
   }
-  if (cls === 'PALADIN') {
+  if (suit === 'S') {
     const discarded = state.tavernDeck.shift();
     if (discarded) {
       state.discardPile.push(discarded);
@@ -404,7 +409,7 @@ function flipBeastDeckCard(state: GameState): void {
     return;
   }
   const player = currentPlayer(state);
-  if (cls === 'CLERIC') {
+  if (suit === 'H') {
     if (player.hand.length === 0) {
       log(state, `${label} flips (Cleric) — ${player.name} has no cards to discard.`);
       return;
@@ -416,7 +421,7 @@ function flipBeastDeckCard(state: GameState): void {
     const [discarded] = player.hand.splice(idx, 1);
     state.discardPile.push(discarded);
     log(state, `${label} flips (Cleric) — ${player.name} discards a card from hand.`);
-  } else if (cls === 'BARD') {
+  } else if (suit === 'D') {
     if (player.hand.length === 0) {
       log(state, `${label} flips (Bard) — ${player.name} has no cards to banish, skipped.`);
       return;
@@ -956,8 +961,8 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number, attackInclud
       // Myla. The shipped version instead auto-picked the lowest-value card, taking the choice away from the
       // player entirely and routinely dragging a second or third suit into Myla's permanent immunity on the very
       // first kill. Modeled as a genuine pending choice (see CHOOSE_ZONE_VENGEANCE_SACRIFICE /
-      // chooseZoneVengeanceSacrifice), the same shape as Mission 9's AWAIT_RESCUE_CHOICE / Mission 11's
-      // AWAIT_BEAST_REWARD_CHOICE — the rest of this kill's resolution (finishEnemyDefeatTail) waits for it.
+      // chooseZoneVengeanceSacrifice), the same shape as Mission 9's AWAIT_RESCUE_CHOICE — the rest of this
+      // kill's resolution (finishEnemyDefeatTail) waits for it.
       if (enemy.tableCards.length > 0) {
         state.zoneVengeanceChoice = { remaining, attackIncludesGuardian };
         state.turnPhase = 'AWAIT_ZONE_VENGEANCE_CHOICE';
@@ -1062,7 +1067,7 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number, attackInclud
  * The shared tail of a confirmed enemy defeat, once every ruleset/mission-specific inline effect above has run
  * (or, for Mission 6's zoneVengeanceOnKill, once its AWAIT_ZONE_VENGEANCE_CHOICE has been resolved — see
  * chooseZoneVengeanceSacrifice). Split out of dealDamageAndCheckDefeat so that choice can pause mid-resolution
- * and resume here afterward, the same way CHOOSE_EXACT_KILL_RESCUE/CHOOSE_BEAST_REWARD resume their own
+ * and resume here afterward, the same way CHOOSE_EXACT_KILL_RESCUE resumes its own
  * mission's flow from a dedicated resolve function. `attackIncludesGuardian` — see dealDamageAndCheckDefeat.
  */
 function finishEnemyDefeatTail(state: GameState, enemy: EnemyState, remaining: number, attackIncludesGuardian: boolean): boolean {
@@ -1083,19 +1088,10 @@ function finishEnemyDefeatTail(state: GameState, enemy: EnemyState, remaining: n
   }
 
   if (state.castleDeck.length === 0) {
-    if (state.ruleset === 'legacy' && state.beastDeckMechanic) {
-      const beastRewardPool = [...state.beastDeck, ...state.beastDeckDiscard];
-      if (beastRewardPool.length > 0) {
-        // Mission 11's reward: the party picks ONE of the beast-deck cards to carry into Mission 12 — modeled as
-        // a genuine pending choice (see CHOOSE_BEAST_REWARD / chooseBeastReward) instead of resolving
-        // automatically, the closest existing precedent being Mission 9's AWAIT_RESCUE_CHOICE window. The
-        // mission doesn't actually complete (phase -> WON) until the party resolves it.
-        state.currentEnemy = null;
-        state.turnPhase = 'AWAIT_BEAST_REWARD_CHOICE';
-        log(state, `All enemies defeated! The party may choose one of the ${beastRewardPool.length} beast card(s) to carry forward.`);
-        return true;
-      }
-    }
+    // Mission 11's reward (Esme's permanent evergreen upgrade, see party.ts's applyEvergreenUpgrade) resolves
+    // entirely outside GameState at mission-grant time — sourced correction: the previously-shipped version
+    // opened a pending AWAIT_BEAST_REWARD_CHOICE window here for the party to pick one of the beast-deck cards to
+    // carry forward, which no longer happens (the beast cards simply return to the party untouched instead).
     state.phase = 'WON';
     state.currentEnemy = null;
     if (state.ruleset === 'regicide' && state.players.length === 1) {
@@ -2206,35 +2202,6 @@ function chooseZoneVengeanceSacrifice(
   return ok(state);
 }
 
-/**
- * Mission 11 only: resolves the AWAIT_BEAST_REWARD_CHOICE window opened once the mission's last enemy falls (see
- * dealDamageAndCheckDefeat). Validated against the window being open, not turn ownership — any player may make
- * the pick for the party, same as CLAIM_JESTER. The chosen card is fed into GameState.restoredPartyCards, reusing
- * the same mission-end fold Mission 10's "deck rehabilitation" reward already uses (see party.ts's
- * applyBeastCardChoice / RoomManager's completeLegacyMission) — the mission only actually completes (phase ->
- * WON) once this resolves.
- */
-function chooseBeastReward(state: GameState, action: Extract<GameAction, { type: 'CHOOSE_BEAST_REWARD' }>): EngineResult {
-  if (state.phase !== 'IN_PROGRESS' || state.turnPhase !== 'AWAIT_BEAST_REWARD_CHOICE') {
-    return fail('There is no open beast-card reward to choose right now.');
-  }
-  const player = findPlayer(state, action.playerId);
-  if (!player) return fail('Unknown player.');
-  const pool = [...state.beastDeck, ...state.beastDeckDiscard];
-  const chosen = pool.find((c) => c.id === action.cardId);
-  if (!chosen) return fail('That card is not part of the beast-card reward pool.');
-
-  state.restoredPartyCards.push(chosen);
-  state.beastDeck = [];
-  state.beastDeckDiscard = [];
-  log(state, `${player.name} chooses ${chosen.kind === 'suited' ? chosen.name ?? `the ${chosen.rank}` : 'a Jester'} to carry into the next mission.`);
-
-  state.phase = 'WON';
-  state.currentEnemy = null;
-  log(state, 'All enemies defeated — the mission is complete!');
-  return ok(state);
-}
-
 export function createLobbyState(): GameState {
   return {
     phase: 'LOBBY',
@@ -2339,8 +2306,6 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return chooseExactKillRescue(draft, action);
     case 'CHOOSE_ZONE_VENGEANCE_SACRIFICE':
       return chooseZoneVengeanceSacrifice(draft, action);
-    case 'CHOOSE_BEAST_REWARD':
-      return chooseBeastReward(draft, action);
     case 'SURRENDER_CARD_TO_ZONE':
       return surrenderCardToZone(draft, action);
     case 'START_ENDLESS_ROUND':

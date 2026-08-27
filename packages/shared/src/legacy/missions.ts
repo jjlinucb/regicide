@@ -26,6 +26,14 @@ export interface Mission {
   endOfTurnZoneFlip?: boolean;
   /** When set, this many random current party members sit out this mission (excluded from the reserve deck; unaffected in the campaign roster). */
   sidelineCount?: number;
+  /**
+   * When set, this exact card (by suit + rank, not a random pick) sits out this mission — excluded from the
+   * reserve deck for the fight, unaffected in the persisted campaign roster (see RoomManager's
+   * startLegacyMission), same "sits out, comes back automatically" shape as `sidelineCount` above. Currently
+   * Mission 11 only, for Esme (6 of Clubs) — see this mission's own `reward.upgradeSidelinedCard`, which targets
+   * the same identity at mission end.
+   */
+  sidelineIdentity?: { suit: Suit; rank: Rank };
   /** See GameState.jesterClaimNextPlayerOnly. */
   jesterClaimNextPlayerOnly?: boolean;
   /** See GameState.discardTopBuffsAttack. */
@@ -689,24 +697,44 @@ export const MISSIONS: Mission[] = [
     id: 11,
     title: 'Descent into Darkness',
     story:
-      "The party's underground pursuit leads to a cavern where their old ally is found bound to a corrupting " +
-      'machine, guarded by four elite enemies.',
-    // Four elite guardians, one per base class — the transcript names no stats for this mission at all, so these
-    // are an invented judgment call (like every other mission's raw numbers), pitched one tier past Mission 8's
-    // Wyverns (50/25) to match how deep into the campaign this fight sits.
+      "The party's underground pursuit leads to a cavern where Esme — the ally who's fought at their side since " +
+      'the very first mission — is found bound to a corrupting machine, guarded by four exhausted watchers and ' +
+      "the corrupted overseer running the whole operation: Evil Goran. Esme can't stand with the party this " +
+      'time; freeing her is the whole point of the fight.',
+    // Sourced correction (see the user's own research memo, legacy-missions-transcript-mismatches.md's Mission 11
+    // section, cross-checked against regicidelegacy.com's compendium, BGG threads, a fan box-repacking inventory,
+    // and a fan digital reimplementation's rules doc): the previously-shipped 4 uniform 60/30 "elite" enemies were
+    // wrong — simulated playtesting independently confirmed they collapse almost every game within 1-3 turns. The
+    // real roster is 5 enemies: 4 weak mooks plus one much bigger final boss, "Evil Goran" — the 10/30 (mooks) and
+    // 20/90 (boss) stats below are exactly the sourced figures. Which base class each mook carries, and which
+    // single class the boss carries, is NOT specified by the source (only the two stat tiers and the boss's name
+    // are) — one mook per base class (matching every other mission's own convention) and a single, non-dual-immune
+    // class on the boss are both unsourced judgment calls, deliberately kept simple so the roster fix isn't
+    // quietly undone by an invented immunity stack.
     enemies: [
-      enemy('Warden of the Depths: Ashclad', 'WARRIOR', 60, 30),
-      enemy('Warden of the Depths: Bellsong', 'BARD', 60, 30),
-      enemy('Warden of the Depths: Hollowmourn', 'CLERIC', 60, 30),
-      enemy('Warden of the Depths: Ironvow', 'PALADIN', 60, 30),
+      enemy('Warden of the Depths: Ashclad', 'WARRIOR', 30, 10),
+      enemy('Warden of the Depths: Bellsong', 'BARD', 30, 10),
+      enemy('Warden of the Depths: Hollowmourn', 'CLERIC', 30, 10),
+      enemy('Warden of the Depths: Ironvow', 'PALADIN', 30, 10),
+      enemy('Evil Goran', 'PALADIN', 90, 20),
     ],
+    // Sourced correction: the source names a specific card pulled from the party for this mission entirely — Esme,
+    // the 6 of Clubs (see party.ts's STARTING_NAMES, renamed from the placeholder "Ulra Bloodfang" — a name never
+    // referenced by any other mission — to match). Unlike sidelineCount's random pick (Mission 3), this needs a
+    // specific identity: RoomManager's startLegacyMission excludes exactly this card from the mission's active
+    // party, same "sits out, comes back automatically" shape sidelineCount already uses (the persisted campaign
+    // roster itself is never touched) — she simply isn't available to draw, hold, or play this mission. See
+    // `reward.upgradeSidelinedCard` below, which targets this same identity once the mission is won.
+    sidelineIdentity: { suit: 'C', rank: '6' },
     // Mission 4's Beast Companion cards are pulled out of the campaign party and shuffled into a face-down deck
     // that sits in the mission zone for this fight only — no Beast card is available to draw or play this
     // mission (an unrelated Mage-aligned party member is still usable as normal; see deck.ts's buildBeastDeck).
-    // At the start of every turn its top card flips for a one-shot effect keyed to its class (see engine.ts's
-    // flipBeastDeckCard — Mission 10's flipStartOfTurnZoneCard is the closest precedent for this shape); once it
-    // runs out it reshuffles from its own used-card pile and the cycle continues. An exact kill spares the very
-    // next turn's flip (see GameState.skipNextBeastDeckFlip).
+    // At the start of every turn its top card flips for a one-shot effect keyed to its SUIT (sourced correction —
+    // the previously-shipped version keyed this off the card's derived CLASS instead; see engine.ts's
+    // flipBeastDeckCard). Once it runs out it reshuffles from its own used-card pile and the cycle continues —
+    // since the beast deck is always exactly the 4 base-suited Beast Companions, one full cycle always flips all 4
+    // exactly once before clearing and restarting. An exact kill spares the very next turn's flip (see
+    // GameState.skipNextBeastDeckFlip).
     beastDeckMechanic: true,
     // The current enemy draws bonus strength AND class-immunity from whatever cards currently sit on top of the
     // discard pile and the banish pile — both recomputed live, so a Cleric heal reshuffling the discard pile (or
@@ -716,16 +744,17 @@ export const MISSIONS: Mission[] = [
     // always banishes it, never recycled or discarded"), they go to the banish pile instead of the discard pile —
     // which is exactly what keeps feeding this same mechanic forward through the rest of the fight.
     pileTopEnemyBonus: true,
-    // Reward: the party picks ONE of the four Beast Companion cards that spent this whole fight locked in the
-    // mission-zone beast deck to carry into Mission 12 — the other three don't return to the party. Modeled as a
-    // genuine pending choice (AWAIT_BEAST_REWARD_CHOICE / CHOOSE_BEAST_REWARD) instead of resolving automatically,
-    // the closest existing precedent being Mission 9's AWAIT_RESCUE_CHOICE window; the pick is folded into the
-    // campaign roster via the same GameState.restoredPartyCards field Mission 10's "deck rehabilitation" reward
-    // already threads through to RoomManager.completeLegacyMission, just with pruning logic of its own (see
-    // party.ts's applyBeastCardChoice) since Mission 11's choice REPLACES the party's beast-card slate rather than
-    // just adding to it.
+    // Sourced correction: the reward is NOT a beast-card pick — the previously-shipped AWAIT_BEAST_REWARD_CHOICE
+    // window and CHOOSE_BEAST_REWARD action (and party.ts's applyBeastCardChoice) have been removed entirely, no
+    // longer reachable from anywhere. The real reward is Esme herself: freed and returned to the party permanently
+    // upgraded to carry all four base suits — reusing the same SuitedCard.evergreen mechanic Mission 9's Gøran
+    // reward already grants (all four class powers resolve at once, ignoring immunity, whenever she's played — see
+    // party.ts's applyEvergreenUpgrade). The 4 Beast Companion cards were never removed from the persisted roster
+    // to begin with (same as Esme, they only sat out this one mission's active fight), so they simply return
+    // unchanged — the source describes no further pruning or pick for them at this mission.
     reward: {
       recruits: [],
+      upgradeSidelinedCard: { suit: 'C', rank: '6' },
     },
   },
   {

@@ -213,9 +213,7 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * What the current player must do next. AWAIT_JESTER_CLAIM, AWAIT_COMBO_ASSIST, and AWAIT_AZURE_EMBLEM are
  * Legacy-only. AWAIT_ZONE_PURGE and AWAIT_CHANT_TRIM are Mission 8-only (see GameState.zonePurge / chanterWindow).
  * AWAIT_END_OF_TURN and AWAIT_RESCUE_CHOICE are Mission 9's captured-piles mechanic only (see
- * GameState.capturedPilesActive). AWAIT_BEAST_REWARD_CHOICE is Mission 11 only (see GameState.beastDeckMechanic) —
- * opened once the mission's last enemy falls, resolved via CHOOSE_BEAST_REWARD; the mission only actually
- * completes (phase -> WON) once it's resolved. AWAIT_ZONE_VENGEANCE_CHOICE is Mission 6 only (see
+ * GameState.capturedPilesActive). AWAIT_ZONE_VENGEANCE_CHOICE is Mission 6 only (see
  * GameState.zoneVengeanceChoice) — opened by a kill under zoneVengeanceOnKill, resolved via
  * CHOOSE_ZONE_VENGEANCE_SACRIFICE. AWAIT_BARD_SURRENDER is Mission 10 only (see
  * GameState.corruptedPartyEnemies) — opened by an enemy Bard's end-of-turn power when the ending player's hand is
@@ -233,7 +231,6 @@ export type TurnPhase =
   | 'AWAIT_CHANT_TRIM'
   | 'AWAIT_END_OF_TURN'
   | 'AWAIT_RESCUE_CHOICE'
-  | 'AWAIT_BEAST_REWARD_CHOICE'
   | 'AWAIT_BARD_SURRENDER';
 
 /**
@@ -504,8 +501,9 @@ export interface GameState {
   restoredPartyCards: Card[];
   /**
    * Legacy-only (Mission 11, "Descent into Darkness"): when true, gates the mission's whole beast-deck mechanic —
-   * the start-of-turn class-keyed flip (see engine.ts's flipBeastDeckCard), the exact-kill-skips-next-flip rule
-   * (see skipNextBeastDeckFlip), and the end-of-mission AWAIT_BEAST_REWARD_CHOICE window.
+   * the start-of-turn suit-keyed flip (see engine.ts's flipBeastDeckCard) and the exact-kill-skips-next-flip rule
+   * (see skipNextBeastDeckFlip). The mission's reward (Esme's permanent upgrade) doesn't touch this deck at all —
+   * see party.ts's applyEvergreenUpgrade / missions.ts's Mission 11 entry.
    */
   beastDeckMechanic: boolean;
   /**
@@ -514,8 +512,9 @@ export interface GameState {
    * seeded here at mission start instead of joining the reserve deck, so no Beast card is available to draw or
    * play this mission. Its top card flips for a one-shot effect at the start of every turn (see
    * flipBeastDeckCard), moving to `beastDeckDiscard`; once empty, it reshuffles from there and the cycle
-   * continues. At mission end, `beastDeck` and `beastDeckDiscard` together are the pool CHOOSE_BEAST_REWARD picks
-   * from (see GameState.restoredPartyCards / party.ts's applyBeastCardChoice).
+   * continues. Every Beast Companion card was never removed from the persisted campaign roster to begin with (same
+   * "sits out, comes back automatically" shape as this mission's sidelined Esme) — this `beastDeck` is only the
+   * mission's temporary in-fight copy, so all 4 simply return to the party unchanged at mission end.
    */
   beastDeck: Card[];
   /** Legacy-only (Mission 11): beast-deck cards already flipped this mission — reshuffled back into `beastDeck` once it runs dry (see flipBeastDeckCard). */
@@ -673,12 +672,6 @@ export type GameAction =
   | { type: 'DECLINE_RESCUE'; playerId: string }
   /** Legacy-only (Mission 9), from AWAIT_RESCUE_CHOICE: an exact kill's bonus — sends `pileIndex`'s face-up captured card straight to the top of the reserve deck. */
   | { type: 'CHOOSE_EXACT_KILL_RESCUE'; playerId: string; pileIndex: number }
-  /**
-   * Legacy-only (Mission 11), from AWAIT_BEAST_REWARD_CHOICE: picks `cardId` (one of the beast-deck cards, see
-   * GameState.beastDeck/beastDeckDiscard) to carry into Mission 12. Validated against the window being open, not
-   * turn ownership — any player may make the pick for the party, same as CLAIM_JESTER.
-   */
-  | { type: 'CHOOSE_BEAST_REWARD'; playerId: string; cardId: string }
   /**
    * Legacy-only (Mission 10), from AWAIT_BARD_SURRENDER: the ending player picks `cardId` from their own hand to
    * move into the mission zone, per an enemy Bard's end-of-turn power. Sourced correction (regicidelegacy.com's
