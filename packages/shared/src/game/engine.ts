@@ -6,12 +6,14 @@ import {
   buildCorruptedPartyEnemies,
   buildEndlessCastleDeck,
   CORRUPTED_PARTY_ENEMY_COUNT,
-  buildEndlessTavernDeck,
   buildLegacyReserveDeck,
   buildTavernDeck,
+  JESTERS_BY_PLAYER_COUNT,
+  makeJesters,
   makeLegacyEnemy,
   makeRng,
   MAX_HAND_SIZE_BY_PLAYER_COUNT,
+  shuffle,
 } from './deck.js';
 import {
   ascendingZoneAttackBuff,
@@ -741,47 +743,7 @@ function enemyLabel(enemy: { name?: string; rank: 'J' | 'Q' | 'K'; suit: string 
   return enemy.name ?? `${enemy.rank} of ${enemy.suit}`;
 }
 
-const RANK_ORDER: ('J' | 'Q' | 'K')[] = ['J', 'Q', 'K'];
 const RANK_NAME: Record<'J' | 'Q' | 'K', string> = { J: 'Jack', Q: 'Queen', K: 'King' };
-
-/**
- * Classic Regicide Endless Mode only: a defeated enemy's card carries its escalation into the player's own deck.
- * Fought during endless loop N, its rank is promoted N steps up the J→Q→K chain (defeat a Jack in loop 1, it comes
- * back a Queen; loop 2, a King). Once a promotion would go past King — there's no rank above it — the excess
- * instead becomes `tier`, so a King defeated in loop 2 comes back a King worth two tiers more than a fresh one,
- * stepping past both the printed ceiling and any King already sitting in the deck from an earlier, lower-tier win.
- */
-function upgradeDefeatedRank(rank: 'J' | 'Q' | 'K', loop: number): { rank: 'J' | 'Q' | 'K'; tier: number } {
-  if (loop <= 0) return { rank, tier: 0 };
-  const idx = RANK_ORDER.indexOf(rank) + loop;
-  if (idx < RANK_ORDER.length) return { rank: RANK_ORDER[idx], tier: 0 };
-  return { rank: 'K', tier: idx - (RANK_ORDER.length - 1) };
-}
-
-const PLAYER_COURT_TIER_FOR_RANK: Record<'J' | 'Q' | 'K', number> = { J: 1, Q: 2, K: 3 };
-
-/**
- * Endless Mode only: a distinct, player-side court tier (see GameState.playerCourtTier) — separate from
- * upgradeDefeatedRank's own defeated-enemy-card promotion. Every J/Q/K enemy defeat ratchets this up
- * (monotonically, never resets on a new round), and it boosts the player's own Jack/Queen cards' value by
- * stamping the same `.tier` field cardValue() already reads. Kings and number/Ace cards are untouched — Kings
- * are already the top rank and use the separate enemy-tier mechanic if any. Sweeps every zone a Jack/Queen card
- * could currently sit in (tavern deck, every hand, discard pile) using Math.max so it only ever upgrades, never
- * clobbers a higher tier a card might already carry (e.g. from upgradeDefeatedRank's chain, though in practice
- * that chain only ever produces K-rank cards past King, so there's no real collision — see engine.ts:634-649).
- */
-function applyPlayerCourtTier(state: GameState, tier: number): void {
-  if (tier <= state.playerCourtTier) return;
-  state.playerCourtTier = tier;
-  const bump = (card: Card) => {
-    if (card.kind === 'suited' && (card.rank === 'J' || card.rank === 'Q')) {
-      card.tier = Math.max(card.tier ?? 0, state.playerCourtTier);
-    }
-  };
-  state.tavernDeck.forEach(bump);
-  state.discardPile.forEach(bump);
-  for (const player of state.players) player.hand.forEach(bump);
-}
 
 /**
  * UNSOURCED BALANCE JUDGMENT CALL — not from the transcript or any community research (see the
@@ -1060,29 +1022,37 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number, attackInclud
         log(state, 'The exact hit rattles the machine — the mission zone skips its next flip.');
       }
     }
-  } else {
-    if (state.endlessLoop > 0) {
-      applyPlayerCourtTier(state, PLAYER_COURT_TIER_FOR_RANK[enemy.rank]);
+  } else if (state.endlessLoop > 0) {
+    // Endless Mode: the deck already contains exactly one card of every suit+rank — carried forward from the
+    // classic win that unlocked Endless Mode, or from earlier loops (see startEndlessRound) — so defeating a
+    // castle enemy never adds a new card. It strengthens the ONE matching suit+rank card already in the deck
+    // (wherever it currently sits: tavern deck, discard pile, or a hand) by 1 tier. Each suit/rank levels up
+    // independently — defeating the Jack of Clubs only strengthens the Jack of Clubs, not every Jack.
+    const isMatch = (c: Card): c is Extract<Card, { kind: 'suited' }> =>
+      c.kind === 'suited' && c.suit === enemy.suit && c.rank === enemy.rank;
+    const existing =
+      state.tavernDeck.find(isMatch) ?? state.discardPile.find(isMatch) ?? state.players.flatMap((p) => p.hand).find(isMatch);
+    if (existing) {
+      existing.tier = (existing.tier ?? 0) + 1;
+      log(state, `${enemyLabel(enemy)} defeated — your ${RANK_NAME[enemy.rank]} of ${enemy.suit} grows stronger (tier ${existing.tier}).`);
+    } else {
+      log(state, `${enemyLabel(enemy)} defeated!`);
     }
-    const exact = remaining === 0;
-    const upgrade = upgradeDefeatedRank(enemy.rank, state.endlessLoop);
-    const upgraded = upgrade.rank !== enemy.rank || upgrade.tier > 0;
+  } else {
+    // Classic Regicide's base recycling rule: an exact-damage kill returns the defeated enemy's own card to the
+    // top of the Tavern deck; otherwise it goes to the discard pile.
     const defeatedCard: Card = {
       id: `enemy-${enemy.suit}${enemy.rank}-${Date.now()}-${Math.floor(nextRandom(state) * 1e6)}`,
       kind: 'suited',
       suit: enemy.suit,
-      rank: upgrade.rank,
-      ...(upgrade.tier > 0 ? { tier: upgrade.tier } : {}),
+      rank: enemy.rank,
     };
-    const upgradeNote = upgraded
-      ? ` — upgraded to a ${RANK_NAME[upgrade.rank]}${upgrade.tier > 0 ? ` (tier ${upgrade.tier} past King)` : ''} in your deck!`
-      : '';
-    if (exact) {
+    if (remaining === 0) {
       state.tavernDeck.unshift(defeatedCard); // top of tavern deck
-      log(state, `${enemyLabel(enemy)} defeated with an exact hit — returns to the top of the Tavern deck${upgradeNote || '!'}`);
+      log(state, `${enemyLabel(enemy)} defeated with an exact hit — returns to the top of the Tavern deck!`);
     } else {
       state.discardPile.push(defeatedCard);
-      log(state, `${enemyLabel(enemy)} defeated${upgradeNote || '!'}`);
+      log(state, `${enemyLabel(enemy)} defeated!`);
     }
   }
   return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian);
@@ -1230,7 +1200,6 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.victoryMedal = null;
   state.jesterClaim = null;
   state.endlessLoop = 0;
-  state.playerCourtTier = 0;
   state.exactKillOnly = false;
   state.relics = [];
   state.comboAssist = null;
@@ -1353,7 +1322,6 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.victoryMedal = null;
   state.jesterClaim = null;
   state.endlessLoop = 0;
-  state.playerCourtTier = 0;
   state.exactKillOnly = action.exactKillOnly ?? false;
   state.relics = action.relics ?? [];
   state.comboAssist = null;
@@ -1408,9 +1376,11 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
 }
 
 /**
- * Classic Regicide only: continues a WON game into another round instead of ending it. Kings join the Tavern
- * deck as playable cards (worth 20 per rules.cardValue) and the Castle deck is rebuilt scaled up by the loop
- * count, so the fight escalates indefinitely.
+ * Classic Regicide only: continues a WON game into another round instead of ending it. Reshuffles the SAME deck
+ * the just-won game ended with (all 52 cards, plus any per-card tier bumps already earned — see
+ * dealDamageAndCheckDefeat) into a fresh Tavern deck, rather than rebuilding from a template — Endless Mode is a
+ * continuation of that one deck across loops, not a series of independent rounds. Hand size and the Castle
+ * deck's enemy stats both scale with the loop count, so the fight escalates indefinitely.
  */
 function startEndlessRound(state: GameState): EngineResult {
   if (state.phase !== 'WON') return fail('Endless Mode can only be started after winning.');
@@ -1419,18 +1389,17 @@ function startEndlessRound(state: GameState): EngineResult {
   const n = state.players.length;
   const loop = state.endlessLoop + 1;
   const rng = () => nextRandom(state);
+  // Endless Mode continues playing with the SAME deck the just-won game ended with — not a fresh template — so
+  // every tier already earned on individual cards (see dealDamageAndCheckDefeat's per-suit/rank tier bump)
+  // carries forward untouched. Jesters don't carry over (played ones are gone for good), so a fresh set is added
+  // per player count, same as a brand new game.
+  const carriedCards = [...state.tavernDeck, ...state.discardPile, ...state.players.flatMap((p) => p.hand)];
+  const tavernDeck = shuffle([...carriedCards, ...makeJesters(JESTERS_BY_PLAYER_COUNT[n] ?? 0)], rng);
   const castleDeck = buildEndlessCastleDeck(loop, rng);
-  const tavernDeck = buildEndlessTavernDeck(n, rng);
-  if (state.playerCourtTier > 0) {
-    // Fresh Jacks/Queens shuffled into this round's deck should reflect whatever court tier the run has already
-    // earned (see applyPlayerCourtTier) — only these newly built cards need the sweep; the previous round's
-    // hands/discard are about to be discarded/cleared below.
-    for (const card of tavernDeck) {
-      if (card.kind === 'suited' && (card.rank === 'J' || card.rank === 'Q')) {
-        card.tier = Math.max(card.tier ?? 0, state.playerCourtTier);
-      }
-    }
-  }
+  // Hand size grows by 1 per loop on top of the normal player-count base, mirroring the same "+2 per loop" scaling
+  // already applied to the combo cap and the Castle deck's enemy stats (see validatePlayShape / buildEndlessCastleDeck).
+  const baseHandSize = MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5;
+  state.maxHandSize = baseHandSize + loop;
 
   for (const player of state.players) {
     player.hand = [];
@@ -1457,7 +1426,10 @@ function startEndlessRound(state: GameState): EngineResult {
   state.jesterClaim = null;
   state.endlessLoop = loop;
 
-  log(state, `Endless Round ${loop} begins! Kings now walk among the Tavern deck. First enemy: ${enemyLabel(state.currentEnemy)}.`);
+  log(
+    state,
+    `Endless Round ${loop} begins! Hand size grows to ${state.maxHandSize}. Defeating a Jack, Queen, or King strengthens that suit's card in your deck. First enemy: ${enemyLabel(state.currentEnemy)}.`,
+  );
   return ok(state);
 }
 
@@ -2288,7 +2260,6 @@ export function createLobbyState(): GameState {
     victoryMedal: null,
     jesterClaim: null,
     endlessLoop: 0,
-    playerCourtTier: 0,
     exactKillOnly: false,
     relics: [],
     comboAssist: null,

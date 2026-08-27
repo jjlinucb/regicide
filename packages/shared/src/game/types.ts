@@ -317,14 +317,6 @@ export interface GameState {
   /** Classic Regicide only: 0 until the first WON, then increments each time Endless Mode is continued into a new round (Kings join the deck, enemies scale up). */
   endlessLoop: number;
   /**
-   * Endless Mode only: the highest enemy court rank (Jack=1/Queen=2/King=3) defeated so far this endless run —
-   * monotonically increasing (never resets on a new round). Drives a boost to the player's own Jack/Queen cards
-   * via SuitedCard.tier (see engine.ts's applyPlayerCourtTier) — a distinct mechanic from the defeated-enemy-card
-   * promotion tier already carried by upgradeDefeatedRank; both share the same `tier` field via Math.max so they
-   * can't clobber each other.
-   */
-  playerCourtTier: number;
-  /**
    * Legacy-only: when true, only an exact-damage hit defeats (and permanently banishes) the current enemy —
    * overkilling it instead resets its wounds and sends it to the back of the mission's enemy line to be fought
    * again later (see engine.ts's dealDamageAndCheckDefeat).
@@ -766,8 +758,6 @@ export interface ClientGameState {
   /** Legacy-only: the Jester sitting in the open claim window, if any (public information — it's on the table). */
   jesterClaim: { card: Card; claimedBy: string | null } | null;
   endlessLoop: number;
-  /** See GameState.playerCourtTier. */
-  playerCourtTier: number;
   /** See GameState.comboAssist. */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
   /** See GameState.azureEmblemWindow. Public information — it's on the table. */

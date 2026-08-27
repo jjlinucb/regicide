@@ -495,11 +495,43 @@ describe('special abilities', () => {
 });
 
 describe('endless mode', () => {
+  const SUITS = ['H', 'D', 'C', 'S'] as const;
+
+  /** Just flips phase to WON — for completing an already-started endless round (no new cards are ever created). */
   function winGame(state: GameState): GameState {
     const s = structuredClone(state);
     s.phase = 'WON';
     s.currentEnemy = null;
     s.castleDeck = [];
+    return s;
+  }
+
+  /**
+   * Simulates having actually played out and won the classic campaign: every suit's Jack/Queen/King has already
+   * been defeated and recycled into the discard pile (the classic exact-hit/discard rule this test harness
+   * doesn't otherwise simulate). Use this ONLY for the very first win, before the first START_ENDLESS_ROUND —
+   * subsequent round completions should use the plain winGame() above, since Endless Mode never creates new cards.
+   */
+  function winClassicGame(state: GameState): GameState {
+    const s = winGame(state);
+    const courtCards = SUITS.flatMap((suit) => (['J', 'Q', 'K'] as const).map((rank) => suited(suit, rank)));
+    s.discardPile = [...s.discardPile, ...courtCards];
+    return s;
+  }
+
+  function allCardsIn(state: GameState): Card[] {
+    return [...state.tavernDeck, ...state.discardPile, ...state.players.flatMap((p) => p.hand)];
+  }
+
+  /**
+   * Adds `card` to the current player's existing hand and rigs the current enemy, WITHOUT replacing the hand
+   * outright (unlike rig()) — Endless Mode's carried-forward deck can deal any of its 52 cards into that hand,
+   * including the very suit/rank card a test is tracking, so overwriting the hand risks silently destroying it.
+   */
+  function attackWith(state: GameState, card: Card, enemy: Partial<NonNullable<GameState['currentEnemy']>>): GameState {
+    const s = structuredClone(state);
+    s.players[s.currentPlayerIndex].hand.push(card);
+    if (s.currentEnemy) Object.assign(s.currentEnemy, enemy);
     return s;
   }
 
@@ -516,8 +548,8 @@ describe('endless mode', () => {
     expect(res.ok).toBe(false);
   });
 
-  it('rebuilds the game with Kings in the Tavern deck, scaled-up enemies, and increments the loop counter', () => {
-    const state = winGame(startGame('endless-start', 2));
+  it('carries the completed game\'s deck (all 52 cards) into Endless Mode, builds scaled-up enemies, and increments the loop counter', () => {
+    const state = winClassicGame(startGame('endless-start', 2));
     const res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
     expect(res.ok).toBe(true);
     const newState = (res as any).state as GameState;
@@ -527,14 +559,15 @@ describe('endless mode', () => {
     // Scaled-up first enemy (Jack normally 20/10) should now hit harder
     expect(newState.currentEnemy!.maxHealth).toBeGreaterThan(20);
     expect(newState.currentEnemy!.baseAttack).toBeGreaterThan(10);
-    // Kings should be present somewhere in the game's cards (tavern deck or dealt hands)
-    const allCards = [...newState.tavernDeck, ...newState.players.flatMap((p) => p.hand)];
-    const kingCount = allCards.filter((c) => c.kind === 'suited' && c.rank === 'K').length;
-    expect(kingCount).toBe(4);
+    // The carried-forward deck should still hold every suit's Jack/Queen/King (no template rebuild).
+    const cards = allCardsIn(newState);
+    for (const rank of ['J', 'Q', 'K'] as const) {
+      expect(cards.filter((c) => c.kind === 'suited' && c.rank === rank).length).toBe(4);
+    }
   });
 
   it('escalates further on a second consecutive endless round', () => {
-    let state = winGame(startGame('endless-escalate', 1));
+    let state = winClassicGame(startGame('endless-escalate', 1));
     let res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
     state = (res as any).state;
     const firstRoundAttack = state.currentEnemy!.baseAttack;
@@ -546,67 +579,20 @@ describe('endless mode', () => {
     expect(newState.currentEnemy!.baseAttack).toBeGreaterThan(firstRoundAttack);
   });
 
-  describe('defeated-enemy rank upgrades', () => {
-    /** Rigs a game already inside the given endless loop, with the current enemy set to the given rank and 2 health. */
-    function rigLoop(loop: number, enemyRank: 'J' | 'Q' | 'K'): GameState {
-      let state = winGame(startGame('endless-upgrade', 1));
-      for (let i = 0; i < loop; i++) {
-        const res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
-        state = (res as any).state as GameState;
-        if (i < loop - 1) state = winGame(state); // only clear between rounds, not after the last one
-      }
-      expect(state.endlessLoop).toBe(loop);
-      return rig(state, [suited('C', '2')], { rank: enemyRank, maxHealth: 2 });
-    }
+  it('hand size grows by 1 per endless loop on top of the player-count base', () => {
+    let state = winClassicGame(startGame('endless-hand-size', 1));
+    let res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
+    let newState = (res as any).state as GameState;
+    expect(newState.maxHandSize).toBe(9); // base 8 for solo + 1 for loop 1
 
-    it('a Jack defeated in loop 1 returns to the deck upgraded to a Queen', () => {
-      const state = rigLoop(1, 'J');
-      const card = suited(state.currentEnemy!.suit, '2');
-      const res = applyAction(rig(state, [card]), { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
-      expect(res.ok).toBe(true);
-      const newState = (res as any).state as GameState;
-      const returned = newState.tavernDeck[0];
-      expect(returned.kind === 'suited' && returned.rank).toBe('Q');
-      expect(returned.kind === 'suited' && returned.tier).toBeUndefined();
-    });
-
-    it('a Queen defeated in loop 1 returns to the deck upgraded to a King', () => {
-      const state = rigLoop(1, 'Q');
-      const card = suited(state.currentEnemy!.suit, '2');
-      const res = applyAction(rig(state, [card]), { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
-      const newState = (res as any).state as GameState;
-      const returned = newState.tavernDeck[0];
-      expect(returned.kind === 'suited' && returned.rank).toBe('K');
-      expect(returned.kind === 'suited' && returned.tier).toBeUndefined();
-    });
-
-    it('a King defeated in loop 2 steps past the printed ceiling with a tier of 2, outranking a fresh King', () => {
-      const state = rigLoop(2, 'K');
-      const card = suited(state.currentEnemy!.suit, '2');
-      const res = applyAction(rig(state, [card]), { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] });
-      const newState = (res as any).state as GameState;
-      const returned = newState.tavernDeck[0];
-      expect(returned.kind === 'suited' && returned.rank).toBe('K');
-      expect(returned.kind === 'suited' && returned.tier).toBe(2);
-      if (returned.kind === 'suited') {
-        expect(cardValue(returned)).toBeGreaterThan(cardValue({ ...returned, tier: undefined }));
-      }
-    });
-  });
-
-  it('the Endless Mode Tavern deck includes 4 Jacks alongside the 4 Kings', () => {
-    const state = winGame(startGame('endless-jacks', 2));
-    const res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
-    const newState = (res as any).state as GameState;
-    const allCards = [...newState.tavernDeck, ...newState.players.flatMap((p) => p.hand)];
-    const jackCount = allCards.filter((c) => c.kind === 'suited' && c.rank === 'J').length;
-    const kingCount = allCards.filter((c) => c.kind === 'suited' && c.rank === 'K').length;
-    expect(jackCount).toBe(4);
-    expect(kingCount).toBe(4);
+    newState = winGame(newState);
+    res = applyAction(newState, { type: 'START_ENDLESS_ROUND' });
+    newState = (res as any).state as GameState;
+    expect(newState.maxHandSize).toBe(10); // base 8 + 2 for loop 2
   });
 
   it('the combo total-value cap scales with the endless loop (10 + 2*loop), 4-card count cap unaffected', () => {
-    let state = winGame(startGame('endless-cap', 1));
+    let state = winClassicGame(startGame('endless-cap', 1));
     let res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
     state = (res as any).state as GameState; // loop 1, cap 12
     const twoSixes = [suited('H', '6'), suited('D', '6')];
@@ -632,65 +618,78 @@ describe('endless mode', () => {
     expect(r3.ok).toBe(true); // 4 cards, sum 12, fits loop-1 cap
   });
 
-  describe('player court tier', () => {
-    it('defeating an enemy Jack in endless mode sets playerCourtTier to 1 and boosts hand/deck Jacks and Queens', () => {
-      let state = winGame(startGame('court-tier', 1));
-      const startRes = applyAction(state, { type: 'START_ENDLESS_ROUND' });
-      state = (startRes as any).state as GameState;
-      expect(state.playerCourtTier).toBe(0);
-
-      // Put a Jack and a Queen in hand (untiered), and rig the current enemy as a low-health Jack.
-      const jackCard = suited('H', 'J');
-      const queenCard = suited('D', 'Q');
-      const attackCard = suited(state.currentEnemy!.suit, '2');
-      let rigged = rig(state, [jackCard, queenCard, attackCard], { rank: 'J', maxHealth: 2 });
-      // Also plant an untiered Jack in the tavern deck to confirm the sweep reaches it.
-      const deckJack = suited('S', 'J');
-      rigged.tavernDeck = [deckJack, ...rigged.tavernDeck];
-
-      const finalRes = applyAction(rigged, {
-        type: 'PLAY_CARDS',
-        playerId: rigged.players[rigged.currentPlayerIndex].id,
-        cardIds: [attackCard.id],
-      });
-      expect(finalRes.ok).toBe(true);
-      const newState = (finalRes as any).state as GameState;
-      expect(newState.playerCourtTier).toBe(1);
-
-      const handJack = newState.players[0].hand.find((c) => c.id === jackCard.id) as SuitedCard | undefined;
-      const handQueen = newState.players[0].hand.find((c) => c.id === queenCard.id) as SuitedCard | undefined;
-      const sweptDeckJack = newState.tavernDeck.find((c) => c.id === deckJack.id) as SuitedCard | undefined;
-      expect(handJack?.tier).toBe(1);
-      expect(handQueen?.tier).toBe(1);
-      expect(sweptDeckJack?.tier).toBe(1);
-      expect(cardValue(handJack!)).toBeGreaterThan(10);
-    });
-
-    it('playerCourtTier is monotonic and does not reset across new endless rounds', () => {
-      let state = winGame(startGame('court-tier-persist', 1));
+  describe('per-suit court card tier', () => {
+    it('defeating one suit\'s Jack strengthens only that suit\'s Jack card, not other suits\' Jacks', () => {
+      let state = winClassicGame(startGame('court-tier-suit', 1));
       let res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
       state = (res as any).state as GameState;
-      const attackCard = suited(state.currentEnemy!.suit, '2');
-      let rigged = rig(state, [attackCard], { rank: 'K', maxHealth: 2 });
-      let finalRes = applyAction(rigged, {
+      expect(state.currentEnemy!.rank).toBe('J'); // Jacks fought first
+
+      const targetSuit = state.currentEnemy!.suit;
+      const attackCard = suited(targetSuit, '2');
+      const rigged = attackWith(state, attackCard, { rank: 'J', maxHealth: 2 });
+      const finalRes = applyAction(rigged, {
         type: 'PLAY_CARDS',
         playerId: rigged.players[0].id,
         cardIds: [attackCard.id],
       });
       expect(finalRes.ok).toBe(true);
+      const newState = (finalRes as any).state as GameState;
+
+      const jacks = allCardsIn(newState).filter((c) => c.kind === 'suited' && c.rank === 'J') as SuitedCard[];
+      expect(jacks.length).toBe(4); // no new card was created
+      const defeatedSuitJack = jacks.find((c) => c.suit === targetSuit)!;
+      expect(defeatedSuitJack.tier).toBe(1);
+      for (const jack of jacks.filter((c) => c.suit !== targetSuit)) {
+        expect(jack.tier ?? 0).toBe(0); // other suits' Jacks are untouched
+      }
+    });
+
+    it('a King also gets the per-suit tier bump on defeat, same as Jacks and Queens', () => {
+      let state = winClassicGame(startGame('court-tier-king', 1));
+      let res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
+      state = (res as any).state as GameState;
+
+      const targetSuit = state.currentEnemy!.suit;
+      const attackCard = suited(targetSuit, '2');
+      const rigged = attackWith(state, attackCard, { rank: 'K', maxHealth: 2 });
+      const finalRes = applyAction(rigged, {
+        type: 'PLAY_CARDS',
+        playerId: rigged.players[0].id,
+        cardIds: [attackCard.id],
+      });
+      const newState = (finalRes as any).state as GameState;
+      const kings = allCardsIn(newState).filter((c) => c.kind === 'suited' && c.rank === 'K') as SuitedCard[];
+      expect(kings.length).toBe(4); // no new card was created
+      expect(kings.find((c) => c.suit === targetSuit)!.tier).toBe(1);
+    });
+
+    it('tier accumulates across multiple loops for the same suit/rank', () => {
+      let state = winClassicGame(startGame('court-tier-accumulate', 1));
+      let res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
+      state = (res as any).state as GameState;
+
+      const targetSuit = state.currentEnemy!.suit;
+      let attackCard = suited(targetSuit, '2');
+      let rigged = attackWith(state, attackCard, { rank: 'J', maxHealth: 2 });
+      let finalRes = applyAction(rigged, { type: 'PLAY_CARDS', playerId: rigged.players[0].id, cardIds: [attackCard.id] });
       let newState = (finalRes as any).state as GameState;
-      expect(newState.playerCourtTier).toBe(3); // King defeat -> tier 3
+      expect((allCardsIn(newState).find((c) => c.kind === 'suited' && c.rank === 'J' && c.suit === targetSuit) as SuitedCard).tier).toBe(1);
 
       newState = winGame(newState);
-      const nextRoundRes = applyAction(newState, { type: 'START_ENDLESS_ROUND' });
-      expect(nextRoundRes.ok).toBe(true);
-      const roundTwoState = (nextRoundRes as any).state as GameState;
-      expect(roundTwoState.playerCourtTier).toBe(3); // not reset by a new round
-      // Freshly dealt hand Jacks/Queens should already carry the persisted tier.
-      const dealtJQ = [...roundTwoState.tavernDeck, ...roundTwoState.players.flatMap((p) => p.hand)].filter(
-        (c) => c.kind === 'suited' && (c.rank === 'J' || c.rank === 'Q'),
-      ) as SuitedCard[];
-      expect(dealtJQ.every((c) => (c.tier ?? 0) >= 3)).toBe(true);
+      res = applyAction(newState, { type: 'START_ENDLESS_ROUND' });
+      newState = (res as any).state as GameState;
+      expect(newState.endlessLoop).toBe(2);
+
+      attackCard = suited(targetSuit, '2');
+      // Force the same suit again — loop 2's freshly shuffled castle deck won't necessarily fight this suit's
+      // Jack first, and this test needs the SAME suit/rank to verify tier accumulation, not a coincidence.
+      rigged = attackWith(newState, attackCard, { rank: 'J', suit: targetSuit, maxHealth: 2 });
+      finalRes = applyAction(rigged, { type: 'PLAY_CARDS', playerId: rigged.players[0].id, cardIds: [attackCard.id] });
+      newState = (finalRes as any).state as GameState;
+      const jack = allCardsIn(newState).find((c) => c.kind === 'suited' && c.rank === 'J' && c.suit === targetSuit) as SuitedCard;
+      expect(jack.tier).toBe(2);
+      expect(cardValue(jack)).toBeGreaterThan(cardValue({ ...jack, tier: 1 }));
     });
   });
 });
