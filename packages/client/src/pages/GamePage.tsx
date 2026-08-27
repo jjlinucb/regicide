@@ -293,7 +293,7 @@ export function GamePage({
           />
         )}
         <MissionZonePanel state={state} />
-        <DeckPiles state={state} />
+        <DeckPiles state={state} myPlayerId={myPlayerId} />
         {state.capturedPilesActive && <CapturedPiles piles={state.capturedPiles} />}
         <PlayerList state={state} myPlayerId={myPlayerId} />
         <ActionLog state={state} />
@@ -320,25 +320,18 @@ export function GamePage({
               🃏 Flip Jester ({MAX_SOLO_JESTERS - state.soloJestersUsed} left)
             </button>
           )}
-          {hasKinfolkFlute && (
-            <span className="kinfolk-slot-status" title="A personal storage slot: bank one hand card worth 2-5, once per turn, then play it alongside a matching-rank card later.">
-              🎵{' '}
-              {myKinfolkSlot
-                ? `Kinfolk slot: ${myKinfolkSlot.kind === 'suited' ? myKinfolkSlot.name ?? `the ${myKinfolkSlot.rank}` : ''}`
-                : 'Kinfolk slot: empty'}
-              {canBankKinfolk && (
-                <button
-                  type="button"
-                  className="btn-solo-jester"
-                  onClick={() => {
-                    sendAction({ type: 'BANK_KINFOLK_CARD', playerId: myPlayerId, cardId: selectedCards[0].id });
-                    setSelectedIds(new Set());
-                  }}
-                >
-                  Bank it
-                </button>
-              )}
-            </span>
+          {canBankKinfolk && (
+            <button
+              type="button"
+              className="btn-solo-jester"
+              title="Bank this card onto your Kinfolk slot (see it on the mat below), once per turn — play it alongside a matching-rank card later."
+              onClick={() => {
+                sendAction({ type: 'BANK_KINFOLK_CARD', playerId: myPlayerId, cardId: selectedCards[0].id });
+                setSelectedIds(new Set());
+              }}
+            >
+              🎵 Bank onto Kinfolk Flute
+            </button>
           )}
         </div>
         <Hand
