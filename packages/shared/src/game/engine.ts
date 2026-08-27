@@ -111,20 +111,30 @@ function allOtherPlayersYieldedLastTurn(state: GameState): boolean {
   return true;
 }
 
-function checkForStuckLoss(state: GameState): void {
+/**
+ * `idleYield` is true only when the turn now ending was a yield that resolved with zero enemy attack — the one
+ * genuinely-idle path (see yieldTurn), as opposed to every other way a turn can end (a successful defend, a
+ * kill, a rescue, a zone placement, feign death, ...), all of which represent real progress even when they
+ * happen to leave the hand empty too. Callers that aren't yieldTurn's own zero-attack branch always omit this
+ * (defaulting to false) — see every other call site of advanceToNextPlayer/endTurnOrAwaitRescue/finishAdvanceToNextPlayer.
+ */
+function checkForStuckLoss(state: GameState, idleYield = false): void {
   if (state.phase !== 'IN_PROGRESS') return;
   const p = currentPlayer(state);
   if (p.hand.length !== 0) return;
   // Solo play has no "other players" for allOtherPlayersYieldedLastTurn to ever be true about (it hard-returns
   // false below player count 2, which is also the correct answer for yieldTurn's own unrelated use of the same
   // helper — yielding alone is always legitimate). An empty hand alone isn't fatal there either: a play that
-  // spends the last card to defeat an enemy, feign death, or place a card still deserves its shot at whatever
-  // that action set up next. What's genuinely terminal is a *forced* yield — the only legal move once the hand
-  // is empty — that changes nothing: with no one else at the table, that's the solo equivalent of every other
-  // player having already yielded. Without this, a solo game can wedge forever: an empty hand plus a
-  // fully-shielded (0-attack) enemy lets YIELD keep advancing the turn indefinitely with no way to ever draw
-  // another card (every other action handler resets lastActionWasYield to false on completion — see defend()).
-  const stuck = state.players.length <= 1 ? state.lastActionWasYield[state.currentPlayerIndex] : allOtherPlayersYieldedLastTurn(state);
+  // spends the last card to defeat an enemy, feign death, successfully defend, or place a card still deserves its
+  // shot at whatever that action set up next — `idleYield` is what tells those genuinely-productive cases apart
+  // from a truly wasted turn (lastActionWasYield can't be reused here: it deliberately stays true through a
+  // successful non-feign-death defend, for the "cannot yield if everyone else just yielded" rule's own unrelated
+  // bookkeeping — see defend()'s comment). What's genuinely terminal is a *forced*, zero-effect yield — the only
+  // legal move once the hand is empty — that changes nothing: with no one else at the table, that's the solo
+  // equivalent of every other player having already yielded. Without this, a solo game can wedge forever: an
+  // empty hand plus a fully-shielded (0-attack) enemy lets YIELD keep advancing the turn indefinitely with no way
+  // to ever draw another card.
+  const stuck = state.players.length <= 1 ? idleYield : allOtherPlayersYieldedLastTurn(state);
   if (stuck) {
     state.phase = 'LOST';
     state.lossReason = `${p.name} has no cards left and cannot yield — the party has fallen.`;
@@ -132,15 +142,16 @@ function checkForStuckLoss(state: GameState): void {
   }
 }
 
-function advanceToNextPlayer(state: GameState): void {
+function advanceToNextPlayer(state: GameState, idleYield = false): void {
   // Mission 10: the current enemy's end-of-turn power fires for the turn that's ending, before the
   // current-player pointer moves on to whoever's turn is starting next (see resolveCorruptedEnemyEndOfTurnEffect).
   // An enemy Bard's power opens a real player choice (AWAIT_BARD_SURRENDER) rather than resolving immediately —
   // when that happens, pause here without advancing anything further; finishAdvanceToNextPlayer picks the rest of
-  // this back up once SURRENDER_CARD_TO_ZONE resolves it (see surrenderCardToZone).
+  // this back up once SURRENDER_CARD_TO_ZONE resolves it (see surrenderCardToZone). That resumption is always a
+  // genuine player action, never idle, so it's fine that idleYield doesn't carry across the pause.
   resolveCorruptedEnemyEndOfTurnEffect(state);
   if (state.turnPhase === 'AWAIT_BARD_SURRENDER') return;
-  finishAdvanceToNextPlayer(state);
+  finishAdvanceToNextPlayer(state, idleYield);
 }
 
 /**
@@ -148,7 +159,7 @@ function advanceToNextPlayer(state: GameState): void {
  * pause partway through and resume later (see surrenderCardToZone) instead of forcing that choice to resolve
  * synchronously inside a single engine call, the same way Mission 9's AWAIT_END_OF_TURN pauses endTurnOrAwaitRescue.
  */
-function finishAdvanceToNextPlayer(state: GameState): void {
+function finishAdvanceToNextPlayer(state: GameState, idleYield = false): void {
   state.pendingDamage = 0;
   state.turnPhase = 'AWAIT_PLAY';
   state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
@@ -160,7 +171,7 @@ function finishAdvanceToNextPlayer(state: GameState): void {
   // Mission 8's placement window only ever covers the turn a kill happened on (or the continued turn right
   // after it) — once play moves on to a fresh turn with no kill behind it, close the window back up.
   state.zoneOpenForPlacement = false;
-  checkForStuckLoss(state);
+  checkForStuckLoss(state, idleYield);
 }
 
 /**
@@ -169,14 +180,15 @@ function finishAdvanceToNextPlayer(state: GameState): void {
  * as long as at least one captured pile still has a face-up card to offer. Never called when a kill lets the
  * same player continue their turn (dealDamageAndCheckDefeat's "continue" path calls neither this nor
  * advanceToNextPlayer directly), which is exactly how the mission's "no end-of-turn effects after a kill" rule
- * falls out for free.
+ * falls out for free. `idleYield` — see checkForStuckLoss — only ever arrives true from yieldTurn's own
+ * zero-attack branch; every other caller omits it.
  */
-function endTurnOrAwaitRescue(state: GameState): void {
+function endTurnOrAwaitRescue(state: GameState, idleYield = false): void {
   if (state.ruleset === 'legacy' && state.capturedPilesActive && state.capturedPiles.some((p) => p.faceUp)) {
     state.turnPhase = 'AWAIT_END_OF_TURN';
     return;
   }
-  advanceToNextPlayer(state);
+  advanceToNextPlayer(state, idleYield);
 }
 
 /**
@@ -1763,7 +1775,9 @@ function yieldTurn(state: GameState, action: Extract<GameAction, { type: 'YIELD'
 
   const enemyAttack = resolvedEnemyAttack(state);
   if (enemyAttack <= 0) {
-    endTurnOrAwaitRescue(state);
+    // This yield resolved with nothing to defend against — genuinely idle, the one case checkForStuckLoss's solo
+    // branch needs to catch (see its own comment).
+    endTurnOrAwaitRescue(state, true);
     return ok(state);
   }
   state.pendingDamage = enemyAttack;
