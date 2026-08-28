@@ -1487,10 +1487,6 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
 
-  log(
-    state,
-    `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${shape.totalValue}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
-  );
   const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
   // Mage, Reaver, Guardian, Druid, Chanter, and Evergreen cards' printed suits don't join the combined
   // suit-power resolution below — a Mage's (or a secondClassArcane card's bonus) class power is the arcane bolt
@@ -1639,6 +1635,13 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   // Mission 10: an enemy Paladin's extra power reduces the damage it takes by its own base strength (see
   // applyEnemyPaladinDamageReduction) — a no-op for every other mission/enemy.
   const damage = applyEnemyPaladinDamageReduction(state, rawDamage);
+  // Logged here — after Clubs' clubsMultiplier, a Reaver's reaverBonus, an Arcane bolt's arcaneBonus, and any
+  // Paladin damage reduction are all folded in — rather than up front off the pre-bonus shape.totalValue, so the
+  // number shown always matches what actually lands on the enemy (enemy.damageTaken below).
+  log(
+    state,
+    `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${damage}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
+  );
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
   // Mission 6, sourced fix: a winning attack that includes a Guardian cancels Myla's zoneVengeanceOnKill
