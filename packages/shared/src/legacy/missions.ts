@@ -170,6 +170,30 @@ function zoneWildcard(name: string, suit: Suit): Card {
 }
 
 /**
+ * Mission 6's own fight SETUP (not a reward — see this mission's own comment below): the 4 Guardian cards,
+ * seeded straight into the fight's reserve deck via extraReserveCards, same non-persistent "mission-only" shape
+ * chanterCompanion above already established for Mission 8's 4 Chanters. Sourced from this repo's own
+ * tutorial_vids/summaries/mission-6.md transcript, under the mission's "How it plays / special rules" (not its
+ * reward section): "Four new 'Guardian' party members join" this fight — i.e. all 4 are meant to be drawable
+ * and playable DURING Mission 6 itself, not merely named in the eventual reward roster. This is what makes the
+ * mission's own central Guardian-cancels-Myla mechanic (zoneVengeanceOnKill's attackIncludesGuardian check,
+ * see engine.ts) actually reachable during the fight it's meant to counter — before this fix, no Guardian-class
+ * card existed anywhere before Mission 6's reward granted one, at which point the fight was already won.
+ * Ferro's rank ('3') and suit ('S') match the one Guardian this mission's reward keeps permanently (see
+ * recruit('Ferro', ...) below) for narrative continuity — the fight-only card and the eventual permanent
+ * recruit are still two separate Card instances (buildRecruitCard mints a fresh id), same as Mission 8's Bram.
+ * Kesh/Ambrey/Dorna's specific ranks and suits have no source at all (the transcript names only "four Guardian
+ * party members," not which one is which) — UNSOURCED JUDGMENT CALL: spread across the remaining 3 suits at
+ * ranks 5/7/9, mirroring Mission 8's own 3/5/7/9 spread for its 4 Chanters. None of the 3 carry a `special`
+ * ability card here (Dorna's AEGIS is a permanent-recruit-only upgrade this mission's reward explicitly drops —
+ * see the reward comment below), matching how Mission 8's 3 non-kept Chanters are likewise plain companions
+ * during the fight, with only the specialRecruit-granted survivor carrying its class's signature ability.
+ */
+function guardianCompanion(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `guardian-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, guardian: true };
+}
+
+/**
  * Mission 12's own flavor pair, seeded into its extraReserveCards: heroes the antagonist's corruption reached
  * along the campaign's road. `restoredHero` carries SuitedCard.restored — the relic upgrade's beneficiaries,
  * healing the banish pile back into the game whenever they're played (see engine.ts's applyRestoredHeal).
@@ -510,6 +534,21 @@ export const MISSIONS: Mission[] = [
     // player-choice shape and the Guardian cancellation are sourced fixes over the original shipped
     // auto-sacrifice-with-no-Guardian-interaction — see legacy-missions-transcript-mismatches.md).
     zoneVengeanceOnKill: true,
+    // Bug fix: the Guardian-cancels-Myla mechanic just above is this mission's one real counter to its own
+    // central threat, but no Guardian-class card existed anywhere in the game before this same mission's reward
+    // granted one (see the reward comment below) — by which point the fight that mechanic is meant to counter
+    // is already over. Sourced from this repo's own tutorial_vids/summaries/mission-6.md transcript: "Four new
+    // 'Guardian' party members join" is listed under the mission's "How it plays / special rules," not its
+    // reward — i.e. all 4 Guardians (Ferro, Kesh, Ambrey, Dorna) are meant to be drawable and playable DURING
+    // this fight, same shape as Mission 8's 4 Chanter cards entering THAT fight via extraReserveCards before
+    // its own reward keeps only 1 of them permanently (see guardianCompanion's doc comment above for the
+    // ranks/suits judgment call on the 3 that aren't sourced by name).
+    extraReserveCards: [
+      guardianCompanion('Ferro', 'S', '3'),
+      guardianCompanion('Kesh', 'H', '5'),
+      guardianCompanion('Ambrey', 'D', '7'),
+      guardianCompanion('Dorna', 'C', '9'),
+    ],
     // Reward, sourced fix (legacy-missions-transcript-mismatches.md): the Guardian faction, but only Ferro
     // (rank 3) is kept as a permanent new recruit — the shipped version over-granted all 4 (Kesh, Ambrey, and
     // Dorna's special Aegis are dropped). Playing a Guardian card raises an absolute shield, blocking the

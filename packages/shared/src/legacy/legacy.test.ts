@@ -1682,6 +1682,85 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
   });
 });
 
+describe('legacy: mission 6 setup, bug fix — Guardian cards seeded as fight setup, not just the eventual reward', () => {
+  it('seeds all 4 Guardian faction cards into extraReserveCards — before this fix, no Guardian card existed anywhere until the mission was already won', () => {
+    const mission6 = getMission(6)!;
+    expect(mission6.extraReserveCards?.length).toBe(4);
+    expect(mission6.extraReserveCards?.every((c) => c.kind === 'suited' && c.guardian)).toBe(true);
+    expect(mission6.extraReserveCards?.some((c) => c.kind === 'suited' && c.name === 'Ferro')).toBe(true);
+    // The base 40-card party alone (no extraReserveCards) has zero Guardian cards — confirming the fight-setup
+    // seeding above, not the base party, is what makes the mission's own Guardian-cancels-Myla mechanic
+    // (zoneVengeanceOnKill) reachable during Mission 6 itself instead of only after it's already won.
+    expect(buildInitialParty().some((c) => c.kind === 'suited' && c.guardian)).toBe(false);
+  });
+
+  it('shuffles the 4 fight-setup Guardian cards into the live reserve deck at mission start, alongside the party', () => {
+    const mission6 = getMission(6)!;
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'garden-setup-test',
+      party: buildInitialParty(),
+      enemies: missionEnemiesToSpecs(mission6.enemies),
+      jesterCount: 0,
+      presetMissionZone: mission6.presetMissionZone,
+      zoneVengeanceOnKill: mission6.zoneVengeanceOnKill,
+      extraReserveCards: mission6.extraReserveCards,
+    });
+    const state = ensureOk(res).state;
+    expect(state.missionZone.length).toBe(1); // Myla, preset per presetMissionZone
+    const allCirculatingCards = [...state.players.flatMap((p) => p.hand), ...state.tavernDeck];
+    // 40 party + 4 fight-setup Guardians = 44 total in circulation (Myla's preset zone card isn't drawable).
+    expect(allCirculatingCards.length).toBe(44);
+    expect(allCirculatingCards.filter((c) => c.kind === 'suited' && c.guardian).length).toBe(4);
+  });
+
+  it("playing one of the mission's own fight-setup Guardian cards in the winning attack cancels Myla's strike entirely", () => {
+    const mission6 = getMission(6)!;
+    const ferro = mission6.extraReserveCards!.find((c) => c.kind === 'suited' && c.name === 'Ferro')!;
+    // Boss suit deliberately not Spades (Ferro's suit) — a Guardian's shield power is never immunity-gated (see
+    // engine.ts's guardianCards handling), but keeping suits distinct rules that out as a confound for this test.
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'H', health: 3, attack: 1 };
+    const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'D', health: 20, attack: 1 };
+
+    const started = ensureOk(
+      applyAction(createLobbyState(), {
+        type: 'START_LEGACY_MISSION',
+        playerIds: ['p0'],
+        playerNames: ['Player 0'],
+        seed: 'garden-guardian-test',
+        party: buildInitialParty(),
+        enemies: [boss, next],
+        jesterCount: 0,
+        presetMissionZone: mission6.presetMissionZone,
+        zoneVengeanceOnKill: mission6.zoneVengeanceOnKill,
+        extraReserveCards: mission6.extraReserveCards,
+      }),
+    );
+    let state = rig(started.state, [ferro]); // Ferro (value 3) exactly kills the 3-health boss
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    ).state;
+
+    expect(state.turnPhase).toBe('AWAIT_ZONE_VENGEANCE_CHOICE');
+    expect(state.zoneVengeanceChoice?.attackIncludesGuardian).toBe(true);
+
+    state = ensureOk(
+      applyAction(state, {
+        type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE',
+        playerId: state.players[0].id,
+        cardId: state.currentEnemy!.tableCards[0].id,
+      }),
+    ).state;
+
+    expect(state.missionZone.length).toBe(2); // the zone still grows — only the team-damage step is cancelled
+    expect(state.turnPhase).toBe('AWAIT_PLAY'); // no Myla strike, no AWAIT_DEFEND
+    expect(state.pendingDamage).toBe(0);
+  });
+});
+
 describe('legacy: mission 5 reward (only rank-5 Reaver kept, Myla joins the party, Dual-class Stickers, corrupt-another-card)', () => {
   it('keeps only the rank-5 Reaver recruit (Haror) permanently — not all 4 originally shipped', () => {
     // Sourced research (regicidelegacy.com compendium / BGG threads / a fan digital reimplementation's rules
