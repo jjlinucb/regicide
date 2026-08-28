@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
+import { makeRng } from '../game/deck.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
@@ -611,6 +612,54 @@ describe('legacy: Dual-class Stickers reward (mission 2)', () => {
     const alreadyStickered: Card = { ...suited('D', '5'), secondSuit: 'C' };
     const stickered = applyDualClassStickers([arcaneCard, alreadyStickered], 2);
     expect(stickered).toEqual([arcaneCard, alreadyStickered]); // neither was eligible
+  });
+});
+
+describe('legacy: party.ts reward randomness accepts a seeded rng (determinism)', () => {
+  // These four functions used to call Math.random() directly, breaking reproducibility for any seeded campaign
+  // simulation/test from the point a mission grants one of these rewards onward. They now take an optional
+  // `rng: () => number` (defaulting to Math.random so every existing call site is unaffected) — this locks in
+  // that a shared seed reproduces the exact same pick, and a different seed can (not must, just in general)
+  // diverge.
+  it('applyDualClassStickers is reproducible under the same seed', () => {
+    const party = buildInitialParty();
+    const a = applyDualClassStickers(party, 4, makeRng('sticker-seed'));
+    const b = applyDualClassStickers(party, 4, makeRng('sticker-seed'));
+    expect(a).toEqual(b);
+  });
+
+  it('applyMageSticker is reproducible under the same seed', () => {
+    const party = buildInitialParty();
+    const a = applyMageSticker(party, makeRng('mage-seed'));
+    const b = applyMageSticker(party, makeRng('mage-seed'));
+    expect(a).toEqual(b);
+  });
+
+  it('applyGuardianSticker is reproducible under the same seed', () => {
+    const party = buildInitialParty();
+    const a = applyGuardianSticker(party, makeRng('guardian-seed'));
+    const b = applyGuardianSticker(party, makeRng('guardian-seed'));
+    expect(a).toEqual(b);
+  });
+
+  it('applyCorruptAnotherCard is reproducible under the same seed', () => {
+    const party = buildInitialParty();
+    const a = applyCorruptAnotherCard(party, new Set(), makeRng('corrupt-seed'));
+    const b = applyCorruptAnotherCard(party, new Set(), makeRng('corrupt-seed'));
+    expect(a).toEqual(b);
+  });
+
+  it('applyReward threads the same seeded rng through to every sub-reward it applies', () => {
+    // Mission 5's reward exercises both dualClassStickers and corruptAnotherCard in one call. The SAME base
+    // party is reused for both runs (rather than calling buildInitialParty() twice) so only the rng-driven
+    // picks can differ; ids are stripped before comparing since buildRecruitCard mints each new recruit's id
+    // from Date.now()/Math.random() independent of this threading, and that's out of scope here.
+    const mission5 = getMission(5)!;
+    const basePartyForReward = buildInitialParty();
+    const stripIds = (party: Card[]) => party.map(({ id: _id, ...rest }) => rest);
+    const a = applyReward(basePartyForReward, mission5.reward, makeRng('reward-seed'));
+    const b = applyReward(basePartyForReward, mission5.reward, makeRng('reward-seed'));
+    expect(stripIds(a)).toEqual(stripIds(b));
   });
 });
 
