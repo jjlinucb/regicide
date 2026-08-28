@@ -152,15 +152,20 @@ describe('legacy: mission setup', () => {
     ]);
   });
 
-  it('mission 4 buffs enemy attack from the discard pile, seals exact kills to the reserve deck, requeues defeats corrupted, and rewards Beast Companions + the Scarlet Whistle relic', () => {
+  it('mission 4 buffs enemy attack from the discard pile, seals exact kills to the reserve deck, requeues defeats corrupted, and rewards Beast Companions + Goran + the Scarlet Whistle relic', () => {
     const mission4 = getMission(4)!;
     expect(mission4.discardTopBuffsAttack).toBe(true);
     expect(mission4.exactKillToReserveDeck).toBe(true);
     expect(mission4.corruptedReturnQueue).toBe(true);
     expect(mission4.discardCleanupLowToHigh).toBe(true);
     expect(mission4.reward.relics).toEqual(['SCARLET_WHISTLE']);
-    expect(mission4.reward.recruits.length).toBe(4);
-    expect(mission4.reward.recruits.every((r) => r.beast)).toBe(true);
+    expect(mission4.reward.recruits.length).toBe(5);
+    expect(mission4.reward.recruits.filter((r) => r.beast).length).toBe(4);
+    // SOURCED FIX (a full solo playthrough — see tutorial_vids/summaries/mission-4.md): Goran also joins here,
+    // not (only) at Mission 8 as an earlier, shorter source had this codebase deferred to.
+    const goran = mission4.reward.recruits.find((r) => r.name === 'Goran');
+    expect(goran?.class).toBe('PALADIN');
+    expect(goran?.rank).toBe('8');
   });
 });
 
@@ -3130,7 +3135,7 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
   });
 });
 
-describe('legacy: mission 8 reward (only Bram kept, plus Goran and corrupt-another-card)', () => {
+describe('legacy: mission 8 reward (only Bram kept, plus corrupt-another-card)', () => {
   it('SOURCED FIX: the other 3 Chanters (fight setup, not a reward) are never granted — only Bram (rank 9, Encore) is kept permanently', () => {
     const mission8 = getMission(8)!;
     // The 4 Chanters are fight SETUP now (extraReserveCards), not part of the reward.
@@ -3144,17 +3149,10 @@ describe('legacy: mission 8 reward (only Bram kept, plus Goran and corrupt-anoth
     expect(chanters[0]?.kind === 'suited' && chanters[0]?.special).toBe('ENCORE');
   });
 
-  it('SOURCED FIX: also recruits Goran (Spades, rank 8, no earlier mission in this codebase had recruited him) and corrupts another card', () => {
+  it('corrupts another card, and no longer recruits Goran here (moved to Mission 4 — see that mission\'s own reward)', () => {
     const mission8 = getMission(8)!;
     expect(mission8.reward.corruptAnotherCard).toBe(true);
-    const goran = mission8.reward.recruits.find((r) => r.name === 'Goran');
-    expect(goran?.class).toBe('PALADIN');
-    expect(goran?.rank).toBe('8');
-
-    const party = applyReward(buildInitialParty(), mission8.reward);
-    const goranCard = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
-    expect(goranCard).toBeDefined();
-    if (goranCard?.kind === 'suited') expect(goranCard.suit).toBe('S');
+    expect(mission8.reward.recruits.some((r) => r.name === 'Goran')).toBe(false);
   });
 
   it('a Chanter recruit takes its explicit suit (Chanter has none of its own) and is flagged chanter', () => {
@@ -3418,17 +3416,17 @@ describe('legacy: Evergreen Mother relic (Mission 9 reward — corrupted-card co
 });
 
 describe('legacy: mission 9 reward (Evergreen Mother relic, Goran upgraded to Evergreen in place, Mage sticker)', () => {
-  it('SOURCED FIX: grants no new recruit here — instead upgrades the existing Goran (introduced by Mission 8\'s own reward) to Evergreen, plus the Evergreen Mother relic and a bonus Mage sticker', () => {
-    const mission8 = getMission(8)!;
+  it('SOURCED FIX: grants no new recruit here — instead upgrades the existing Goran (introduced by Mission 4\'s own reward) to Evergreen, plus the Evergreen Mother relic and a bonus Mage sticker', () => {
+    const mission4 = getMission(4)!;
     const mission9 = getMission(9)!;
     expect(mission9.reward.relics).toEqual(['EVERGREEN_MOTHER']);
     expect(mission9.reward.mageSticker).toBe(true);
     expect(mission9.reward.recruits.length).toBe(0); // no brand-new recruit — sourced correction
     expect(mission9.reward.upgradeEvergreenCard).toBe('Goran');
 
-    // Goran doesn't exist in this campaign's party until Mission 8's own reward introduces him — apply both
+    // Goran doesn't exist in this campaign's party until Mission 4's own reward introduces him — apply both
     // rewards in their actual campaign order to exercise the full arc.
-    let party = applyReward(buildInitialParty(), mission8.reward);
+    let party = applyReward(buildInitialParty(), mission4.reward);
     party = applyReward(party, mission9.reward);
 
     const goranCard = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
@@ -3443,9 +3441,9 @@ describe('legacy: mission 9 reward (Evergreen Mother relic, Goran upgraded to Ev
   });
 
   it('matching by name (not suit+rank) matters: Goran\'s suit+rank identity (Spades, 8) is already claimed by a pre-existing starting party member, who must NOT be the one upgraded', () => {
-    const mission8 = getMission(8)!;
+    const mission4 = getMission(4)!;
     const mission9 = getMission(9)!;
-    let party = applyReward(buildInitialParty(), mission8.reward);
+    let party = applyReward(buildInitialParty(), mission4.reward);
     const preexistingS8 = party.find((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '8' && c.name !== 'Goran');
     expect(preexistingS8).toBeDefined(); // sanity check: the collision this test guards against is real
 
@@ -3828,9 +3826,9 @@ describe('legacy: mission 10 reward (applyRestoredPartyCards — "deck rehabilit
   });
 });
 
-/** Mission 4's Beast Companion reward pool, freshly built (mirrors how RoomManager grants it via applyReward). */
+/** Mission 4's Beast Companion reward pool, freshly built (mirrors how RoomManager grants it via applyReward). Filtered to just the 4 beast recruits — Mission 4's reward also recruits Goran (a non-beast card) alongside them. */
 function mission4BeastCards(): SuitedCard[] {
-  return getMission(4)!.reward.recruits.map((r) => buildRecruitCard(r) as SuitedCard);
+  return getMission(4)!.reward.recruits.filter((r) => r.beast).map((r) => buildRecruitCard(r) as SuitedCard);
 }
 
 function startMission11(n: number, opts: { party?: Card[] } = {}): GameState {
@@ -3908,7 +3906,9 @@ describe('legacy: mission 11 setup (Descent into Darkness)', () => {
 
 describe('legacy: mission 11 beast-deck start-of-turn flip', () => {
   function classSpec(cls: 'WARRIOR' | 'BARD' | 'CLERIC' | 'PALADIN') {
-    return getMission(4)!.reward.recruits.find((r) => r.class === cls)!;
+    // Filtered to beast recruits — Mission 4's reward also recruits Goran (also PALADIN, not beast-flagged), which
+    // would otherwise collide with Sabrielle (the PALADIN beast) on an unfiltered class lookup.
+    return getMission(4)!.reward.recruits.find((r) => r.beast && r.class === cls)!;
   }
 
   it('Warrior-flip banishes the top of the discard pile', () => {

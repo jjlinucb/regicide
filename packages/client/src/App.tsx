@@ -44,6 +44,7 @@ export function App() {
     restoreLegacyCampaign,
     startLegacyMission,
     setMercenaryLoadout,
+    setBeastCompanionSelection,
     loadEndlessSave,
   } = useGameConnection();
 
@@ -121,6 +122,7 @@ export function App() {
           myPlayerId={session.playerId}
           onStartMission={startLegacyMission}
           onSetMercenaryLoadout={setMercenaryLoadout}
+          onSetBeastCompanionSelection={setBeastCompanionSelection}
           onLeave={handleLeave}
         />
       );

@@ -434,12 +434,24 @@ export const MISSIONS: Mission[] = [
     // same silent multiplayer combo-assist window (see GameState.comboAssist) to a lone Animal/Beast Companion
     // attack — the window Mission 1's Kinfolk Flute used to share before being reworked into each player's own
     // personal storage slot instead (see engine.ts's playCards' scarletAssist).
+    //
+    // SOURCED CORRECTION (a full solo playthrough — see tutorial_vids/summaries/mission-4.md): Gøran also joins
+    // the party in this mission's own ending, as a basic rank-8 card (no suit/class revealed on-screen at this
+    // point). An earlier, shorter source had already flagged this exact gap, but by the time it was found, this
+    // mission had already shipped without him — he was deferred to Mission 8 instead as a stopgap (see that
+    // mission's own reward comment, and party.ts's upgradeEvergreenCard doc for how Mission 9 later upgrades him
+    // by name regardless of which mission actually recruits him). This playthrough is a direct, in-context
+    // confirmation rather than a compendium paraphrase, so he now joins HERE instead, matching the source; Mission
+    // 8 no longer recruits him. Suit/class (Spades/Paladin) carries over unchanged from the old Mission 8 entry —
+    // still an unsourced judgment call (no source pins one for his actual first recruitment either way), kept as-is
+    // to avoid re-litigating an arbitrary choice nothing here contradicts.
     reward: {
       recruits: [
         beastRecruit('Fennow', 'WARRIOR', 'A', 'C'),
         beastRecruit('Cressida', 'BARD', 'A', 'D'),
         beastRecruit('Orwick', 'CLERIC', 'A', 'H'),
         beastRecruit('Sabrielle', 'PALADIN', 'A', 'S'),
+        recruit('Goran', 'PALADIN', '8', 'S'),
       ],
       relics: ['SCARLET_WHISTLE'],
     },
@@ -744,23 +756,22 @@ export const MISSIONS: Mission[] = [
     //    extraReserveCards/presetMissionZone entries that never persist into the campaign party or any later
     //    mission's data to begin with (missions.ts has no cross-mission "pilgrim deck" state at all) — there's
     //    nothing left to remove that wasn't already gone by construction, so no code change was needed here.
-    //  - "Add the Diamonds suit to Goran" — sourced material treats Goran as an ALREADY-recruited party member
-    //    gaining a second suit here (its own earlier "Add the Hearts suit to Goran" step lands at Mission 7 in
-    //    that source). This repo's own Mission 7 rework (already merged, out of scope for this pass) never
-    //    recruited Goran at all, so Mission 8 is the earliest point in this campaign's actual code he can be
-    //    introduced — treated here as his real FIRST recruitment (a plain recruit, not "add a second suit to an
-    //    existing one") rather than touching the already-merged Mission 7. Rank 8 and the Spades/Paladin class are
-    //    both unsourced judgment calls (no source pins an exact rank/suit for his first recruitment specifically,
-    //    since no source expected this gap to exist) — Spades matches this same mission's own flavor Pilgrim card
-    //    above (also named "Goran"), and rank 8 matches an earlier research pass's separate note on what Mission
-    //    4's version of this same recruit would have been (see legacy-missions-transcript-mismatches's Mission 4
-    //    entry: "Goran (8, no suit)") — Mission 4 itself was already merged without him, so that rank is repurposed
-    //    here instead of left stranded. Mission 9's reward later upgrades this exact card to Evergreen, matched
-    //    by name rather than this suit+rank identity — see party.ts's applyEvergreenUpgradeByName's doc comment
-    //    for why (his suit+rank collides with a pre-existing starting party member's).
+    //  - "Add the Diamonds suit to Goran" — NOT implemented here. The source's actual chain is: Mission 4 recruits
+    //    Goran (rank 8, no suit revealed yet), Mission 7 adds him a Hearts suit, and this mission adds him a second,
+    //    Diamonds suit on top (a Dual-class-Stickers-style secondSuit). A prior pass, working before a fuller
+    //    solo playthrough existed to confirm Mission 4's own ending recruits him, had already shipped Mission 4 (and
+    //    the already-merged Mission 7 rework, out of scope for this pass) without him — as a stopgap, THIS mission
+    //    was made his first recruitment instead (Spades/Paladin, both unsourced judgment calls — see Mission 4's
+    //    own reward comment). A later pass, working from that direct playthrough, moved his actual first
+    //    recruitment back to Mission 4 where the source places it — so this mission no longer recruits him at all,
+    //    but neither Mission 7's Hearts-suit step nor this mission's own Diamonds-suit step has been implemented in
+    //    their place. Both remain open gaps, flagged here rather than attempted, since fixing them means reopening
+    //    Mission 7's own reward too — out of scope for this pass. Mission 9's reward still upgrades Goran (by name,
+    //    not identity — see party.ts's applyEvergreenUpgradeByName's doc comment) to Evergreen regardless of which
+    //    mission actually recruited him, so that step is unaffected by any of this.
     //  - "Corrupt another card" — reuses the existing corruptAnotherCard reward step (see party.ts).
     reward: {
-      recruits: [specialRecruit('Bram the Refrainkeeper', 'CHANTER', '9', 'S'), recruit('Goran', 'PALADIN', '8')],
+      recruits: [specialRecruit('Bram the Refrainkeeper', 'CHANTER', '9', 'S')],
       corruptAnotherCard: true,
     },
   },

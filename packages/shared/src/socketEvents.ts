@@ -21,6 +21,10 @@ export interface LegacyStatePayload {
   currentMission: number;
   permanentRules: string[];
   mercenaryProgress: MercenaryProgress | null;
+  /** Mission 4's Beast Companion reward, sourced (see tutorial_vids/summaries/mission-4.md): a rotating pool of 4 companion cards, kept separate from `party` — see RoomManager's setBeastCompanionSelection. */
+  beastCompanionPool: Card[];
+  /** Which one card (by id) from `beastCompanionPool`, if any, rides along into the next mission attempt. */
+  selectedBeastCompanionId: string | null;
 }
 
 /** The portable, downloadable shape of a Legacy campaign's progress — same fields as LegacyStatePayload minus the server-assigned code, since restoring a save always mints a fresh one. */
@@ -31,6 +35,9 @@ export interface LegacySavePayload {
   permanentRules: string[];
   /** Optional so a save file exported before this field existed still restores cleanly (see RoomManager's createLegacyCampaignFromSave). */
   mercenaryProgress?: MercenaryProgress | null;
+  /** Optional for the same reason as mercenaryProgress above — older save files predate the Beast Companion pool. */
+  beastCompanionPool?: Card[];
+  selectedBeastCompanionId?: string | null;
 }
 
 /**
@@ -58,6 +65,8 @@ export interface ClientToServerEvents {
   'legacy:startMission': (payload: { code: string; missionId: number }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   /** Legacy-only sourced mechanic (see legacy/mercenaries.ts): sets the FULL mercenary loadout for whatever mission legacy:state's mercenaryProgress is currently tracking a loss streak on — a free re-pick each call (validated against the mission's current coin budget), not an incremental add/swap. */
   'legacy:setMercenaryLoadout': (payload: { code: string; loadout: Partial<Record<MercenaryTypeId, number>> }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
+  /** Sourced Mission 4 mechanic (see tutorial_vids/summaries/mission-4.md): picks one card (by id, or null to bring none) from legacy:state's beastCompanionPool to ride along into the next mission attempt's reserve deck. */
+  'legacy:setBeastCompanionSelection': (payload: { code: string; cardId: string | null }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   /** Loads a durable Endless Mode save by code, same shape as legacy:resume — joins the in-memory room if it's still in its post-load lobby, otherwise fetches it from storage and starts a fresh one. The host then fires room:start to actually deal into the next round (RESUME_ENDLESS_SAVE). */
   'endless:load': (payload: { code: string; name: string }, cb: (res: { ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
 }

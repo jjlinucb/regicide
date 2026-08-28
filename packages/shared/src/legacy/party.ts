@@ -149,13 +149,15 @@ export interface MissionReward {
   /**
    * Mission 9's reward ("Hope from Ashes"), sourced correction over the shipped "brand-new Gøran recruit" — see
    * missions.ts's Mission 9 entry: upgrades the existing party member with this NAME (Goran, introduced as a
-   * plain recruit by Mission 8's own reward) to SuitedCard.evergreen (see applyEvergreenUpgradeByName).
+   * plain recruit by Mission 4's own reward) to SuitedCard.evergreen (see applyEvergreenUpgradeByName).
    * Deliberately NOT a suit+rank identity like Mission 11's upgradeSidelinedCard: Goran is a brand-new recruit
    * appended to the party, not a rename of one of the original 40 starting cards, so his suit+rank is always
    * already claimed by a pre-existing party member (every suit+rank combo across the 4 base suits is already in
    * use — see STARTING_NAMES) — a suit+rank lookup would silently upgrade that OTHER, unrelated card instead
    * (caught by this pass's own regression test). His name has no such collision, so matching by name is the
-   * correct fix here specifically, not a general-purpose replacement for the identity-based lookup.
+   * correct fix here specifically, not a general-purpose replacement for the identity-based lookup. (Which
+   * mission actually recruits him has moved once already — see Mission 4's own reward comment — but this
+   * name-based lookup was unaffected by that move, since it never depended on a specific mission's placement.)
    */
   upgradeEvergreenCard?: string;
 }

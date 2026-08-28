@@ -288,4 +288,71 @@ describe('legacy campaign integration', () => {
     expect(res.ok).toBe(false);
     client.close();
   });
+
+  it("Mission 4's Beast Companion reward is a rotating pool, not the party — the selected one (only) rides into the next attempt's reserve deck", async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Priya' });
+
+    // Jump straight to mission 5 (auto-grants missions 1-4's rewards, including Mission 4's Beast Companions).
+    let result = rooms.startLegacyMission(created.code, created.playerId, 5);
+    if ('error' in result) throw new Error(result.error);
+    expect(result.room.legacy?.beastCompanionPool.length).toBe(4);
+    expect(result.room.legacy?.party.some((c) => c.kind === 'suited' && c.beast)).toBe(false);
+
+    // No selection made yet — this attempt's actual deck has no beast card in it anywhere.
+    const beforeSelection = [...result.room.gameState.tavernDeck, ...result.room.gameState.players.flatMap((p) => p.hand)];
+    expect(beforeSelection.some((c) => c.kind === 'suited' && c.beast)).toBe(false);
+
+    const chosen = result.room.legacy!.beastCompanionPool[0];
+    const selectResult = await rooms.setBeastCompanionSelection(created.code, created.playerId, chosen.id);
+    if ('error' in selectResult) throw new Error(selectResult.error);
+    expect(selectResult.room.legacy?.selectedBeastCompanionId).toBe(chosen.id);
+
+    // Restarting the same mission attempt now includes exactly the selected companion, and no others.
+    const restarted = rooms.restartGame(created.code, created.playerId);
+    if ('error' in restarted) throw new Error(restarted.error);
+    result = rooms.startLegacyMission(created.code, created.playerId, 5);
+    if ('error' in result) throw new Error(result.error);
+    const afterSelection = [...result.room.gameState.tavernDeck, ...result.room.gameState.players.flatMap((p) => p.hand)];
+    const beastCardsInPlay = afterSelection.filter((c) => c.kind === 'suited' && c.beast);
+    expect(beastCardsInPlay.length).toBe(1);
+    expect(beastCardsInPlay[0].id).toBe(chosen.id);
+
+    client.close();
+  });
+
+  it('Mission 11 pulls the WHOLE Beast Companion pool into play at once, overriding the "pick one" restriction', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Tomas' });
+
+    const result = rooms.startLegacyMission(created.code, created.playerId, 11);
+    if ('error' in result) throw new Error(result.error);
+    expect(result.room.legacy?.beastCompanionPool.length).toBe(4);
+    expect(result.room.gameState.beastDeckMechanic).toBe(true);
+    // All 4 beast cards are accounted for between the face-down deck and its used-card pile, same as the
+    // shared-package Mission 11 test (which builds its party the old way, directly from Mission 4's recruit specs).
+    const pool = [...result.room.gameState.beastDeck, ...result.room.gameState.beastDeckDiscard];
+    expect(pool.length).toBe(4);
+    expect(new Set(pool.map((c) => c.id))).toEqual(new Set(result.room.legacy!.beastCompanionPool.map((c) => c.id)));
+
+    client.close();
+  });
+
+  it('rejects a non-host trying to set the Beast Companion selection, and a card id not actually in the pool', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Owen' });
+    const result = rooms.startLegacyMission(created.code, created.playerId, 5);
+    if ('error' in result) throw new Error(result.error);
+
+    const notHost = await rooms.setBeastCompanionSelection(created.code, 'not-the-host', result.room.legacy!.beastCompanionPool[0].id);
+    expect('error' in notHost).toBe(true);
+
+    const badCard = await rooms.setBeastCompanionSelection(created.code, created.playerId, 'not-a-real-card');
+    expect('error' in badCard).toBe(true);
+
+    client.close();
+  });
 });

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { MISSIONS } from '@regicide/shared';
 import type { LegacySavePayload, LegacyStatePayload, MercenaryTypeId, RoomStatePayload } from '@regicide/shared';
 import { MercenaryCamp } from '../components/MercenaryCamp';
+import { BeastCompanionPicker } from '../components/BeastCompanionPicker';
 
 /** Downloads the campaign's current progress as a JSON save file — a local backup independent of server persistence. */
 function downloadSave(legacyState: LegacyStatePayload): void {
@@ -10,6 +11,8 @@ function downloadSave(legacyState: LegacyStatePayload): void {
     missionsCompleted: legacyState.missionsCompleted,
     currentMission: legacyState.currentMission,
     permanentRules: legacyState.permanentRules,
+    beastCompanionPool: legacyState.beastCompanionPool,
+    selectedBeastCompanionId: legacyState.selectedBeastCompanionId,
   };
   const blob = new Blob([JSON.stringify(save, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -26,6 +29,7 @@ export function CampaignLobbyPage({
   myPlayerId,
   onStartMission,
   onSetMercenaryLoadout,
+  onSetBeastCompanionSelection,
   onLeave,
 }: {
   roomState: RoomStatePayload;
@@ -33,6 +37,7 @@ export function CampaignLobbyPage({
   myPlayerId: string;
   onStartMission: (missionId: number) => void;
   onSetMercenaryLoadout: (loadout: Partial<Record<MercenaryTypeId, number>>) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onSetBeastCompanionSelection: (cardId: string | null) => Promise<{ ok: true } | { ok: false; error: string }>;
   onLeave: () => void;
 }) {
   const isHost = roomState.players.find((p) => p.id === myPlayerId)?.isHost ?? false;
@@ -92,6 +97,15 @@ export function CampaignLobbyPage({
 
         {legacyState.mercenaryProgress && legacyState.mercenaryProgress.missionId === legacyState.currentMission && (
           <MercenaryCamp progress={legacyState.mercenaryProgress} isHost={isHost} onSave={onSetMercenaryLoadout} />
+        )}
+
+        {legacyState.beastCompanionPool.length > 0 && !selectedMission?.beastDeckMechanic && (
+          <BeastCompanionPicker
+            pool={legacyState.beastCompanionPool}
+            selectedId={legacyState.selectedBeastCompanionId}
+            isHost={isHost}
+            onSave={onSetBeastCompanionSelection}
+          />
         )}
 
         {selectedMission && (

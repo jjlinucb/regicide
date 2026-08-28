@@ -6,6 +6,7 @@ import {
   applyReward,
   buildInitialParty,
   buildMercenaryLoadout,
+  buildRecruitCard,
   getMission,
   LEGACY_JESTER_COUNT,
   mercenaryCoinsForLosses,
@@ -31,6 +32,10 @@ export interface LegacyRoomData {
   currentMission: number;
   permanentRules: string[];
   mercenaryProgress: MercenaryProgress | null;
+  /** Mission 4's Beast Companion reward, sourced (see tutorial_vids/summaries/mission-4.md): a rotating pool of 4 companion cards, kept out of `party` entirely — see grantMissionReward/startLegacyMission/setBeastCompanionSelection. */
+  beastCompanionPool: Card[];
+  /** Which one card (by id) from `beastCompanionPool`, if any, rides along into the next mission attempt (see startLegacyMission). Sticky across missions until changed. */
+  selectedBeastCompanionId: string | null;
 }
 
 /** Classic Regicide's durable Endless Mode save data, mirrored from EndlessSaveStore and kept in sync at every WON. */
@@ -70,6 +75,8 @@ function toRecord(room: Room): CampaignRecord {
     currentMission: legacy.currentMission,
     permanentRules: legacy.permanentRules,
     mercenaryProgress: legacy.mercenaryProgress,
+    beastCompanionPool: legacy.beastCompanionPool,
+    selectedBeastCompanionId: legacy.selectedBeastCompanionId,
     updatedAt: Date.now(),
   };
 }
@@ -285,6 +292,8 @@ export class RoomManager {
       currentMission: 1,
       permanentRules: [],
       mercenaryProgress: null,
+      beastCompanionPool: [],
+      selectedBeastCompanionId: null,
     };
     const player: RoomPlayer = { id: randomUUID(), token: randomUUID(), name: hostName, socketId: null, connected: true };
     const room: Room = {
@@ -324,6 +333,10 @@ export class RoomManager {
       permanentRules: Array.isArray(save.permanentRules) ? save.permanentRules : [],
       // Older save files predate this field — a fresh mission carries no stale loss/coin progress either way.
       mercenaryProgress: save.mercenaryProgress ?? null,
+      // Older save files predate the Beast Companion pool too — an empty pool/no selection is the correct default,
+      // not data loss, since a campaign that never reached Mission 4 (or predates this feature) never had one.
+      beastCompanionPool: Array.isArray(save.beastCompanionPool) ? save.beastCompanionPool : [],
+      selectedBeastCompanionId: save.selectedBeastCompanionId ?? null,
     };
     const player: RoomPlayer = { id: randomUUID(), token: randomUUID(), name: hostName, socketId: null, connected: true };
     const room: Room = {
@@ -362,6 +375,8 @@ export class RoomManager {
       currentMission: record.currentMission,
       permanentRules: record.permanentRules,
       mercenaryProgress: record.mercenaryProgress,
+      beastCompanionPool: record.beastCompanionPool,
+      selectedBeastCompanionId: record.selectedBeastCompanionId,
     };
     const player: RoomPlayer = { id: randomUUID(), token: randomUUID(), name, socketId: null, connected: true };
     const room: Room = {
@@ -383,14 +398,26 @@ export class RoomManager {
    * startLegacyMission). `restoredPartyCards` is Mission 10's "deck rehabilitation" only (see
    * GameState.restoredPartyCards) — omitted (or empty) for every other mission, and for a jumped-ahead grant where
    * no mission was actually played.
+   *
+   * Beast-flagged recruits (see RecruitSpec.beast) are pulled out before applyReward ever sees them — sourced
+   * correction (a full solo playthrough, see tutorial_vids/summaries/mission-4.md): Mission 4's "reward" isn't 4
+   * permanent recruits, it's "keep the four in a box; each mission attempt you may include one in your reserve
+   * deck." They go to legacy.beastCompanionPool instead of legacy.party — a rotating pool, not a roster addition —
+   * consumed by startLegacyMission/setBeastCompanionSelection. Data-driven, not Mission-4-specific: any future
+   * mission's beast-flagged recruits would route the same way.
    */
   private grantMissionReward(
     legacy: LegacyRoomData,
     mission: NonNullable<ReturnType<typeof getMission>>,
     restoredPartyCards: Card[] = [],
   ): void {
-    legacy.party = applyReward(legacy.party, mission.reward);
+    const beastRecruits = mission.reward.recruits.filter((r) => r.beast);
+    const nonBeastReward = beastRecruits.length > 0 ? { ...mission.reward, recruits: mission.reward.recruits.filter((r) => !r.beast) } : mission.reward;
+    legacy.party = applyReward(legacy.party, nonBeastReward);
     legacy.party = applyRestoredPartyCards(legacy.party, restoredPartyCards);
+    if (beastRecruits.length > 0) {
+      legacy.beastCompanionPool = [...legacy.beastCompanionPool, ...beastRecruits.map((r) => buildRecruitCard(r))];
+    }
     if (mission.reward.relics?.length) {
       legacy.permanentRules = [...legacy.permanentRules, ...mission.reward.relics];
     }
@@ -451,6 +478,19 @@ export class RoomManager {
       missionParty = missionParty.filter((c) => !(c.kind === 'suited' && c.suit === suit && c.rank === rank));
     }
 
+    // Beast Companion pool (Mission 4's reward, sourced — see tutorial_vids/summaries/mission-4.md): Mission 11's
+    // own beastDeckMechanic needs all 4 at once for its finale mechanic (buildBeastDeck only ever scans `party` —
+    // see engine.ts's startLegacyMission), overriding the normal "pick one per attempt" restriction below. Every
+    // other mission instead folds in just the ONE selected card (if any) as an extra reserve card, same
+    // not-a-permanent-party-member treatment mercenaries get — the rest of the pool sits out this attempt.
+    const beastCompanionPool = room.legacy.beastCompanionPool;
+    const selectedBeastCompanionId = room.legacy.selectedBeastCompanionId;
+    if (mission.beastDeckMechanic) {
+      missionParty = [...missionParty, ...beastCompanionPool];
+    }
+    const selectedBeastCard = mission.beastDeckMechanic ? undefined : beastCompanionPool.find((c) => c.id === selectedBeastCompanionId);
+    const extraExtras = selectedBeastCard ? [...mercenaryCards, selectedBeastCard] : mercenaryCards;
+
     const playerNames = room.playerOrder.map((id) => room.players.get(id)!.name);
     const result = applyAction(room.gameState, {
       type: 'START_LEGACY_MISSION',
@@ -476,7 +516,7 @@ export class RoomManager {
       pilgrimCards: mission.pilgrimCards,
       ascendingZone: mission.ascendingZone,
       capturedPilesActive: mission.capturedPilesActive,
-      extraReserveCards: mercenaryCards.length > 0 ? [...(mission.extraReserveCards ?? []), ...mercenaryCards] : mission.extraReserveCards,
+      extraReserveCards: extraExtras.length > 0 ? [...(mission.extraReserveCards ?? []), ...extraExtras] : mission.extraReserveCards,
       corruptedPartyEnemies: mission.corruptedPartyEnemies,
       startOfTurnZoneFlip: mission.startOfTurnZoneFlip,
       beastDeckMechanic: mission.beastDeckMechanic,
@@ -535,6 +575,25 @@ export class RoomManager {
     const validated = buildMercenaryLoadout(loadout, mercenaryCoinsForLosses(progress.lossCount));
     if (!Array.isArray(validated)) return { error: validated.error };
     progress.loadout = loadout;
+    await this.campaignStore.save(toRecord(room));
+    return { room };
+  }
+
+  /**
+   * Sets which one card (by id, or null for none) from beastCompanionPool rides along into the next mission
+   * attempt (see startLegacyMission) — sourced Mission 4 mechanic (tutorial_vids/summaries/mission-4.md's "keep
+   * the four in a box; each mission attempt you may include one in your reserve deck"). Sticky across missions,
+   * unlike mercenaryProgress's loadout, since there's no per-mission budget to re-validate — just pick one, or
+   * change your mind any time from the lobby.
+   */
+  async setBeastCompanionSelection(code: string, requestingPlayerId: string, cardId: string | null): Promise<{ room: Room } | { error: string }> {
+    const room = this.getRoom(code);
+    if (!room || !room.legacy) return { error: 'Campaign not found.' };
+    if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can choose the Beast Companion.' };
+    if (cardId !== null && !room.legacy.beastCompanionPool.some((c) => c.id === cardId)) {
+      return { error: 'That card is not in the Beast Companion pool.' };
+    }
+    room.legacy.selectedBeastCompanionId = cardId;
     await this.campaignStore.save(toRecord(room));
     return { room };
   }
