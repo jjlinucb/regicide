@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
 import { makeRng } from '../game/deck.js';
+import { missionZoneValueSum } from '../game/rules.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
@@ -1467,6 +1468,68 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, rolling banish-pile 
     expect(state.currentEnemy).toBeNull(); // no more enemies left — the mission is won
     expect(state.rollingZoneCards).toEqual([]);
     expect(state.banishPile).toMatchObject([{ suit: 'C', rank: '4' }, { suit: 'D', rank: '3' }]);
+  });
+
+  it('REGRESSION (playtest cross-check, 2026-08-28): the ACTUAL mission-5 definition seeds Reaver cards into its own fight, so the banish pile — and the rolling zone buff it feeds — isn\'t permanently inert in real play', () => {
+    // Earlier bug: mission-5's extraReserveCards carried Myla only; the only Reaver cards ever created for this
+    // campaign came from reward.recruits, granted AFTER the mission already ended. With zero Reaver cards ever
+    // playable during the fight itself, nothing could ever call banishCards, so rollingZoneBonus's accumulator
+    // (fed exclusively from the banish pile — see rollMissionZoneBonusCard) could never grow no matter how the
+    // fight was played. This test uses the mission's own real definition end-to-end (not a hand-rigged banishPile,
+    // unlike the accumulation-mechanics test above) to prove that's no longer true.
+    const mission5 = getMission(5)!;
+
+    // Structural guard on the root cause: Mission 5's own fight setup must actually include playable Reaver
+    // cards, not just Myla.
+    const reaverSetupCards = mission5.extraReserveCards?.filter((c) => c.kind === 'suited' && c.reaver) ?? [];
+    expect(reaverSetupCards.length).toBeGreaterThan(0);
+
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'crimson-regression-test',
+      party: buildInitialParty(),
+      enemies: missionEnemiesToSpecs(mission5.enemies),
+      jesterCount: 0,
+      extraReserveCards: mission5.extraReserveCards,
+      rollingZoneBonus: mission5.rollingZoneBonus,
+      exactKillSplashDamage: mission5.exactKillSplashDamage,
+    });
+    if (!res.ok) throw new Error(res.error);
+    let state = res.state;
+    expect(state.banishPile).toEqual([]);
+    expect(state.rollingZoneCards).toEqual([]);
+
+    // Simulate having drawn one of the mission's own Reaver companions into hand (the deterministic equivalent of
+    // it eventually coming up in the shuffled reserve deck during real play), and play it against the live enemy.
+    // Deliberately picked as a non-Clubs Reaver so playing it alone doesn't also trigger Warrior doubling and
+    // overkill the boss — this test is about the banish pile/rolling zone plumbing, not attack math.
+    const drawnReaver = reaverSetupCards.find((c) => c.kind === 'suited' && c.suit !== 'C') as SuitedCard;
+    expect(drawnReaver).toBeDefined();
+    state = structuredClone(state);
+    state.tavernDeck = [suited('C', '6'), ...state.tavernDeck]; // top card the Reaver tears and banishes
+    // A second hand card, untouched by the Reaver play, to cover the boss's own attack once the turn is yielded.
+    state = rig(state, [{ ...drawnReaver, id: 'hand-reaver' }, suited('D', '10')]);
+
+    let step = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: ['hand-reaver'] }));
+    state = step.state;
+
+    // The Reaver's own deck-tear mechanic actually fired: the banish pile now holds the torn reserve card.
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')).toBe(true);
+    expect(state.currentEnemy).not.toBeNull(); // not an overkill — still fighting the same boss
+
+    // A non-killing attack immediately triggers the enemy's own counter-attack (AWAIT_DEFEND) within this same
+    // action — cover it so the turn actually ends and rollMissionZoneBonusCard's end-of-turn cycle runs.
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    step = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
+    state = step.state;
+    expect(state.phase).not.toBe('LOST');
+
+    // The rolling zone actually accumulated the banished card — the buff is no longer permanently stuck at zero.
+    expect(state.rollingZoneCards.length).toBeGreaterThan(0);
+    expect(state.rollingZoneCards.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')).toBe(true);
+    expect(missionZoneValueSum(state.rollingZoneCards)).toBeGreaterThan(0);
   });
 });
 

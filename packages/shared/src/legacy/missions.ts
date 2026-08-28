@@ -114,6 +114,25 @@ function reserveCompanion(name: string, suit: Suit, rank: Rank): Card {
 }
 
 /**
+ * Mission 5's own fight SETUP (not a reward — see this mission's reward comment below, and the mission-5
+ * transcript note: "Four new Reaver party members join"): four Reaver-flagged cards added straight to the fight's
+ * reserve deck via extraReserveCards, same non-persistent "mission-only" shape as chanterCompanion below (Mission
+ * 8 reuses this identical pattern for its own Chanters). BUG FIX (playtest cross-check, 2026-08-28): the shipped
+ * version had NO Reaver cards anywhere in Mission 5's own reserve deck — only reward.recruits granted one
+ * (Haror) permanently, at mission END. That left this mission's signature deck-milling mechanic (a Reaver play
+ * tears a card off the reserve deck and banishes it — see resolveCommittedPlay's reaverCards handling) with
+ * nothing to ever trigger it during the actual fight, since the party held zero Reaver cards to play. That in
+ * turn starved rollingZoneBonus (see GameState.rollingZoneCards / engine.ts's rollMissionZoneBonusCard), which
+ * recycles the BANISH pile's top card each turn: with the banish pile never receiving anything, the rolling zone
+ * buff could never grow, no matter how the fight was played. Only rank 5 (Haror) is ever granted permanently via
+ * reward.recruits — same "no separate grant-then-retire step needed" simplification Mission 8's Chanters use —
+ * the other 3 exist only for this one fight.
+ */
+function reaverCompanion(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `reaver-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, reaver: true };
+}
+
+/**
  * A named survivor card, shared by Mission 7's extraReserveCards (see GameState.pilgrimMechanic) and Mission 8's
  * ascending mission zone (see GameState.ascendingZone) — both missions independently reused "Pilgrim" as flavor
  * for stranded survivors, and both read the `pilgrim` flag, gated by their own separate mission flag so the two
@@ -408,7 +427,22 @@ export const MISSIONS: Mission[] = [
     // here; she's just another reserve-deck body this mission, same shape as Mission 9/12's own one-off flavor
     // cards (see reserveCompanion above). She only becomes a real permanent party member starting Mission 6,
     // via this mission's reward below.
-    extraReserveCards: [reserveCompanion('Myla', 'H', '7')],
+    //
+    // The 4 Reavers named in the mission-5 transcript ("Four new Reaver party members join") also ride along
+    // here, for real — see reaverCompanion's own doc comment for why this matters beyond flavor: without them
+    // actually in the fight's reserve deck, nothing can ever trigger this mission's Reaver deck-tear mechanic,
+    // which is the ONLY thing that ever puts a card into the banish pile during Mission 5 — and rollingZoneBonus
+    // below reads its buff from exactly that pile. Haror (rank 5, Clubs) matches the identity reward.recruits
+    // grants permanently below; the other 3's names/suits/ranks are an unsourced judgment call (no source names
+    // them individually) — all rank 5 like Haror, one per remaining suit, so "only the Clubs one survives" reads
+    // cleanly at the reward.
+    extraReserveCards: [
+      reserveCompanion('Myla', 'H', '7'),
+      reaverCompanion('Haror', 'C', '5'),
+      reaverCompanion('Skarn Hollowtooth', 'S', '5'),
+      reaverCompanion('Petra Duskfang', 'H', '5'),
+      reaverCompanion('Yorrin Grimtide', 'D', '5'),
+    ],
     // The grove's rolling zone, per the tutorial transcript ("a rolling mission zone/banish-pile cycle each turn
     // feeds bonus strength to the current enemy"): every turn, the top card of the BANISH pile recycles into the
     // rolling zone, accumulating there — never replaced, never cleared on its own — until the next kill banishes
@@ -430,8 +464,12 @@ export const MISSIONS: Mission[] = [
     // rank 5 (Haror) for good. Implemented as a straight, permanent single-recruit grant rather than
     // modeling "recruit all 4, then retire 3" as two separate steps — this campaign's reward model elsewhere
     // (e.g. Mission 11's applyBeastCardChoice) only ever tracks the FINAL kept roster, never an intermediate
-    // grant-then-retire history, so the net effect (only Haror ends up in the permanent party) is the same either
-    // way. Also adds the sourced-but-missing "corrupt another card" effect (see party.ts's
+    // grant-then-retire history, so the net effect (only Haror ends up in the permanent campaign PARTY roster) is
+    // the same either way. That equivalence is scoped to the permanent roster only, though — it does NOT excuse
+    // the 4 Reavers from also needing to actually join THIS FIGHT'S reserve deck (see extraReserveCards above and
+    // reaverCompanion's doc comment): a prior version of this comment conflated the two and skipped seeding them
+    // into extraReserveCards entirely, which silently broke rollingZoneBonus by starving it of anything to ever
+    // put in the banish pile. Also adds the sourced-but-missing "corrupt another card" effect (see party.ts's
     // applyCorruptAnotherCard) and a second round of Dual-class Stickers. Myla (value 7) — who spent this fight
     // as an ordinary reserve-deck card, not a mission-zone fixture (see extraReserveCards above) — now joins the
     // party for real: a normal, drawable, playable Cleric card from Mission 6 onward.
