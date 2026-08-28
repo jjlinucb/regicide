@@ -279,18 +279,11 @@ export function GamePage({
         </div>
         {isLegacy && state.jesterClaim && (
           <div className="legacy-jester-claim-banner">
-            <span>🃏 A Jester is up for grabs — claim it for a free 8-strength attack, ignoring this enemy's immunity, then refill your hand. Pick a class:</span>
+            <span>🃏 A Jester is up for grabs — claim it for a free 8-strength attack, ignoring this enemy's immunity, then refill your hand.</span>
             <div className="jester-picker-choices">
-              {(Object.keys(SUIT_LABEL) as Suit[]).map((suit) => (
-                <button
-                  key={suit}
-                  type="button"
-                  className="btn"
-                  onClick={() => sendAction({ type: 'CLAIM_JESTER', playerId: myPlayerId, attackSuit: suit })}
-                >
-                  {SUIT_LABEL[suit]}
-                </button>
-              ))}
+              <button type="button" className="btn" onClick={() => sendAction({ type: 'CLAIM_JESTER', playerId: myPlayerId })}>
+                Claim it
+              </button>
             </div>
           </div>
         )}
@@ -298,19 +291,12 @@ export function GamePage({
           <div className="legacy-jester-claim-banner">
             <span>
               🃏 {state.standingJesters.length} standing Jester{state.standingJesters.length > 1 ? 's' : ''} available — use one now for a
-              free 8-strength attack, ignoring this enemy's immunity, then draw back up to your hand limit. Pick a class:
+              free 8-strength attack, ignoring this enemy's immunity, then draw back up to your hand limit.
             </span>
             <div className="jester-picker-choices">
-              {(Object.keys(SUIT_LABEL) as Suit[]).map((suit) => (
-                <button
-                  key={suit}
-                  type="button"
-                  className="btn"
-                  onClick={() => sendAction({ type: 'USE_STANDING_JESTER', playerId: myPlayerId, attackSuit: suit })}
-                >
-                  {SUIT_LABEL[suit]}
-                </button>
-              ))}
+              <button type="button" className="btn" onClick={() => sendAction({ type: 'USE_STANDING_JESTER', playerId: myPlayerId })}>
+                Use a Jester
+              </button>
             </div>
           </div>
         )}

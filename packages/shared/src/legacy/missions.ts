@@ -363,7 +363,17 @@ export const MISSIONS: Mission[] = [
     // One random party member sits this mission out, and every end of turn the reserve deck feeds the fire
     // another class of immunity (see GameState.endOfTurnZoneFlip / missionZone).
     sidelineCount: 1,
+    // UNSOURCED, per John directly: High Arcana (Mission 1's reward recruit, 25 of Diamonds — see this file's
+    // Mission 1 entry) is actually Mission 12's final boss and is never meant to be a playable party card at all.
+    // He was only ever explicitly pulled out of the deck for Mission 3, so that's all this fixes for now — FLAGGED
+    // GAP: the same exclusion likely belongs on every mission between his Mission 1 recruitment and Mission 12's
+    // reveal, not just this one, but that's out of scope until confirmed.
+    sidelineIdentity: { suit: 'D', rank: '25' },
     endOfTurnZoneFlip: true,
+    // Same standing-Jester house rule as Mission 2 (see GameState.standingJesters) — this mission's own Jesters
+    // are also easy to go a whole fight without ever drawing, especially once endOfTurnZoneFlip's escalating
+    // immunity walls off Hearts/Diamonds (this engine's only two hand-refill classes).
+    standingJesters: true,
     // Reward: the Mage class itself — per the transcript, a full 10 new party members (one per non-royal rank,
     // 2 through Ace), not the "Lucky 4" ranks (3/5/7/9) the shipped version originally granted here — that
     // smaller 4-recruit pattern belongs to the later faction rewards instead (e.g. Mission 6's Guardians).
