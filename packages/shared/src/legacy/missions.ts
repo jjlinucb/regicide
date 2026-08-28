@@ -548,8 +548,24 @@ export const MISSIONS: Mission[] = [
       "blot out the sun. Villagers scattered by the storm are stranded across the cliffside path below, too " +
       'panicked to move except in a very particular order.',
     // Wave 1: 6 Trolls. Wave 2: 6 Wyverns (50/25 — a full tier above anything the campaign has fought yet;
-    // community consensus is they "hit like a truck," so the party had better have finished the chain, and its
-    // purge, before this wave drops).
+    // community consensus is they "hit like a truck").
+    //
+    // COMMENT CORRECTION (22-agent playtest cross-check, 2026-08-28 — see mission-playtest-cross-check-2026-08-28
+    // memory): an earlier version of this very comment framed "finish the chain, and its purge, before this wave
+    // drops" as the mission's real goal. That's mathematically impossible as tuned: the chain needs 9 placements
+    // after the preseeded Ace (see presetMissionZone/extraReserveCards below), and placement only opens right
+    // after a kill (see engine.ts's zoneOpenForPlacement) — so Wave 1's 6 Trolls can open at most 6 of those 9
+    // windows. Re-checked against the same CAMPAIGN_RULES.md fan-reimplementation doc already cited throughout
+    // this mission's other corrections: its actual text is "during cleanup, the player may optionally move
+    // cards from the play area to the mission zone... at no extra cost" — "optionally," no deadline, no mention
+    // of Wave 2 at all. Wave 2's own 6 Wyvern kills open the identical placement window (ascendingZone /
+    // zoneOpenForPlacement is not wave-scoped), so the whole mission's 12 kills open up to 11 usable placement
+    // windows (the very last kill's window never opens — the mission ends in that same engine call, see
+    // finishEnemyDefeatTail's castleDeck.length === 0 branch) for the 9 the chain actually needs — comfortably
+    // achievable as a whole-mission project, just never a hard Wave-1-only cutoff. No mechanical change was
+    // needed here, only removing this comment's own unsourced deadline framing (nothing player-facing — story
+    // text, UI copy — ever stated the deadline either; it only lived in this comment). See legacy.test.ts's
+    // "mission 8 chain-vs-wave math" tests for the regression coverage locking in these numbers.
     //
     // SOURCED CORRECTION (fan-reimplementation rules doc: "6 Trolls (10 atk / 20 hp, dual-suited, each with a
     // distinct pair of basic suits), then 6 Wyverns (25 atk / 50 hp, dual-suited, distinct pairs)"): both tiers
