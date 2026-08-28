@@ -256,9 +256,10 @@ export const MISSIONS: Mission[] = [
     // `if (defeated) return ok(state); // enemy was defeated, same player continues against the next one` —
     // no AWAIT_DEFEND is ever opened for a hit that kills). The one genuine deviation from the baseline Legacy
     // ruleset — exact-kill sends the felled enemy to the top of the reserve deck instead of the discard pile —
-    // reuses the existing exactKillToReserveDeck flag Mission 4 also uses. The corrupting-a-card and
-    // adding-a-recruit beats the transcript shows are likewise just the existing SuitedCard.corrupted mechanic
-    // and an ordinary mission reward — nothing mission-1-specific to add.
+    // reuses the existing exactKillToReserveDeck flag Mission 4 also uses. A fuller solo playthrough (Meet Me at
+    // the Table, "Mission 2 & 3 Playthrough") than whatever this file's original note above was based on shows
+    // the corrupting-a-card and adding-a-recruit beats ARE this mission's actual reward, not just narration —
+    // see reward.corruptAnotherCard and the "High Arcana" recruit below.
     exactKillToReserveDeck: true,
     // Reward: the Kinfolk Flute relic only — each player gets a personal storage slot on the flute, and may bank
     // one hand card worth 2-5 onto it (once per turn, a free side-action alongside their normal play). It sits
@@ -267,11 +268,18 @@ export const MISSIONS: Mission[] = [
     // version instead had another player silently slip in a matching card to help complete someone else's combo
     // — which did nothing at all in solo play (no one else at the table to help) and isn't what a fan digital
     // reimplementation's own rules doc describes ("store a card... once per turn. Cards on the flute can be
-    // included in combos") — see the legacy-missions-transcript-mismatches memory doc. (The transcript names no
-    // recruit reward for this mission — the two basic recruits the shipped version invented here are dropped.)
+    // included in combos") — see the legacy-missions-transcript-mismatches memory doc.
+    //
+    // Reward also includes (sourced from the same solo playthrough above): the sourced-elsewhere
+    // corruptAnotherCard step (permanently corrupts one random EXISTING party member — never this same reward's
+    // own new recruit, see party.ts's applyCorruptAnotherCard), and a new one-off recruit, "High Arcana" — a flat
+    // 25 value with no class ability shown at the point it's granted, so it's modeled as an ordinary base-class
+    // recruit rather than folded into the (unbuilt in this codebase) Mage mechanic Mission 3 introduces later.
+    // UNSOURCED JUDGMENT CALL: no footage shows this card's suit — picked Bard (Diamonds) arbitrarily.
     reward: {
-      recruits: [],
+      recruits: [{ name: 'High Arcana', class: 'BARD', rank: '25' }],
       relics: ['KINFOLK_FLUTE'],
+      corruptAnotherCard: true,
     },
   },
   {

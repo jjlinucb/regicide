@@ -88,13 +88,14 @@ describe('legacy: mission setup', () => {
     expect(getMission(999)).toBeUndefined();
   });
 
-  it('mission 1 ("Call to Arms") is the standard 12-enemy Castle deck, sends exact kills to the reserve deck, and rewards only the Kinfolk Flute relic', () => {
+  it('mission 1 ("Call to Arms") is the standard 12-enemy Castle deck, sends exact kills to the reserve deck, and rewards the Kinfolk Flute relic plus corrupting a card and the High Arcana recruit', () => {
     const mission1 = getMission(1)!;
     expect(mission1.title).toBe('Call to Arms');
     expect(mission1.standardCastle).toBe(true);
     expect(mission1.exactKillToReserveDeck).toBe(true);
     expect(mission1.reward.relics).toEqual(['KINFOLK_FLUTE']);
-    expect(mission1.reward.recruits.length).toBe(0);
+    expect(mission1.reward.corruptAnotherCard).toBe(true);
+    expect(mission1.reward.recruits).toEqual([{ name: 'High Arcana', class: 'BARD', rank: '25' }]);
     const ids = ['p0'];
     const res = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',

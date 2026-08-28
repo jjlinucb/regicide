@@ -108,8 +108,19 @@ export function buildEndlessCastleDeck(loop: number, rng: () => number): EnemySt
   return [...jacks, ...queens, ...kings];
 }
 
+/** Classic Regicide only (also reused by Endless Mode's own continuations) — Legacy uses LEGACY_JESTER_COUNT instead, a flat count that doesn't scale down by player count. */
 export const JESTERS_BY_PLAYER_COUNT: Record<number, number> = { 1: 0, 2: 0, 3: 1, 4: 2 };
 export const MAX_HAND_SIZE_BY_PLAYER_COUNT: Record<number, number> = { 1: 8, 2: 7, 3: 6, 4: 5 };
+
+/**
+ * Regicide Legacy only: unlike classic Regicide (see JESTERS_BY_PLAYER_COUNT, which strips Jesters out entirely
+ * below 3 players), Legacy always shuffles both Jesters into the reserve deck regardless of player count —
+ * confirmed at 1 player from a solo playthrough (Meet Me at the Table, "Mission 2 & 3 Playthrough"), where a solo
+ * Legacy game used both Jesters (flavor-named "Frankie" and "Sketch" in that footage). Extrapolated to 2-4
+ * players as "the physical box's two Jesters are always both in play," the simplest reading consistent with that
+ * one data point — not independently confirmed at those player counts.
+ */
+export const LEGACY_JESTER_COUNT = 2;
 
 /**
  * Builds the 40 standard cards — 2-10 of every suit plus the 4 Animal Companions (Aces) — with no jesters.

@@ -7,7 +7,7 @@ import {
   buildInitialParty,
   buildMercenaryLoadout,
   getMission,
-  JESTERS_BY_PLAYER_COUNT,
+  LEGACY_JESTER_COUNT,
   mercenaryCoinsForLosses,
   missionEnemiesToSpecs,
 } from '@regicide/shared';
@@ -451,7 +451,6 @@ export class RoomManager {
       missionParty = missionParty.filter((c) => !(c.kind === 'suited' && c.suit === suit && c.rank === rank));
     }
 
-    const n = room.playerOrder.length;
     const playerNames = room.playerOrder.map((id) => room.players.get(id)!.name);
     const result = applyAction(room.gameState, {
       type: 'START_LEGACY_MISSION',
@@ -460,7 +459,7 @@ export class RoomManager {
       seed: `${code}-${Date.now()}`,
       party: missionParty,
       enemies: mission.standardCastle ? [] : missionEnemiesToSpecs(mission.enemies),
-      jesterCount: JESTERS_BY_PLAYER_COUNT[n] ?? 0,
+      jesterCount: LEGACY_JESTER_COUNT,
       standardCastle: mission.standardCastle,
       exactKillOnly: mission.exactKillOnly,
       endOfTurnZoneFlip: mission.endOfTurnZoneFlip,

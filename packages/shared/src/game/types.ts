@@ -1,10 +1,12 @@
 export type Suit = 'H' | 'D' | 'C' | 'S';
 /**
  * '12' and '19' only ever appear on Mercenary cards (see legacy/mercenaries.ts) — no base party/enemy card uses
- * them. `cardValue()`'s `Number(card.rank)` fallback (rules.ts) already handles them correctly with no dedicated
- * case needed.
+ * them. '25' is Mission 1's "High Arcana" recruit only (see legacy/missions.ts's Mission 1 reward) — sourced
+ * from a solo playthrough (Meet Me at the Table), an unusually high flat value with no class ability shown at
+ * the point it was granted. `cardValue()`'s `Number(card.rank)` fallback (rules.ts) already handles all of
+ * these correctly with no dedicated case needed.
  */
-export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '12' | '19' | 'A' | 'J' | 'Q' | 'K';
+export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '12' | '19' | '25' | 'A' | 'J' | 'Q' | 'K';
 
 /**
  * A signature ability a Legacy card can carry on top of its base suit power, one per class

@@ -11,3 +11,8 @@ The staff of a magic academy turn out to be part of the problem, and the party h
 
 ## Reward
 **New class — Mage:** ten new party members join, all Mages. A Mage's power resolves *before* the other class powers in an attack, and at its own card strength each time — not the attack's combined total. Multiple Mages in one attack resolve one after another, each at their own strength.
+
+### Not yet implemented — found in a fuller solo playthrough (Meet Me at the Table, "Mission 2 & 3 Playthrough")
+That video's own description of a Mage's power is more involved than this codebase's current `resolveArcaneBolts` (which just adds the Mage's own value as bonus damage): playing a Mage secretly reveals cards off the top of the reserve deck, one per point of the play's own attack strength; any Jesters or corrupted cards among them are discarded, then one of the rest is chosen and tucked under the attack, adding its value; if that chosen card is itself another Mage, the reveal repeats using that Mage's own strength instead, chaining as long as Mages keep coming up; everything not chosen goes to the discard pile. Separately, on an attack that included a Mage, a successful kill sends every card from that attack to the **banish** pile instead of the discard pile.
+
+This is a real, sourced gap between the current implementation and the sourced mechanic, but reworking it is a larger job than what's been scoped so far — not attempted yet.
