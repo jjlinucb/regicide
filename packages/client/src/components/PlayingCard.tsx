@@ -18,7 +18,10 @@ function isLegacyCard(card: Extract<Card, { kind: 'suited' }>): boolean {
 /** Classic Regicide Endless Mode only: a King pushed past its ceiling shows as "K+N" (see SuitedCard.tier). */
 function tieredRankLabel(card: Extract<Card, { kind: 'suited' }>): string {
   const base = card.rank === 'A' ? 'A' : card.rank;
-  return card.tier ? `${base}+${card.tier}` : base;
+  // A Mercenary's flexibleComboRank (see SuitedCard.flexibleComboRank) is printed on the physical card as both
+  // values together (e.g. "2/5") — shown lower-value-first to match. tier and flexibleComboRank never coexist
+  // (tier is classic-Endless-only; flexibleComboRank is Legacy-only), so no conflict here.
+  return card.flexibleComboRank ? `${card.flexibleComboRank}/${base}` : card.tier ? `${base}+${card.tier}` : base;
 }
 
 export function cardLabel(card: Card): string {
@@ -41,8 +44,9 @@ export function cardAbilityText(card: Card): string {
     const dualSuffix = card.secondSuit ? ` Also a ${SUIT_TO_CLASS[card.secondSuit].name} (Dual-class Sticker).` : '';
     const flexSuffix = card.flexibleComboRank ? ` Combos as a ${card.flexibleComboRank} too.` : '';
     const wildSuffix = card.wildSuit ? ' Choose a suit for it when you play it.' : '';
+    const corruptedSuffix = card.corrupted ? ' Corrupted: ignores enemy immunity, but banishes the top of the reserve deck when played.' : '';
     const displayName = card.name ?? (card.wildSuit ? 'Any-Suit Ace' : 'Mercenary');
-    return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${flexSuffix}${wildSuffix}`;
+    return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${flexSuffix}${wildSuffix}${corruptedSuffix}`;
   }
   const tierSuffix = card.tier ? ` (upgraded ${card.tier} tier${card.tier > 1 ? 's' : ''} past King, from an Endless Mode win)` : '';
   return `${rankLabel} of ${SUIT_NAME[card.suit]} — value ${cardValue(card)}${tierSuffix}. ${SUIT_ABILITY_TEXT[card.suit]}`;
@@ -94,13 +98,14 @@ export function PlayingCard({
   return (
     <button
       type="button"
-      className={`playing-card${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}`}
+      className={`playing-card${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}${card.corrupted ? ' corrupted' : ''}`}
       onClick={onClick}
       style={Object.keys(style).length > 0 ? style : undefined}
       aria-label={cardLabel(card)}
       title={blocked ? `${abilityText} — no effect on this boss` : abilityText}
     >
       {card.special && !small && <span className="special-badge" aria-hidden="true">✦</span>}
+      {card.corrupted && !small && <span className="corrupted-badge" aria-hidden="true">🔥</span>}
       <span className="rank">{rankLabel}</span>
       <span className="glyph">{glyph}</span>
       {legacy && card.secondSuit && !small && (

@@ -651,8 +651,8 @@ function pushToDiscardPile(state: GameState, cards: Card[]): void {
 }
 
 /**
- * Pays a corrupted card's (or, via corruptedReturnQueue, a corrupted enemy's) cost: normally banishes the top of
- * the reserve deck (see SuitedCard.corrupted / EnemyState.corrupted). With Mission 9's 'EVERGREEN_MOTHER' relic
+ * Pays a corrupted card's cost: normally banishes the top of
+ * the reserve deck (see SuitedCard.corrupted). With Mission 9's 'EVERGREEN_MOTHER' relic
  * in play, the cost changes to another player banishing a card from their own hand instead — in solo play (no
  * "other player" to ask), the same player banishes from their own remaining hand instead (the relic's "solo
  * side"). If there's no eligible hand to banish from (every other hand is empty, or the solo player's own hand
@@ -1050,7 +1050,9 @@ function dealDamageAndCheckDefeat(
     );
     if (state.exactKillToReserveDeck && remaining === 0) {
       // Mission 4: an exact hit seals a card representing the specimen onto the top of the reserve deck instead
-      // of letting it fall into the discard pile — its value mirrors the enemy's attack tier (10/15/20).
+      // of letting it fall into the discard pile — its value mirrors the enemy's attack tier (10/15/20). It's a
+      // corrupted card (see SuitedCard.corrupted): drawing and playing it later ignores whatever enemy is then
+      // immune to, at the cost of banishing the reserve deck's own top card the instant it's played.
       const specimenRank = enemy.baseAttack <= 10 ? 'J' : enemy.baseAttack <= 15 ? 'Q' : 'K';
       const specimenCard: Card = {
         id: `specimen-${enemy.suit}-${Date.now()}-${Math.floor(nextRandom(state) * 1e6)}`,
@@ -1058,6 +1060,7 @@ function dealDamageAndCheckDefeat(
         suit: enemy.suit,
         rank: specimenRank,
         name: enemy.name ? `${enemy.name}'s Remains` : undefined,
+        corrupted: true,
       };
       state.tavernDeck.unshift(specimenCard);
       log(state, `An exact hit seals a specimen card atop the reserve deck.`);
@@ -1155,25 +1158,6 @@ function dealDamageAndCheckDefeat(
       // GameState.skipNextBeastDeckFlip / flipBeastDeckCard).
       state.skipNextBeastDeckFlip = true;
       log(state, 'The exact hit rattles the machine — the beast deck skips its next flip.');
-    }
-    if (state.corruptedReturnQueue && !enemy.corrupted && remaining !== 0) {
-      // Mission 4: this defeat wasn't the last of it — the enemy rejoins the back of the fight queue, wounds
-      // healed and immunity intact, but corrupted (see EnemyState.corrupted / resolveCommittedPlay's
-      // enemyCorrupted handling). Guarded on `!enemy.corrupted` so a corrupted return, once defeated again,
-      // stays gone for good instead of looping forever, and on `remaining !== 0` so an exact hit — which already
-      // seals the specimen to the reserve deck above — banishes it for good instead of also requeuing a corrupted
-      // clone right back onto the castle deck.
-      const requeued = {
-        ...enemy,
-        damageTaken: 0,
-        spadesShield: 0,
-        blockedSpadesShield: 0,
-        immunityBroken: false,
-        tableCards: [],
-        corrupted: true,
-      };
-      state.castleDeck.push(requeued);
-      log(state, `${enemyLabel(enemy)} rejoins the fight queue, corrupted!`);
     }
     if (state.restoredCardMechanic) {
       // Mission 12 ("Decay to Growth"): a much bigger cleanup than any earlier mission's zone-only sweep — banish
@@ -1451,7 +1435,6 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.standingJesters = [];
   state.discardTopBuffsAttack = false;
   state.exactKillToReserveDeck = false;
-  state.corruptedReturnQueue = false;
   state.discardCleanupLowToHigh = false;
   state.exactKillSplashDamage = false;
   state.rollingZoneBonus = false;
@@ -1620,7 +1603,6 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.standingJesters = action.standingJesters ? makeJesters(action.jesterCount) : [];
   state.discardTopBuffsAttack = action.discardTopBuffsAttack ?? false;
   state.exactKillToReserveDeck = action.exactKillToReserveDeck ?? false;
-  state.corruptedReturnQueue = action.corruptedReturnQueue ?? false;
   state.discardCleanupLowToHigh = action.discardCleanupLowToHigh ?? false;
   state.exactKillSplashDamage = action.exactKillSplashDamage ?? false;
   state.rollingZoneBonus = action.rollingZoneBonus ?? false;
@@ -1855,15 +1837,6 @@ function continueResolveCommittedPlay(
     applyRestoredHeal(state, c.name ?? 'A restored card');
   }
 
-  // Corrupted enemy (Mission 4's corruptedReturnQueue): a defeated enemy that's rejoined the fight queue
-  // corrupted follows the same rule as a corrupted card — every play against it ignores its class immunity, at
-  // the cost of one applyCorruptedCost payment per play (not per card, since the corruption belongs to the
-  // enemy here, not to any of the cards played against it).
-  const enemyCorrupted = state.ruleset === 'legacy' && Boolean(state.currentEnemy?.corrupted);
-  if (enemyCorrupted) {
-    applyCorruptedCost(state, player, state.currentEnemy!.name ?? 'The corrupted enemy');
-  }
-
   // Reavers (Mission 5): playing one tears the top card off the reserve deck, adds its raw value straight onto
   // the attack as flat bonus damage, and permanently banishes it. A Reaver never doubles damage on its own —
   // that bonus still gets folded into a Warrior (Clubs) card's own doubling if one's played alongside it, for
@@ -1957,7 +1930,7 @@ function continueResolveCommittedPlay(
     log(state, `${(cards.find((c) => c.kind === 'suited' && c.evergreen) as Extract<Card, { kind: 'suited' }> | undefined)?.name ?? 'Evergreen'} surges — all four powers resolve at once, ignoring immunity.`);
   }
   const effectiveSuits: Suit[] = evergreenActive ? Array.from(new Set([...nonArcaneSuits, 'H', 'D', 'C', 'S'])) : nonArcaneSuits;
-  const ignoreImmunityForPlay = Boolean(claimedJester) || evergreenActive || enemyCorrupted;
+  const ignoreImmunityForPlay = Boolean(claimedJester) || evergreenActive;
 
   // Both corrupted and restored cards ignore immunity, per-suit only (not the whole play) — see
   // SuitedCard.corrupted / SuitedCard.restored.
@@ -2906,7 +2879,6 @@ export function createLobbyState(): GameState {
     standingJesters: [],
     discardTopBuffsAttack: false,
     exactKillToReserveDeck: false,
-    corruptedReturnQueue: false,
     discardCleanupLowToHigh: false,
     exactKillSplashDamage: false,
     rollingZoneBonus: false,

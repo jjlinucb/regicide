@@ -48,8 +48,6 @@ export interface Mission {
   discardTopBuffsAttack?: boolean;
   /** See GameState.exactKillToReserveDeck. */
   exactKillToReserveDeck?: boolean;
-  /** See GameState.corruptedReturnQueue. */
-  corruptedReturnQueue?: boolean;
   /** See GameState.discardCleanupLowToHigh. */
   discardCleanupLowToHigh?: boolean;
   /** See GameState.exactKillSplashDamage. */
@@ -213,7 +211,7 @@ function guardianCompanion(name: string, suit: Suit, rank: Rank): Card {
  * along the campaign's road. `restoredHero` carries SuitedCard.restored — the relic upgrade's beneficiaries,
  * healing the banish pile back into the game whenever they're played (see engine.ts's applyRestoredHeal).
  * `corruptedHero` carries the plain SuitedCard.corrupted the rest of the campaign already uses (Mission 1's full
- * corrupted court, Mission 4's corruptedReturnQueue) — the relic didn't reach these few in time, so they still pay
+ * corrupted court) — the relic didn't reach these few in time, so they still pay
  * the ordinary immunity-ignoring cost, redirected to the bottom of the banish pile instead of the reserve deck
  * this mission (see engine.ts's toReserveDeck). Named separately from zoneCompanion/pilgrim above since neither
  * fits: these aren't mission-zone fixtures or Pilgrim-style rescues, just ordinary reserve-deck cards carrying one
@@ -445,12 +443,6 @@ export const MISSIONS: Mission[] = [
     // kill still sends the played cards to the discard pile as normal — see discardCleanupLowToHigh for the
     // ordering fix that now governs exactly how "as normal" is defined.
     exactKillToReserveDeck: true,
-    // The transcript's other named mechanic: a defeated specimen doesn't stay gone — it rejoins the back of the
-    // fight queue corrupted, following the same rule an ordinary corrupted party card does (ignores immunity,
-    // costs a reserve-deck banish — see EnemyState.corrupted / engine.ts's resolveCommittedPlay). The shipped
-    // version never had this at all; a 12-enemy mission could in principle grow past 12 fights if every specimen
-    // requeues once, which is exactly the transcript's intent.
-    corruptedReturnQueue: true,
     // SOURCED FIX, cited above: an independent fan digital-reimplementation's rules doc's "M4+ Cleanup discard
     // ordering" rule — cards discarded during cleanup (both a covered DEFEND and an enemy kill's played cards)
     // are placed low-to-high, so the LOWEST-value card of that batch ends up on top of the discard pile (see
