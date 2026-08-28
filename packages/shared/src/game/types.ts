@@ -214,7 +214,13 @@ export interface EnemyState {
   damageTaken: number;
   /** Active cumulative spade-shield reduction to this enemy's attack. */
   spadesShield: number;
-  /** Spade values played while this enemy was immune to spades; folded into spadesShield if immunity is later broken. */
+  /**
+   * Spade values played while this enemy was immune to spades; folded into spadesShield if immunity is later
+   * broken. That redemption only happens in classic Regicide (engine.ts's activateJester) — Legacy's own Jester
+   * claim (claimJester) never sets immunityBroken (deliberate, one-shot-only, see legacy.test.ts), so this value
+   * accumulates but can never be redeemed in a Legacy game; see resolveSuitPowers's Spades branch, which keeps
+   * its blocked-play log message ruleset-aware so it doesn't promise a payoff Legacy can't deliver.
+   */
   blockedSpadesShield: number;
   /** True once a Jester has cancelled this enemy's suit immunity. */
   immunityBroken: boolean;

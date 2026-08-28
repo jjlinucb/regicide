@@ -701,6 +701,16 @@ function resolveArcaneBolts(state: GameState, cards: Card[]): number {
  * multiplier to apply (1 normally, 2 for Clubs, 3 for Clubs + a Cleave card). `ignoreImmunity` is Legacy-only:
  * true for an attack combined with a claimed Jester, which ignores immunity for that attack only (unlike classic
  * Regicide's Jester, this does NOT permanently set enemy.immunityBroken).
+ *
+ * DECISION (see the Spades branch below): since Legacy's own Jester claim never sets enemy.immunityBroken — that's
+ * deliberate and tested, not a bug, see legacy.test.ts's "not a permanent immunity break" case — a Spades play
+ * blocked by immunity under ruleset 'legacy' banks into enemy.blockedSpadesShield but can NEVER be redeemed:
+ * the only code that ever folds blockedSpadesShield into real spadesShield is activateJester, which is classic
+ * Regicide's Jester action and is never reachable in a Legacy game (Legacy uses playJester/claimJester instead,
+ * gated separately). Rewiring claimJester to also permanently break immunity was considered and rejected — it
+ * would contradict the sourced, footage-confirmed, already-tested one-shot behavior above, for every Legacy
+ * mission's Jester interactions, not just the dual-immune/Paladin edge case this was found from. Instead, the log
+ * message below is ruleset-aware so it never promises a payoff that can't happen.
  */
 function resolveSuitPowers(
   state: GameState,
@@ -751,7 +761,14 @@ function resolveSuitPowers(
   if (suits.includes('S')) {
     if (blocked('S')) {
       enemy.blockedSpadesShield += totalValue;
-      log(state, `${powerLabel(state, 'S')} blocked — ${blockedClause('S')} (shield banked for later).`);
+      // Only classic Regicide's Jester (activateJester) ever redeems blockedSpadesShield — Legacy's claimJester
+      // never sets immunityBroken (see this function's own doc comment above), so under ruleset 'legacy' this
+      // value can never convert into real shield. Don't promise a payoff Legacy can't deliver.
+      const canRedeemLater = state.ruleset !== 'legacy';
+      log(
+        state,
+        `${powerLabel(state, 'S')} blocked — ${blockedClause('S')}${canRedeemLater ? ' (shield banked for later).' : '.'}`,
+      );
     } else if (hasSpecial(cards, 'BULWARK')) {
       enemy.spadesShield = enemy.baseAttack;
       log(state, `${powerLabel(state, 'S')}: the enemy's attack is reduced to 0 (Bulwark).`);

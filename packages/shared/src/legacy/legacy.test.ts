@@ -340,6 +340,74 @@ describe('legacy: jester claim', () => {
     const res = applyAction(state, { type: 'PLAY_JESTER', playerId: state.players[0].id, cardId: j.id });
     expect(res.ok).toBe(false);
   });
+
+  it('a claimed Jester never redeems a Paladin/dual-immune enemy\'s already-banked Spades value (one-shot only, unlike classic Regicide)', () => {
+    // Dual immune, Paladin-class (Spades) among them — the shape of the dual-immune bosses (Mission 3, Mission
+    // 12's original Hierarch, etc.) that actually surfaced this interaction: a Spades play against a Paladin
+    // (or dual-immune) enemy banks into blockedSpadesShield instead of applying, and — per resolveSuitPowers's
+    // own doc comment and this suite's "not a permanent immunity break" case above — nothing in Legacy ever sets
+    // enemy.immunityBroken, so that banked value can never convert into real spadesShield the way classic
+    // Regicide's Jester (activateJester) would (see engine.test.ts's mirror-image "retroactively activates"
+    // case). Regression coverage for the fix: the blocked-Spades log message must not promise a payoff under
+    // Legacy that structurally can never happen.
+    const enemy: LegacyEnemySpec = { name: 'Ironclad Warden', suit: 'S', secondSuit: 'H', health: 100, attack: 5 };
+    let state = startMission(2, [enemy], 0);
+    const [p1, p2] = state.players;
+
+    // Player 1 plays a Spades card against the Paladin-immune enemy — blocked and banked, not applied.
+    const spadeCard = suited('S', '5');
+    state = rig(state, [spadeCard]);
+    let logLenBefore = state.log.length;
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: p1.id, cardIds: [spadeCard.id] }));
+    state = res.state;
+    expect(state.currentEnemy?.spadesShield).toBe(0);
+    expect(state.currentEnemy?.blockedSpadesShield).toBe(5);
+    let newLogs = state.log.slice(logLenBefore).map((e) => e.message);
+    expect(newLogs.some((m) => m.includes('blocked'))).toBe(true);
+    // THE FIX: Legacy has no mechanism that can ever redeem this, so the log must not claim otherwise.
+    expect(newLogs.some((m) => m.includes('banked for later'))).toBe(false);
+
+    // Cover the counterattack so play passes to player 2.
+    state = rig(state, [suited('D', '9')]);
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: p1.id, cardIds: [state.players[state.currentPlayerIndex].hand[0].id] }));
+    state = res.state;
+    expect(state.currentPlayerIndex).toBe(1);
+
+    // Player 2 plays the Jester into the open, then claims it themselves: a free 8-strength attack (in Diamonds,
+    // so it can't be confused with a fresh Spades play) plus a full hand refill.
+    const j = jester();
+    state = rig(state, [j]);
+    res = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId: p2.id, cardId: j.id }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: p2.id, attackSuit: 'D' }));
+    state = res.state;
+
+    // The claim resolves (8 damage dealt, on top of the 5 already dealt = 13) but does NOT retroactively unlock
+    // the value banked before it, and does not permanently break immunity either.
+    expect(state.currentEnemy?.damageTaken).toBe(13);
+    expect(state.currentEnemy?.immunityBroken).toBe(false);
+    expect(state.currentEnemy?.blockedSpadesShield).toBe(5);
+    expect(state.currentEnemy?.spadesShield).toBe(0);
+
+    // Cover the claimed attack's own counterattack so play passes back to player 1.
+    state = rig(state, [suited('D', '9')]);
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: p2.id, cardIds: [state.players[state.currentPlayerIndex].hand[0].id] }));
+    state = res.state;
+    expect(state.currentPlayerIndex).toBe(0);
+
+    // Proof this is a genuine dead end, not just a bookkeeping quirk: immunity is still fully live afterward — a
+    // brand new Spades play still gets blocked and banked on top, exactly as if the Jester had never been claimed.
+    const spadeCard2 = suited('S', '3');
+    state = rig(state, [spadeCard2]);
+    logLenBefore = state.log.length;
+    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: p1.id, cardIds: [spadeCard2.id] }));
+    state = res.state;
+    expect(state.currentEnemy?.blockedSpadesShield).toBe(8); // 5 (still stuck from before the claim) + 3 (freshly blocked)
+    expect(state.currentEnemy?.spadesShield).toBe(0);
+    expect(state.currentEnemy?.immunityBroken).toBe(false);
+    newLogs = state.log.slice(logLenBefore).map((e) => e.message);
+    expect(newLogs.some((m) => m.includes('banked for later'))).toBe(false);
+  });
 });
 
 describe('legacy: jester claim discard-cleanup low-to-high ordering (bug-fix)', () => {
