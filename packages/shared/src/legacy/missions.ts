@@ -787,8 +787,21 @@ export const MISSIONS: Mission[] = [
       "finally the Hierarch himself — as a last line of defense between the party and the campaign's end.",
     // Queen/King/Hierarch, reusing classic Regicide's own royalty stat table (Q: 30 health / 15 attack, K: 40/20 —
     // see deck.ts's ENEMY_STATS) for the first eight, one of each base class per tier, then a final boss standing
-    // a clear step past Mission 11's 60/30 elites and dual-immune like Mission 9's Myla — a title above King
-    // fitting the campaign's true mastermind, only unmasked at the very end.
+    // a clear step past Mission 11's 60/30 elites — a title above King fitting the campaign's true mastermind,
+    // only unmasked at the very end.
+    //
+    // Sourced correction: the Hierarch used to also carry a permanent CLERIC+PALADIN secondClass immunity — the
+    // identical bug already found and fixed on Mission 3 (see that mission's comment above), stacked on top of
+    // this mission's own escalating immunity grant (flipBanishPileZoneCard below). No source corroborates a
+    // baked-in immunity on the final boss; the real design intent is that immunity comes solely from the zone,
+    // same as Mission 3. Removed the secondClass argument.
+    //
+    // Deliberately NOT also applying Mission 3's second-pass zone-immunity cap here — that cap was only added
+    // after playtest data showed the uncapped zone alone was still driving a ~0% win rate there, and it would
+    // silently neutralize this mission's own documented "grants immunity to every class sitting there" mechanic
+    // (see flipBanishPileZoneCard's own doc comment and test coverage) rather than just remove an unsourced
+    // invention. If a future playtest pass finds Mission 12 needs the same treatment, add it then with real
+    // numbers behind it, the same way Mission 3's second pass was justified.
     enemies: [
       enemy('Queen of Ash', 'WARRIOR', 30, 15),
       enemy('Queen of Silence', 'BARD', 30, 15),
@@ -798,7 +811,7 @@ export const MISSIONS: Mission[] = [
       enemy('King of Silence', 'BARD', 40, 20),
       enemy('King of Ruin', 'CLERIC', 40, 20),
       enemy('King of Thorns', 'PALADIN', 40, 20),
-      enemy('The Hierarch', 'CLERIC', 120, 30, 'PALADIN'),
+      enemy('The Hierarch', 'CLERIC', 120, 30),
     ],
     // The mission's whole mechanic, gating the restored/corrupted-card bundle (see GameState.restoredCardMechanic):
     // a previous relic gets swapped for an upgraded version this mission — restored cards ignore enemy immunity

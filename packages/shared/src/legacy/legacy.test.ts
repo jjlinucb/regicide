@@ -3308,7 +3308,10 @@ describe('legacy: mission 12 setup (Decay to Growth)', () => {
     expect(mission12.title).toBe('Decay to Growth');
     expect(mission12.enemies.length).toBe(9);
     expect(new Set(mission12.enemies.slice(0, 8).map((e) => e.class))).toEqual(new Set(['WARRIOR', 'BARD', 'CLERIC', 'PALADIN']));
-    expect(mission12.enemies[8].secondClass).toBeDefined(); // the Hierarch is dual-immune
+    // Sourced correction: the Hierarch no longer carries a hard-coded secondClass immunity — the same
+    // unsourced-dual-immunity bug already found and fixed on Mission 3 (see missions.ts's Mission 12 comment).
+    // Immunity for the final boss now comes solely from the mission's own escalating zone.
+    expect(mission12.enemies[8].secondClass).toBeUndefined();
     expect(mission12.restoredCardMechanic).toBe(true);
     expect(mission12.reward.recruits).toEqual([]);
     expect(mission12.reward.relics ?? []).toEqual([]);
