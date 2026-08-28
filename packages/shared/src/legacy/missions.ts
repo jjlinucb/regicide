@@ -470,6 +470,10 @@ export const MISSIONS: Mission[] = [
     // 8 no longer recruits him. Suit/class (Spades/Paladin) carries over unchanged from the old Mission 8 entry —
     // still an unsourced judgment call (no source pins one for his actual first recruitment either way), kept as-is
     // to avoid re-litigating an arbitrary choice nothing here contradicts.
+    // "Dr. Darkness" story card (a campaign-book pack-opening event, per John's photo): "some in the Syndicate
+    // grow attached to their newfound power" — corrupts one random existing party member. Reuses the same
+    // corruptAnotherCard reward step Missions 1/5/8 already use (see party.ts's applyCorruptAnotherCard):
+    // SuitedCard.corrupted, so it ignores enemy immunity but banishes the reserve deck's top card as the cost.
     reward: {
       recruits: [
         beastRecruit('Fennow', 'WARRIOR', 'A', 'C'),
@@ -479,6 +483,7 @@ export const MISSIONS: Mission[] = [
         recruit('Goran', 'PALADIN', '8', 'S'),
       ],
       relics: ['SCARLET_WHISTLE'],
+      corruptAnotherCard: true,
     },
   },
   {

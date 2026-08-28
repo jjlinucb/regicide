@@ -166,6 +166,9 @@ describe('legacy: mission setup', () => {
     expect(mission4.reward.relics).toEqual(['SCARLET_WHISTLE']);
     expect(mission4.reward.recruits.length).toBe(5);
     expect(mission4.reward.recruits.filter((r) => r.beast).length).toBe(4);
+    // "Dr. Darkness" story card (John's photo of the physical campaign book): corrupts one random existing
+    // party member — reuses the corruptAnotherCard reward step Missions 1/5/8 already use.
+    expect(mission4.reward.corruptAnotherCard).toBe(true);
     // SOURCED FIX (a full solo playthrough — see tutorial_vids/summaries/mission-4.md): Goran also joins here,
     // not (only) at Mission 8 as an earlier, shorter source had this codebase deferred to.
     const goran = mission4.reward.recruits.find((r) => r.name === 'Goran');
