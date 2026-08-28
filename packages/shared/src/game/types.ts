@@ -805,20 +805,25 @@ export type GameAction =
   | { type: 'PLAY_JESTER'; playerId: string; cardId: string }
   /**
    * Legacy-only: claim an open Jester window. Validated against the window being open, not turn ownership — any
-   * player may claim. Resolves immediately and atomically as its own attack: an 8-strength play in `attackSuit`,
-   * ignoring the enemy's immunity, followed by the claimant discarding their whole hand and drawing a fresh one —
-   * the base game's own printed Jester power, which Legacy never overrides (deliberate house rule; see engine.ts's
-   * claimJester — unsourced beyond the base game's own printed card text, since Mission 2's compendium page isn't
-   * published yet, but confirmed against footage of actual play).
+   * player may claim. Resolves immediately and atomically as its own attack: a flat 8-strength hit, ignoring the
+   * enemy's immunity and triggering no class power of its own (see engine.ts's resolveJesterAttack — the
+   * synthetic attack card carries an inert placeholder suit, same shape as a Mercenary "19"), followed by the
+   * claimant discarding their whole hand and drawing a fresh one — the base game's own printed Jester power,
+   * which Legacy never overrides (deliberate house rule; see engine.ts's claimJester — unsourced beyond the base
+   * game's own printed card text, since Mission 2's compendium page isn't published yet, but confirmed against
+   * footage of actual play). This used to let the claimant also pick a suit to trigger that class's own power
+   * (heal/draw/double-damage/reduce-enemy-attack) — dropped per John's own call: the base game's real Jester
+   * carries no suit and no class power at all, and the choice was pure house-rule scaffolding this engine no
+   * longer needs now that immunity-ignoring is driven by `claimedJester`, not by any particular suit.
    */
-  | { type: 'CLAIM_JESTER'; playerId: string; attackSuit: Suit }
+  | { type: 'CLAIM_JESTER'; playerId: string }
   /**
-   * Legacy-only (Mission 2, unsourced house rule — see GameState.standingJesters): use one of the mission's 2
-   * standing Jesters directly, as the current player's own turn action. Same resolution as CLAIM_JESTER (an
-   * 8-strength attack in `attackSuit` ignoring immunity, then discard-hand-and-redraw) but requires no PLAY_JESTER/
-   * CLAIM_JESTER handshake first, since a standing Jester was never drawn into anyone's hand to begin with.
+   * Legacy-only (Missions 2/3, unsourced house rule — see GameState.standingJesters): use one of the mission's
+   * standing Jesters directly, as the current player's own turn action. Same flat, suit-less, immunity-ignoring
+   * resolution as CLAIM_JESTER (see its own doc comment) but requires no PLAY_JESTER/CLAIM_JESTER handshake
+   * first, since a standing Jester was never drawn into anyone's hand to begin with.
    */
-  | { type: 'USE_STANDING_JESTER'; playerId: string; attackSuit: Suit }
+  | { type: 'USE_STANDING_JESTER'; playerId: string }
   /**
    * Legacy-only, gated by the 'SCARLET_WHISTLE' relic: silently add a card from hand to the open combo-assist
    * window. Any player except the attacker. `chosenSuit` resolves `cardId` if it's a Mercenary any-suit Ace (see

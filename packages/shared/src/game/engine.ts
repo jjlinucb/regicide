@@ -2288,10 +2288,6 @@ function claimJester(state: GameState, action: Extract<GameAction, { type: 'CLAI
   }
   const player = findPlayer(state, action.playerId);
   if (!player) return fail('Unknown player.');
-  if (!BASE_SUITS.includes(action.attackSuit)) {
-    return fail('Choose a class to attack with — Hearts, Diamonds, Clubs, or Spades.');
-  }
-
 
   const jesterCard = state.jesterClaim.card;
   state.jesterClaim = null;
@@ -2299,11 +2295,11 @@ function claimJester(state: GameState, action: Extract<GameAction, { type: 'CLAI
   state.turnPhase = 'AWAIT_PLAY';
   state.kinfolkBankedThisTurn = false;
   log(state, `${player.name} claims the Jester — a free 8-strength attack, ignoring immunity.`);
-  return resolveJesterAttack(state, player, jesterCard, action.attackSuit, 'discard');
+  return resolveJesterAttack(state, player, jesterCard, 'discard');
 }
 
 /**
- * Legacy-only (Mission 2, unsourced house rule — see GameState.standingJesters): uses one of the mission's 2
+ * Legacy-only (Missions 2/3, unsourced house rule — see GameState.standingJesters): uses one of the mission's
  * standing Jesters directly as the current player's own turn action — no PLAY_JESTER/CLAIM_JESTER handshake
  * first, since a standing Jester was never drawn into anyone's hand to begin with. Unlike CLAIM_JESTER, the
  * refill afterward only tops the hand up to max rather than discarding it first (see resolveJesterAttack).
@@ -2313,16 +2309,13 @@ function useStandingJester(state: GameState, action: Extract<GameAction, { type:
   const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_PLAY');
   if (err) return fail(err);
   if (state.standingJesters.length === 0) return fail('There are no standing Jesters left to use.');
-  if (!BASE_SUITS.includes(action.attackSuit)) {
-    return fail('Choose a class to attack with — Hearts, Diamonds, Clubs, or Spades.');
-  }
 
   const player = currentPlayer(state);
   const jesterCard = state.standingJesters[0];
   state.standingJesters = state.standingJesters.slice(1);
   state.lastActionWasYield[state.currentPlayerIndex] = false;
   log(state, `${player.name} calls on a standing Jester — a free 8-strength attack, ignoring immunity.`);
-  return resolveJesterAttack(state, player, jesterCard, action.attackSuit, 'topUp');
+  return resolveJesterAttack(state, player, jesterCard, 'topUp');
 }
 
 /**
@@ -2331,9 +2324,17 @@ function useStandingJester(state: GameState, action: Extract<GameAction, { type:
  * 8-strength attack it grants is computed via a throwaway synthetic card, never entered into tableCards/
  * discardPile itself, so it can't leak an extra card into the deck economy.
  *
+ * The synthetic card carries an inert placeholder suit ('D', arbitrarily — see SuitedCard.noSuitPower, same
+ * shape as a Mercenary "19") and is flagged noSuitPower so it never triggers any class power of its own (no
+ * heal/draw/double-damage/reduce-enemy-attack) — a flat, suit-less 8-strength hit, per the base game's actual
+ * printed Jester (which has no suit at all). This used to let the claimant choose a real suit and get that
+ * class's power too; dropped per John's own call, since the choice never had a source behind it and the base
+ * game's Jester doesn't work that way. Immunity-ignoring is driven entirely by `claimedJester` being non-null in
+ * resolveCommittedPlay/resolveSuitPowers, not by the suit, so dropping the suit doesn't touch that at all.
+ *
  * `refillMode` picks which hand-refill power applies afterward — 'discard' is the base game's own printed Jester
- * power (discard the whole hand, redraw to max — CLAIM_JESTER); 'topUp' is Mission 2's own unsourced house rule
- * for its standing Jesters (just draw up to max, without discarding what's already held).
+ * power (discard the whole hand, redraw to max — CLAIM_JESTER); 'topUp' is Mission 2/3's own unsourced house rule
+ * for their standing Jesters (just draw up to max, without discarding what's already held).
  *
  * Bug-fix (see GameState.pendingJesterRefill): if the synthetic attack didn't kill the enemy, the claimant now
  * owes a defend against its dealt damage (turnPhase is AWAIT_DEFEND). Refilling right here, before that defend
@@ -2346,15 +2347,9 @@ function useStandingJester(state: GameState, action: Extract<GameAction, { type:
  * resolveCommittedPlay() call — which does reassign it internally, TS just has no way to see that — and flags
  * the comparison below as comparing non-overlapping literals. A function-call boundary resets that narrowing.)
  */
-function resolveJesterAttack(
-  state: GameState,
-  player: PlayerState,
-  jesterCard: Card,
-  attackSuit: Suit,
-  refillMode: 'discard' | 'topUp',
-): EngineResult {
+function resolveJesterAttack(state: GameState, player: PlayerState, jesterCard: Card, refillMode: 'discard' | 'topUp'): EngineResult {
   state.currentEnemy!.tableCards.push(jesterCard);
-  const syntheticAttack: SuitedCard = { id: `${jesterCard.id}-attack`, kind: 'suited', suit: attackSuit, rank: '8' };
+  const syntheticAttack: SuitedCard = { id: `${jesterCard.id}-attack`, kind: 'suited', suit: 'D', rank: '8', noSuitPower: true };
   const result = resolveCommittedPlay(state, player, [syntheticAttack], jesterCard);
   if (!result.ok || state.phase !== 'IN_PROGRESS') return result;
 

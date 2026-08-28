@@ -138,6 +138,12 @@ describe('legacy: mission setup', () => {
     );
   });
 
+  it('mission 3 also uses standing Jesters, and sidelines High Arcana (Mission 12\'s final boss) out of the deck', () => {
+    const mission3 = getMission(3)!;
+    expect(mission3.standingJesters).toBe(true);
+    expect(mission3.sidelineIdentity).toEqual({ suit: 'D', rank: '25' });
+  });
+
   it('mission 3 is a 6-enemy exact-kill-only gauntlet escalating in three stat tiers', () => {
     const mission3 = getMission(3)!;
     expect(mission3.enemies).toHaveLength(6);
@@ -377,23 +383,25 @@ describe('legacy: jester claim', () => {
     expect(state.turnPhase).toBe('AWAIT_JESTER_CLAIM');
     expect(state.jesterClaim?.claimedBy).toBeNull();
 
-    const toHeal = [suited('C', '2'), suited('C', '3'), suited('C', '4')];
-    state.discardPile = toHeal; // something to heal back
+    const untouchedDiscard = [suited('C', '2'), suited('C', '3'), suited('C', '4')];
+    state.discardPile = untouchedDiscard;
     // p2's own hand, rigged to a single card worth exactly the enemy's retaliation (5). The regression this
     // guards against is refillHandFromDeck firing BEFORE the defend below, which would silently swap this exact
     // card out from under p2 and could turn a coverable hit into a lethal one.
     const oldHand = [suited('S', '5')];
     state.players[1].hand = oldHand;
 
-    // Player 2 (not the jester's player) claims it, attacking in Hearts — normally blocked by this enemy's own-class immunity.
-    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: p2.id, attackSuit: 'H' }));
+    // Player 2 (not the jester's player) claims it — a flat, suit-less attack that ignores this Hearts-class
+    // enemy's own-class immunity, and does NOT trigger any class power (see resolveJesterAttack).
+    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: p2.id }));
     state = res.state;
 
     expect(state.jesterClaim).toBeNull(); // consumed
     expect(state.currentPlayerIndex).toBe(1);
-    expect(state.currentEnemy?.damageTaken).toBe(8); // flat 8-strength attack, Hearts doesn't double
-    // Hearts healed the 3-card discard pile back under the deck despite matching the enemy's class.
-    expect(toHeal.every((c) => !state.discardPile.some((d) => d.id === c.id))).toBe(true);
+    expect(state.currentEnemy?.damageTaken).toBe(8); // flat 8-strength attack, no class power doubling it
+    // No class power triggered: the discard pile is untouched (no Hearts heal), and the pre-claim hand below is
+    // still exactly 1 card (no Diamonds draw either).
+    expect(state.discardPile).toEqual(untouchedDiscard);
     expect(state.currentEnemy?.immunityBroken).toBe(false); // one-shot only — NOT a permanent break like classic Regicide
 
     // Bug-fix regression: the enemy survived and retaliates for its own attack (5) — the refill must NOT have
@@ -401,7 +409,7 @@ describe('legacy: jester claim', () => {
     expect(state.turnPhase).toBe('AWAIT_DEFEND');
     expect(state.pendingDamage).toBe(5);
     expect(state.players[1].hand).toEqual(oldHand);
-    expect(state.discardPile.length).toBe(0); // old hand not discarded yet either
+    expect(state.discardPile).toEqual(untouchedDiscard); // old hand not discarded yet either
 
     // Defending with the OLD hand's exact card would fail with "not in your hand" if the refill had already
     // silently replaced it — which is exactly the bug this test exists to catch.
@@ -411,20 +419,6 @@ describe('legacy: jester claim', () => {
     // The base game's own printed Jester power refreshes the claimant's hand — but only now, after the defend.
     expect(state.players[1].hand.length).toBe(state.maxHandSize);
     expect(state.discardPile.some((c) => c.id === oldHand[0].id)).toBe(true); // the defended card lands in the discard pile
-  });
-
-  it('rejects a claim with no attackSuit chosen, or an invalid one', () => {
-    const enemy: LegacyEnemySpec = { name: 'Warden', suit: 'H', health: 100, attack: 1 };
-    let state = startMission(1, [enemy], 0);
-    const j = jester();
-    state = rig(state, [j]);
-    let res = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId: state.players[0].id, cardId: j.id }));
-    state = res.state;
-
-    const missing = applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[0].id, attackSuit: undefined as unknown as SuitedCard['suit'] });
-    expect(missing.ok).toBe(false);
-    const invalid = applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[0].id, attackSuit: 'X' as SuitedCard['suit'] });
-    expect(invalid.ok).toBe(false);
   });
 
   it('rejects PLAY_JESTER/CLAIM_JESTER outside Regicide Legacy', () => {
@@ -469,13 +463,14 @@ describe('legacy: jester claim', () => {
     state = res.state;
     expect(state.currentPlayerIndex).toBe(1);
 
-    // Player 2 plays the Jester into the open, then claims it themselves: a free 8-strength attack (in Diamonds,
-    // so it can't be confused with a fresh Spades play) plus a full hand refill.
+    // Player 2 plays the Jester into the open, then claims it themselves: a flat, suit-less 8-strength attack
+    // (so it can't be confused with a fresh Spades play, and doesn't trigger any class power) plus a full hand
+    // refill.
     const j = jester();
     state = rig(state, [j]);
     res = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId: p2.id, cardId: j.id }));
     state = res.state;
-    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: p2.id, attackSuit: 'D' }));
+    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: p2.id }));
     state = res.state;
 
     // The claim resolves (8 damage dealt, on top of the 5 already dealt = 13) but does NOT retroactively unlock
@@ -535,7 +530,7 @@ describe('legacy: jester claim discard-cleanup low-to-high ordering (bug-fix)', 
 
     let res = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId, cardId: j.id }));
     state = res.state;
-    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId, attackSuit: 'S' }));
+    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId }));
     state = res.state;
 
     expect(state.currentEnemy?.name).not.toBe('Weakling'); // defeated — a new enemy (or WON) follows
@@ -1076,7 +1071,7 @@ describe('legacy: mission 2 standing Jesters (unsourced house rule)', () => {
   it('lets the current player use a standing Jester directly, ignoring immunity, with no draw needed first', () => {
     const state = startStandingJesterMission(2);
     const player = state.players[state.currentPlayerIndex];
-    const res = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id, attackSuit: 'H' }));
+    const res = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id }));
     expect(res.state.standingJesters.length).toBe(1);
     expect(res.state.currentEnemy?.damageTaken).toBe(8); // the dual immunity was ignored
   });
@@ -1084,7 +1079,7 @@ describe('legacy: mission 2 standing Jesters (unsourced house rule)', () => {
   it('rejects a standing Jester use from anyone but the current player', () => {
     const state = startStandingJesterMission(2);
     const otherPlayer = state.players[(state.currentPlayerIndex + 1) % state.players.length];
-    const res = applyAction(state, { type: 'USE_STANDING_JESTER', playerId: otherPlayer.id, attackSuit: 'H' });
+    const res = applyAction(state, { type: 'USE_STANDING_JESTER', playerId: otherPlayer.id });
     expect(res.ok).toBe(false);
   });
 
@@ -1092,7 +1087,7 @@ describe('legacy: mission 2 standing Jesters (unsourced house rule)', () => {
     let state = startStandingJesterMission(1);
     state = rig(state, [suited('C', '2')]); // a single held card, well under the hand limit
     const player = state.players[state.currentPlayerIndex];
-    const res = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id, attackSuit: 'H' }));
+    const res = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id }));
     const hand = res.state.players[0].hand;
     expect(hand.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '2')).toBe(true); // original card kept
     expect(hand.length).toBe(res.state.maxHandSize);
@@ -1101,10 +1096,10 @@ describe('legacy: mission 2 standing Jesters (unsourced house rule)', () => {
   it('rejects using a standing Jester once none remain', () => {
     let state = startStandingJesterMission(1);
     const player = state.players[state.currentPlayerIndex];
-    state = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id, attackSuit: 'H' })).state;
-    state = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id, attackSuit: 'H' })).state;
+    state = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id })).state;
+    state = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id })).state;
     expect(state.standingJesters.length).toBe(0);
-    const res = applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id, attackSuit: 'H' });
+    const res = applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id });
     expect(res.ok).toBe(false);
   });
 });
@@ -2500,7 +2495,7 @@ describe('legacy: mission 7 mechanics (Pilgrim hand-trap)', () => {
 
     let res = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId, cardId: j.id }));
     state = res.state;
-    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId, attackSuit: 'S' }));
+    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId }));
     state = res.state;
 
     expect(state.currentEnemy?.damageTaken).toBe(8); // flat 8-strength attack, survives (100 health)
