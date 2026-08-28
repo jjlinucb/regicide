@@ -138,6 +138,12 @@ export function GamePage({
   // only the current player (who landed the kill) resolves it.
   const isZoneVengeanceWindow = state.turnPhase === 'AWAIT_ZONE_VENGEANCE_CHOICE' && Boolean(state.zoneVengeanceChoice);
   const isMyZoneVengeanceWindow = isZoneVengeanceWindow && isMyTurn;
+
+  // Mission 3+, sourced from a full solo playthrough (see tutorial_vids/summaries/mission-3.md): the Mage reveal
+  // window, opened whenever a Mage card joins an attack — only the player whose Mage it is resolves it.
+  const isMageRevealWindow = state.turnPhase === 'AWAIT_MAGE_REVEAL' && Boolean(state.mageReveal);
+  const mageRevealPlayerId = state.mageReveal?.playerId;
+  const isMyMageRevealWindow = isMageRevealWindow && mageRevealPlayerId === myPlayerId;
   const canPlaceInZone =
     isLegacy &&
     state.ascendingZone &&
@@ -229,7 +235,11 @@ export function GamePage({
                 ? isMyZoneVengeanceWindow
                   ? 'The kill draws a card permanently into the mission zone — choose one from the table below.'
                   : `${state.players[state.currentPlayerIndex]?.name} is choosing a card to sacrifice into the mission zone...`
-                : isChantWindow
+                : isMageRevealWindow
+                  ? isMyMageRevealWindow
+                    ? 'The Mage reveals cards from the reserve deck — choose one to tuck under the attack.'
+                    : `${state.players.find((p) => p.id === mageRevealPlayerId)?.name} is choosing a card from the Mage's reveal...`
+                  : isChantWindow
                   ? isMyChantTrim
                     ? `The chant drew everyone up — discard exactly ${myChantOverflow} card(s) to get back to your hand limit.`
                     : `${state.players.find((p) => p.id === chantTrimmerId)?.name} is trimming their hand from the chant...`
@@ -483,6 +493,16 @@ export function GamePage({
         </div>
       )}
 
+      {isMyMageRevealWindow && (
+        <div className="jester-picker">
+          <span>✦ The Mage's reveal turns up these cards — choose one to tuck under the attack.</span>
+          <EnemyCardPicker
+            cards={state.mageReveal?.candidates ?? []}
+            onChoose={(cardId) => sendAction({ type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: myPlayerId, cardId })}
+          />
+        </div>
+      )}
+
       {isMyZonePurgeWindow && (
         <ZonePurgePicker
           discardPile={state.discardPile}
@@ -542,6 +562,7 @@ export function GamePage({
         !isComboAssistWindow &&
         !isAzureEmblemWindow &&
         !isZoneVengeanceWindow &&
+        !isMageRevealWindow &&
         !isChantWindow &&
         !isZonePurgeWindow &&
         state.turnPhase !== 'AWAIT_JESTER_CLAIM' &&

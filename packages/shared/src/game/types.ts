@@ -42,9 +42,9 @@ export interface SuitedCard {
   /** Legacy-only: a signature class ability this card carries permanently, on top of its suit power. */
   special?: SpecialAbilityId;
   /**
-   * Legacy-only: marks a Mage card. A Mage still carries a suit (for immunity bookkeeping) but its class
-   * powers don't resolve as part of the combined suit powers — instead it fires its own arcane bolt, at its
-   * own card value, before the play's other class powers resolve (see engine.ts's resolveArcaneBolts).
+   * Legacy-only: marks a Mage card. A Mage still carries a suit (for immunity bookkeeping) but its class powers
+   * don't resolve as part of the combined suit powers — instead it triggers a reveal off the top of the reserve
+   * deck, before the play's other class powers resolve (see engine.ts's revealForMage / GameState.mageReveal).
    */
   arcane?: boolean;
   /**
@@ -114,8 +114,8 @@ export interface SuitedCard {
   /**
    * Legacy-only: marks a card that's picked up a bonus Mage sticker (Mission 9's "second Mage sticker" reward)
    * on top of an existing class. Unlike a pure Mage recruit's `arcane` flag (which replaces suit-power
-   * resolution entirely), this card keeps resolving its normal suit power AND fires an arcane bolt at its own
-   * value (see engine.ts's resolveArcaneBolts).
+   * resolution entirely), this card keeps resolving its normal suit power AND triggers its own Mage reveal (see
+   * engine.ts's revealForMage / GameState.mageReveal).
    */
   secondClassArcane?: boolean;
   /**
@@ -268,7 +268,8 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * CHOOSE_ZONE_VENGEANCE_SACRIFICE. AWAIT_BARD_SURRENDER is Mission 10 only (see
  * GameState.corruptedPartyEnemies) — opened by an enemy Bard's end-of-turn power when the ending player's hand is
  * non-empty, resolved via SURRENDER_CARD_TO_ZONE; engine.ts's advanceToNextPlayer pauses mid-advance right here
- * until it resolves, same shape as AWAIT_END_OF_TURN pausing there for Mission 9.
+ * until it resolves, same shape as AWAIT_END_OF_TURN pausing there for Mission 9. AWAIT_MAGE_REVEAL is Mission 3+
+ * only (see GameState.mageReveal) — opened by a Mage card in a play, resolved via CHOOSE_MAGE_REVEAL_CARD.
  */
 export type TurnPhase =
   | 'AWAIT_PLAY'
@@ -281,7 +282,8 @@ export type TurnPhase =
   | 'AWAIT_CHANT_TRIM'
   | 'AWAIT_END_OF_TURN'
   | 'AWAIT_RESCUE_CHOICE'
-  | 'AWAIT_BARD_SURRENDER';
+  | 'AWAIT_BARD_SURRENDER'
+  | 'AWAIT_MAGE_REVEAL';
 
 /**
  * Legacy-only (Mission 8): what engine.ts's resolveChant does once the last pending player finishes trimming
@@ -378,6 +380,30 @@ export interface GameState {
    */
   azureEmblemWindow: { pendingPlayerIds: string[]; eligibleCardIds: string[]; blockNextAttack: boolean } | null;
   /**
+   * Legacy-only (Mission 3+), sourced from a full solo playthrough (see tutorial_vids/summaries/mission-3.md —
+   * "Meet Me at the Table"): the open Mage reveal window. Playing a Mage card (or a card carrying a bonus Mage
+   * sticker) secretly reveals cards off the top of the reserve deck — one per point of the play's own attack
+   * strength — sets aside any Jesters/corrupted found there to the discard pile, and lets `playerId` choose one of
+   * the rest via CHOOSE_MAGE_REVEAL_CARD to tuck under the attack (adding its value to the play's own total, which
+   * every other class power then resolves against too — not a separate flat damage bonus like the old, simpler
+   * arcane-bolt mechanic this replaced). If the chosen card is itself a Mage, the reveal chains again at that
+   * card's own strength; `queue` holds this same play's other Mage card(s), each triggering their own independent
+   * reveal (at the ORIGINAL play's strength) once the current chain resolves. Non-null only while a choice is
+   * pending — an empty reveal (nothing left after discarding Jesters/corrupted) resolves immediately without
+   * ever opening this window. `cards`/`claimedJester`/`forcedPlay`/`totalValue` carry everything
+   * continueResolveCommittedPlay needs to resume once every queued Mage card's reveal (and any chains) is done.
+   */
+  mageReveal: {
+    playerId: string;
+    candidates: SuitedCard[];
+    queue: Card[];
+    cards: Card[];
+    claimedJester: Card | null;
+    forcedPlay: boolean;
+    totalValue: number;
+    arcaneBonus: number;
+  } | null;
+  /**
    * Legacy-only: when true (Mission 3), the top of the reserve deck flips face-up into `missionZone` at the end
    * of every turn, and the current enemy becomes immune to that card's class(es) too (see zoneImmuneSuits).
    */
@@ -469,10 +495,10 @@ export interface GameState {
   /**
    * Legacy-only (Mission 6): the open AWAIT_ZONE_VENGEANCE_CHOICE window opened by a kill under
    * zoneVengeanceOnKill above — non-null until CHOOSE_ZONE_VENGEANCE_SACRIFICE resolves it. `remaining` and
-   * `attackIncludesGuardian` are carried through from the kill so finishEnemyDefeatTail can resume the rest of
-   * the defeat resolution exactly as if zoneVengeanceOnKill's sacrifice had resolved inline.
+   * `attackIncludesGuardian`/`attackIncludesMage` are carried through from the kill so finishEnemyDefeatTail can
+   * resume the rest of the defeat resolution exactly as if zoneVengeanceOnKill's sacrifice had resolved inline.
    */
-  zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean } | null;
+  zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean; attackIncludesMage: boolean } | null;
   /**
    * Legacy-only (Mission 7): when true, gates the whole Pilgrim hand-trap rule — Pilgrim cards (see
    * SuitedCard.pilgrim), shuffled into the reserve deck via Mission.extraReserveCards like any other card, can
@@ -799,6 +825,12 @@ export type GameAction =
    * permanently into the mission zone.
    */
   | { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE'; playerId: string; cardId: string }
+  /**
+   * Legacy-only (Mission 3+), sourced fix, from AWAIT_MAGE_REVEAL: the player whose Mage card opened the reveal
+   * (see GameState.mageReveal) chooses `cardId`, from the cards just revealed off the reserve deck, to tuck under
+   * the attack. Every candidate not chosen falls to the discard pile.
+   */
+  | { type: 'CHOOSE_MAGE_REVEAL_CARD'; playerId: string; cardId: string }
   | { type: 'DEFEND'; playerId: string; cardIds: string[] }
   | { type: 'USE_SOLO_JESTER'; playerId: string }
   /**
@@ -874,6 +906,17 @@ export interface ClientGameState {
   kinfolkBankedThisTurn: boolean;
   /** See GameState.azureEmblemWindow. Public information — it's on the table. */
   azureEmblemWindow: { pendingPlayerIds: string[]; eligibleCardIds: string[]; blockNextAttack: boolean } | null;
+  /** See GameState.mageReveal. Public information, same as every other pending-choice window. */
+  mageReveal: {
+    playerId: string;
+    candidates: SuitedCard[];
+    queue: Card[];
+    cards: Card[];
+    claimedJester: Card | null;
+    forcedPlay: boolean;
+    totalValue: number;
+    arcaneBonus: number;
+  } | null;
   /** See GameState.discardTopBuffsAttack. */
   discardTopBuffsAttack: boolean;
   /** See GameState.missionZone. Public information — it's on the table. */
@@ -885,7 +928,7 @@ export interface ClientGameState {
   /** See GameState.zoneVengeanceOnKill. */
   zoneVengeanceOnKill: boolean;
   /** See GameState.zoneVengeanceChoice. Public information — the eligible cards are the enemy's own (public) table. */
-  zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean } | null;
+  zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean; attackIncludesMage: boolean } | null;
   /** See GameState.pilgrimMechanic. */
   pilgrimMechanic: boolean;
   /** Vestigial (see GameState.pilgrimMechanic) — always empty now; a Pilgrim card sits in the owning player's own (redacted) hand instead of any shared zone. */

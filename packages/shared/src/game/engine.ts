@@ -698,24 +698,104 @@ function applyRestoredHeal(state: GameState, label: string): void {
   }
 }
 
+/** Legacy-only, Mission 3+: a "Mage" for reveal purposes — a pure Mage card, or a card carrying a bonus Mage sticker (Mission 9's secondClassArcane). */
+function isMageCard(c: Card): c is Extract<Card, { kind: 'suited' }> {
+  return c.kind === 'suited' && Boolean(c.arcane || c.secondClassArcane);
+}
+
+/** How many cards a Mage's reveal pulls for a trigger of the given own-value — doubled by the (currently dormant, no recruit sets it) ARCANE_SURGE special ability. */
+function mageRevealCount(trigger: Card, ownValue: number): number {
+  return hasSpecial([trigger], 'ARCANE_SURGE') ? ownValue * 2 : ownValue;
+}
+
 /**
- * Legacy-only, Mission 3+: resolves each played Mage card's arcane bolt — at that card's own value, one after
- * another, and always before the rest of the play's class powers resolve (see resolveSuitPowers). Also fires for
- * a card carrying a bonus Mage sticker (Mission 9's secondClassArcane) — unlike a pure Mage card, that card's own
- * suit power ALSO resolves normally (see resolveCommittedPlay's nonArcaneCards filter). Returns the total bonus
- * damage to add on top of the play's normal totalValue * multiplier.
+ * Legacy-only, Mission 3+, sourced from a full solo playthrough (see tutorial_vids/summaries/mission-3.md —
+ * "Meet Me at the Table"): pulls `count` cards off the top of the reserve deck for a Mage's reveal, discards any
+ * Jesters/corrupted cards found among them, and either opens AWAIT_MAGE_REVEAL for `playerId` to choose one of
+ * the rest (tucking it under the attack) or — if nothing's left to choose from — moves straight on to
+ * `advanceMageQueue`. `queue` holds this same play's OTHER Mage cards, each still waiting for its own independent
+ * reveal (at the original play's own strength) once this one, and any chain it kicks off, is fully resolved.
  */
-function resolveArcaneBolts(state: GameState, cards: Card[]): number {
-  let bonus = 0;
-  for (const c of cards) {
-    if (c.kind !== 'suited' || !(c.arcane || c.secondClassArcane)) continue;
-    const base = cardValue(c);
-    const surged = c.special === 'ARCANE_SURGE';
-    const bolt = surged ? base * 2 : base;
-    bonus += bolt;
-    log(state, `${c.name ?? 'A Mage'}'s arcane bolt strikes for ${bolt}${surged ? ' (Arcane Surge)' : ''}.`);
+function revealForMage(
+  state: GameState,
+  playerId: string,
+  cards: Card[],
+  claimedJester: Card | null,
+  forcedPlay: boolean,
+  totalValue: number,
+  queue: Card[],
+  arcaneBonus: number,
+  count: number,
+): EngineResult {
+  const revealed: Card[] = [];
+  for (let i = 0; i < count; i++) {
+    const card = state.tavernDeck.shift();
+    if (card) revealed.push(card);
   }
-  return bonus;
+  const setAside = revealed.filter((c) => c.kind === 'jester' || (c.kind === 'suited' && c.corrupted));
+  const candidates = revealed.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.corrupted);
+  if (setAside.length > 0) {
+    state.discardPile.push(...setAside);
+    log(state, `The Mage's reveal turns up ${setAside.length} Jester(s)/corrupted card(s) — discarded.`);
+  }
+  if (candidates.length === 0) {
+    log(state, revealed.length > 0 ? "Nothing's left in the reveal to add to the attack." : 'The reserve deck is empty — the reveal finds nothing.');
+    return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus);
+  }
+  state.mageReveal = { playerId, candidates, queue, cards, claimedJester, forcedPlay, totalValue, arcaneBonus };
+  state.turnPhase = 'AWAIT_MAGE_REVEAL';
+  log(state, `The Mage reveals ${revealed.length} card(s) from the reserve deck — choose one to add to the attack.`);
+  return ok(state);
+}
+
+/** Pops the next queued Mage card (if any) into its own fresh revealForMage at the play's original strength; once the queue's empty, resumes continueResolveCommittedPlay with the fully accumulated arcaneBonus. */
+function advanceMageQueue(
+  state: GameState,
+  playerId: string,
+  cards: Card[],
+  claimedJester: Card | null,
+  forcedPlay: boolean,
+  totalValue: number,
+  queue: Card[],
+  arcaneBonus: number,
+): EngineResult {
+  if (queue.length > 0) {
+    const [trigger] = queue;
+    const rest = queue.slice(1);
+    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, rest, arcaneBonus, mageRevealCount(trigger, totalValue));
+  }
+  const player = state.players.find((p) => p.id === playerId)!;
+  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus);
+}
+
+/** Resolves the AWAIT_MAGE_REVEAL window opened by revealForMage (see GameState.mageReveal). */
+function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, { type: 'CHOOSE_MAGE_REVEAL_CARD' }>): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_MAGE_REVEAL');
+  if (err) return fail(err);
+  const window = state.mageReveal;
+  if (!window) return fail('There is no open Mage reveal to resolve.');
+
+  const idx = window.candidates.findIndex((c) => c.id === action.cardId);
+  if (idx === -1) return fail('That card is not part of the current reveal.');
+  const candidates = [...window.candidates];
+  const [chosen] = candidates.splice(idx, 1);
+  if (candidates.length > 0) state.discardPile.push(...candidates);
+
+  const enemy = state.currentEnemy!;
+  enemy.tableCards.push(chosen);
+  const chosenValue = cardValue(chosen);
+  const arcaneBonus = window.arcaneBonus + chosenValue;
+  log(state, `${chosen.name ?? `the ${chosen.rank}`} is tucked under the attack, adding +${chosenValue}.`);
+
+  const { playerId, cards, claimedJester, forcedPlay, totalValue, queue } = window;
+  state.mageReveal = null;
+  state.turnPhase = 'AWAIT_PLAY';
+
+  if (isMageCard(chosen)) {
+    log(state, `${chosen.name ?? 'The chosen card'} is itself a Mage — the reveal chains at its own strength.`);
+    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, mageRevealCount(chosen, chosenValue));
+  }
+  return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus);
 }
 
 /**
@@ -898,6 +978,9 @@ function finishDeferredAttackTurn(state: GameState, blockNextAttack: boolean): E
  * GameState.zoneVengeanceOnKill / finishEnemyDefeatTail). Absent for the recursive splash-damage self-call
  * (Mission 5's exactKillSplashDamage — never combined with Mission 6's zoneVengeanceOnKill in practice, but
  * threaded through anyway so a chained kill from the same play stays covered by the same shield).
+ * `attackIncludesMage` is Legacy-only (Mission 3+, sourced — see tutorial_vids/summaries/mission-3.md): true when
+ * the play that landed this kill included a Mage card — sends the kill's table cards to the banish pile instead
+ * of the discard pile (see finishEnemyDefeatTail), same threading pattern as attackIncludesGuardian.
  * `forcedPlay` — true when the play that landed this hit only happened because YIELD was rejected by
  * allOtherPlayersYieldedLastTurn (every other player at the table had already yielded, leaving the current player
  * no legal way to pass — see playCards/resolveComboAssist, which compute this fresh from state right before
@@ -907,7 +990,13 @@ function finishDeferredAttackTurn(state: GameState, blockNextAttack: boolean): E
  * closes). Absent (false) for the recursive splash-damage self-call and for CLAIM_JESTER's call, neither of
  * which is a response to a rejected yield.
  */
-function dealDamageAndCheckDefeat(state: GameState, damage: number, attackIncludesGuardian = false, forcedPlay = false): boolean {
+function dealDamageAndCheckDefeat(
+  state: GameState,
+  damage: number,
+  attackIncludesGuardian = false,
+  attackIncludesMage = false,
+  forcedPlay = false,
+): boolean {
   const enemy = state.currentEnemy!;
   enemy.damageTaken += damage;
   const remaining = enemy.maxHealth - enemy.damageTaken;
@@ -1033,14 +1122,14 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number, attackInclud
       // chooseZoneVengeanceSacrifice), the same shape as Mission 9's AWAIT_RESCUE_CHOICE — the rest of this
       // kill's resolution (finishEnemyDefeatTail) waits for it.
       if (enemy.tableCards.length > 0) {
-        state.zoneVengeanceChoice = { remaining, attackIncludesGuardian };
+        state.zoneVengeanceChoice = { remaining, attackIncludesGuardian, attackIncludesMage };
         state.turnPhase = 'AWAIT_ZONE_VENGEANCE_CHOICE';
         log(state, 'Choose one card from the play area to sacrifice permanently into the mission zone.');
         return true;
       }
       // No card left on the enemy's table to sacrifice this kill (rare) — the zone doesn't grow, straight on to
       // the rest of the defeat resolution.
-      return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian);
+      return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian, attackIncludesMage);
     }
     if (state.pilgrimMechanic && remaining === 0) {
       // Mission 7: sourced even by this mission's own transcript (though never actually coded until now) — an
@@ -1137,7 +1226,7 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number, attackInclud
       log(state, `${enemyLabel(enemy)} defeated!`);
     }
   }
-  return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian);
+  return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian, attackIncludesMage);
 }
 
 /**
@@ -1145,9 +1234,16 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number, attackInclud
  * (or, for Mission 6's zoneVengeanceOnKill, once its AWAIT_ZONE_VENGEANCE_CHOICE has been resolved — see
  * chooseZoneVengeanceSacrifice). Split out of dealDamageAndCheckDefeat so that choice can pause mid-resolution
  * and resume here afterward, the same way CHOOSE_EXACT_KILL_RESCUE resumes its own
- * mission's flow from a dedicated resolve function. `attackIncludesGuardian` — see dealDamageAndCheckDefeat.
+ * mission's flow from a dedicated resolve function. `attackIncludesGuardian`/`attackIncludesMage` — see
+ * dealDamageAndCheckDefeat.
  */
-function finishEnemyDefeatTail(state: GameState, enemy: EnemyState, remaining: number, attackIncludesGuardian: boolean): boolean {
+function finishEnemyDefeatTail(
+  state: GameState,
+  enemy: EnemyState,
+  remaining: number,
+  attackIncludesGuardian: boolean,
+  attackIncludesMage: boolean,
+): boolean {
   if (state.ruleset === 'legacy' && (state.pileTopEnemyBonus || state.restoredCardMechanic)) {
     // Mission 11: "defeating the enemy always banishes it" — its played cards go to the banish pile instead of
     // the discard pile, directly feeding the very pile-top bonus/immunity mechanic this flag names (see
@@ -1161,6 +1257,13 @@ function finishEnemyDefeatTail(state: GameState, enemy: EnemyState, remaining: n
     // immediately; whatever isn't claimed by a placement gets swept to the discard pile once the placement
     // window closes (finishAdvanceToNextPlayer) or the zone purges at 10 (placeInZone).
     state.zoneCommittedPlay.push(...enemy.tableCards);
+  } else if (state.ruleset === 'legacy' && attackIncludesMage) {
+    // Mission 3+, sourced (see tutorial_vids/summaries/mission-3.md): an attack that included a Mage banishes its
+    // cards on a kill instead of sending them to the discard pile. Lower precedence than the two mission-specific
+    // branches above — a Mage recruit, once granted, stays in the party for every later mission too, so this can
+    // in principle coincide with Mission 8/11/12's own more specific table-cards handling; no source addresses
+    // that overlap, so the more specific mission mechanic wins and this only applies in the plain default case.
+    banishCards(state, enemy.tableCards);
   } else {
     pushToDiscardPile(state, enemy.tableCards);
   }
@@ -1200,7 +1303,7 @@ function finishEnemyDefeatTail(state: GameState, enemy: EnemyState, remaining: n
     // kill (and its own effects) if it's strong enough.
     const splash = enemy.baseAttack;
     log(state, `${enemyLabel(enemy)}'s death throes burst outward — ${splash} splash damage crashes into ${enemyLabel(state.currentEnemy)}!`);
-    dealDamageAndCheckDefeat(state, splash, attackIncludesGuardian);
+    dealDamageAndCheckDefeat(state, splash, attackIncludesGuardian, attackIncludesMage);
     return true;
   }
 
@@ -1642,17 +1745,46 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
 
-  const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
-  // Mage, Reaver, Guardian, Druid, Chanter, and Evergreen cards' printed suits don't join the combined
-  // suit-power resolution below — a Mage's (or a secondClassArcane card's bonus) class power is the arcane bolt
-  // above instead (which already resolved), a Reaver's is the reserve-deck tear resolved just below, a
-  // Guardian's is the permanent shield resolved just after that, a Druid's is the banish-pile salvage resolved
-  // after that, a Chanter's is the chant resolved further down, and an Evergreen card's is the all-four-powers
-  // resolution forced further down still (Mage always goes first, per legacy/classes.ts). A secondClassArcane
-  // card is deliberately NOT excluded here — it keeps its own suit power on top of the arcane bolt it already
-  // triggered above (see SuitedCard.secondClassArcane). A Mercenary "19" (noSuitPower) is excluded for a
-  // different reason than the rest — it doesn't substitute its own effect, it genuinely has none — which is also
-  // what keeps it out of immunity-blocking, since that's computed only from cards that reach this filter.
+  // Mage (Mission 3+, sourced from a full solo playthrough — see tutorial_vids/summaries/mission-3.md): each Mage
+  // card (or secondClassArcane bonus-sticker card) in the play triggers its own independent reveal off the top of
+  // the reserve deck, always before every other class power resolves (see continueResolveCommittedPlay) —
+  // resolved first here since the chosen bonus feeds into the play's own effective total value.
+  const mageQueue = state.ruleset === 'legacy' ? cards.filter(isMageCard) : [];
+  if (mageQueue.length > 0) {
+    const [trigger] = mageQueue;
+    const rest = mageQueue.slice(1);
+    return revealForMage(state, player.id, cards, claimedJester, forcedPlay, shape.totalValue, rest, 0, mageRevealCount(trigger, shape.totalValue));
+  }
+  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, shape.totalValue, 0);
+}
+
+/**
+ * The rest of a committed play's resolution once any Mage reveal(s) (see resolveCommittedPlay/GameState.mageReveal)
+ * are fully done — `arcaneBonus` is the total value tucked under the attack from every chosen reveal card, 0 if no
+ * Mage was involved. Split out so a play with a Mage in it can pause mid-resolution for AWAIT_MAGE_REVEAL and
+ * resume here once the choice (and any chain it kicks off) is settled, the same way Azure Emblem/Chanter windows
+ * pause and resume elsewhere in this file.
+ */
+function continueResolveCommittedPlay(
+  state: GameState,
+  player: PlayerState,
+  cards: Card[],
+  claimedJester: Card | null,
+  forcedPlay: boolean,
+  totalValue: number,
+  arcaneBonus: number,
+): EngineResult {
+  // Reaver, Guardian, Druid, Chanter, and Evergreen cards' printed suits don't join the combined suit-power
+  // resolution below — a Reaver's own class power is the reserve-deck tear resolved just below, a Guardian's is
+  // the permanent shield resolved just after that, a Druid's is the banish-pile salvage resolved after that, a
+  // Chanter's is the chant resolved further down, and an Evergreen card's is the all-four-powers resolution forced
+  // further down still. A Mage card's own class power was the reveal-and-chain already resolved before this
+  // function was ever called (see resolveCommittedPlay/GameState.mageReveal; Mage always goes first, per
+  // legacy/classes.ts). A secondClassArcane card is deliberately NOT excluded here — it keeps its own suit power
+  // on top of the reveal it already triggered (see SuitedCard.secondClassArcane). A Mercenary "19" (noSuitPower)
+  // is excluded for a different reason than the rest — it doesn't substitute its own effect, it genuinely has
+  // none — which is also what keeps it out of immunity-blocking, since that's computed only from cards that reach
+  // this filter.
   const nonArcaneCards = cards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> =>
       c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.chanter && !c.evergreen && !c.noSuitPower,
@@ -1785,14 +1917,21 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   // Both corrupted and restored cards ignore immunity, per-suit only (not the whole play) — see
   // SuitedCard.corrupted / SuitedCard.restored.
   const immunityIgnoringSuits = Array.from(new Set([...corruptedSuits, ...restoredSuits]));
-  const clubsMultiplier = resolveSuitPowers(state, cards, effectiveSuits, shape.totalValue, ignoreImmunityForPlay, immunityIgnoringSuits);
-  const rawDamage = (shape.totalValue + reaverBonus) * clubsMultiplier + arcaneBonus;
+  // Sourced fix (see tutorial_vids/summaries/mission-3.md): a Mage's chosen reveal card is "tucked under the
+  // attack, adding its value" — folded into the play's own total value here, so it buffs every other class power
+  // (heal/draw/enemy-strength-reduction amounts) exactly like an ordinary extra card would, and gets doubled by a
+  // Clubs multiplier same as the rest of the attack. The old, simpler arcane-bolt mechanic this replaced instead
+  // added its bonus as flat extra damage only, outside the multiplier — a real behavior change, not just a
+  // richer way of computing the same number.
+  const effectiveTotalValue = totalValue + arcaneBonus;
+  const clubsMultiplier = resolveSuitPowers(state, cards, effectiveSuits, effectiveTotalValue, ignoreImmunityForPlay, immunityIgnoringSuits);
+  const rawDamage = (effectiveTotalValue + reaverBonus) * clubsMultiplier;
   // Mission 10: an enemy Paladin's extra power reduces the damage it takes by its own base strength (see
   // applyEnemyPaladinDamageReduction) — a no-op for every other mission/enemy.
   const damage = applyEnemyPaladinDamageReduction(state, rawDamage);
-  // Logged here — after Clubs' clubsMultiplier, a Reaver's reaverBonus, an Arcane bolt's arcaneBonus, and any
-  // Paladin damage reduction are all folded in — rather than up front off the pre-bonus shape.totalValue, so the
-  // number shown always matches what actually lands on the enemy (enemy.damageTaken below).
+  // Logged here — after Clubs' clubsMultiplier, a Reaver's reaverBonus, a Mage's arcaneBonus, and any Paladin
+  // damage reduction are all folded in — rather than up front off the pre-bonus totalValue, so the number shown
+  // always matches what actually lands on the enemy (enemy.damageTaken below).
   log(
     state,
     `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${damage}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
@@ -1802,7 +1941,8 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   // Mission 6, sourced fix: a winning attack that includes a Guardian cancels Myla's zoneVengeanceOnKill
   // team-damage step entirely (see finishEnemyDefeatTail) — a documented mechanic missing from the shipped
   // version. Inert on every other mission, since guardianCards is always empty there.
-  const defeated = dealDamageAndCheckDefeat(state, damage, guardianCards.length > 0, forcedPlay);
+  const attackIncludesMage = state.ruleset === 'legacy' && cards.some(isMageCard);
+  const defeated = dealDamageAndCheckDefeat(state, damage, guardianCards.length > 0, attackIncludesMage, forcedPlay);
 
   if (state.phase !== 'IN_PROGRESS') return ok(state);
 
@@ -2583,7 +2723,7 @@ function chooseZoneVengeanceSacrifice(
   log(state, `${sacrificed.kind === 'suited' ? sacrificed.name ?? `the ${sacrificed.rank}` : 'the Jester'} is drawn permanently into the mission zone.`);
 
   state.zoneVengeanceChoice = null;
-  finishEnemyDefeatTail(state, enemy, pending.remaining, pending.attackIncludesGuardian);
+  finishEnemyDefeatTail(state, enemy, pending.remaining, pending.attackIncludesGuardian, pending.attackIncludesMage);
   return ok(state);
 }
 
@@ -2614,6 +2754,7 @@ export function createLobbyState(): GameState {
     comboAssist: null,
     kinfolkBankedThisTurn: false,
     azureEmblemWindow: null,
+    mageReveal: null,
     endOfTurnZoneFlip: false,
     missionZone: [],
     zoneImmuneSuits: [],
@@ -2695,6 +2836,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return chooseExactKillRescue(draft, action);
     case 'CHOOSE_ZONE_VENGEANCE_SACRIFICE':
       return chooseZoneVengeanceSacrifice(draft, action);
+    case 'CHOOSE_MAGE_REVEAL_CARD':
+      return resolveMageRevealChoice(draft, action);
     case 'SURRENDER_CARD_TO_ZONE':
       return surrenderCardToZone(draft, action);
     case 'START_ENDLESS_ROUND':

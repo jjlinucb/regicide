@@ -23,7 +23,7 @@ export type ClassId =
  * Evergreen (Mission 9) are the odd ones out: none has a suit of its own (there's no 5th+ suit in a standard
  * deck). Each kind of card keeps whatever suit it's printed with, purely for immunity bookkeeping, but its
  * class power never joins the combined suit-power resolution — see
- * SuitedCard.arcane/reaver/guardian/druid/chanter/evergreen and engine.ts's resolveArcaneBolts/resolveCommittedPlay.
+ * SuitedCard.arcane/reaver/guardian/druid/chanter/evergreen and engine.ts's revealForMage/resolveCommittedPlay.
  */
 export interface ClassTheme {
   id: ClassId;
