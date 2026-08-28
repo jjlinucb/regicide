@@ -392,6 +392,7 @@ export class RoomManager {
       beastDeckMechanic: mission.beastDeckMechanic,
       pileTopEnemyBonus: mission.pileTopEnemyBonus,
       restoredCardMechanic: mission.restoredCardMechanic,
+      randomizeEnemyOrder: mission.randomizeEnemyOrder,
       relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };
