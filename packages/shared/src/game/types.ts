@@ -816,7 +816,15 @@ export type GameAction =
    */
   | { type: 'SURRENDER_CARD_TO_ZONE'; playerId: string; cardId: string }
   /** Classic Regicide only, from WON: continues into another round with Kings shuffled into the Tavern deck and enemies scaled up. */
-  | { type: 'START_ENDLESS_ROUND' };
+  | { type: 'START_ENDLESS_ROUND' }
+  /**
+   * Classic Regicide only, from LOBBY: starts a brand-new game directly into a saved Endless run (see
+   * RoomManager's checkpointEndlessSave / engine.ts's ENDLESS_MODE_MAX_LOOP) instead of a fresh classic game.
+   * `deck` is the save's 52 suited cards as they stood when that run's last round was won (tier bumps included,
+   * no jesters — a fresh set is added per player count, same as START_ENDLESS_ROUND). `endlessLoop` is the round
+   * that save last won; this action continues into `endlessLoop + 1`.
+   */
+  | { type: 'RESUME_ENDLESS_SAVE'; playerIds: string[]; playerNames: string[]; seed: string; deck: SuitedCard[]; endlessLoop: number };
 
 export type EngineResult =
   | { ok: true; state: GameState; events: GameEvent[] }

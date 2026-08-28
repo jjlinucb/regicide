@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { applyAction, createLobbyState } from '@regicide/shared';
-import type { Card, GameAction, GameState, LegacySavePayload, MercenaryProgress, MercenaryTypeId } from '@regicide/shared';
+import { applyAction, createLobbyState, ENDLESS_MODE_MAX_LOOP } from '@regicide/shared';
+import type { Card, GameAction, GameState, LegacySavePayload, MercenaryProgress, MercenaryTypeId, SuitedCard } from '@regicide/shared';
 import {
   applyRestoredPartyCards,
   applyReward,
@@ -13,6 +13,7 @@ import {
 } from '@regicide/shared';
 import { generateRoomCode } from './roomCode.js';
 import { generateUniqueCampaignCode, type CampaignRecord, type CampaignStore } from '../db/campaigns.js';
+import { generateUniqueEndlessSaveCode, type EndlessSaveRecord, type EndlessSaveStore } from '../db/endlessSaves.js';
 
 export interface RoomPlayer {
   id: string;
@@ -32,6 +33,13 @@ export interface LegacyRoomData {
   mercenaryProgress: MercenaryProgress | null;
 }
 
+/** Classic Regicide's durable Endless Mode save data, mirrored from EndlessSaveStore and kept in sync at every WON. */
+export interface EndlessRoomData {
+  saveCode: string;
+  deck: SuitedCard[];
+  endlessLoop: number;
+}
+
 export interface Room {
   code: string;
   createdAt: number;
@@ -40,6 +48,15 @@ export interface Room {
   players: Map<string, RoomPlayer>;
   gameState: GameState;
   legacy?: LegacyRoomData;
+  /**
+   * Set once this room has ever won a classic Regicide game — kept in sync at every WON (see
+   * checkpointEndlessSave) purely so the save code/round can be shown to players. Only `pendingEndlessResume`
+   * below actually redirects room:start; an ordinary room that simply won a game once (and could "Play again"
+   * into a fresh one) must NOT have that win silently hijack its next start.
+   */
+  endless?: EndlessRoomData;
+  /** True only right after loadEndlessSave attaches a save to a fresh LOBBY room — tells startGame to deal into that save's next round instead of a brand-new game. Cleared the moment that happens. */
+  pendingEndlessResume?: boolean;
 }
 
 const MAX_PLAYERS = 4;
@@ -57,10 +74,18 @@ function toRecord(room: Room): CampaignRecord {
   };
 }
 
+function toEndlessRecord(room: Room): EndlessSaveRecord {
+  const endless = room.endless!;
+  return { code: endless.saveCode, deck: endless.deck, endlessLoop: endless.endlessLoop, updatedAt: Date.now() };
+}
+
 export class RoomManager {
   private rooms = new Map<string, Room>();
 
-  constructor(private campaignStore: CampaignStore) {}
+  constructor(
+    private campaignStore: CampaignStore,
+    private endlessSaveStore: EndlessSaveStore,
+  ) {}
 
   createRoom(hostName: string): { room: Room; player: RoomPlayer } {
     let code = generateRoomCode();
@@ -147,14 +172,16 @@ export class RoomManager {
     if (room.playerOrder.length < 1) return { error: 'Need at least 1 player.' };
 
     const playerNames = room.playerOrder.map((id) => room.players.get(id)!.name);
-    const result = applyAction(room.gameState, {
-      type: 'START_GAME',
-      playerIds: room.playerOrder,
-      playerNames,
-      seed,
-    });
+    // A room just loaded from an Endless save (see loadEndlessSave) deals straight into its next saved round
+    // instead of a fresh classic game — but only for that first start; see pendingEndlessResume's own doc.
+    const action: GameAction =
+      room.pendingEndlessResume && room.endless
+        ? { type: 'RESUME_ENDLESS_SAVE', playerIds: room.playerOrder, playerNames, seed, deck: room.endless.deck, endlessLoop: room.endless.endlessLoop }
+        : { type: 'START_GAME', playerIds: room.playerOrder, playerNames, seed };
+    const result = applyAction(room.gameState, action);
     if (!result.ok) return { error: result.error };
     room.gameState = result.state;
+    room.pendingEndlessResume = false;
     return { room };
   }
 
@@ -180,7 +207,71 @@ export class RoomManager {
     if (room.legacy && wasInProgress && result.state.ruleset === 'legacy' && result.state.phase !== 'IN_PROGRESS') {
       await this.completeLegacyMission(room, result.state.phase === 'WON' ? 'won' : 'lost');
     }
+    // Classic Regicide only, every WON (the very first classic win as well as every further Endless round) —
+    // a loss deliberately does NOT touch the save, so reloading the same code retries the same next round.
+    if (result.state.ruleset === 'regicide' && wasInProgress && result.state.phase === 'WON') {
+      await this.checkpointEndlessSave(room, result.state);
+    }
     return { room };
+  }
+
+  /**
+   * Creates or updates this room's durable Endless save with the deck as it stands right after a classic
+   * Regicide win — the 52 suited cards only (see EndlessRoomData.deck's own doc), same "no jesters" convention
+   * startEndlessRound/resumeEndlessSave already use. Mints a fresh code the first time a room ever wins.
+   */
+  private async checkpointEndlessSave(room: Room, state: GameState): Promise<void> {
+    const deck = [...state.tavernDeck, ...state.discardPile, ...state.players.flatMap((p) => p.hand)].filter(
+      (c): c is SuitedCard => c.kind === 'suited',
+    );
+    if (!room.endless) {
+      const saveCode = await generateUniqueEndlessSaveCode(this.endlessSaveStore);
+      room.endless = { saveCode, deck, endlessLoop: state.endlessLoop };
+      await this.endlessSaveStore.create(toEndlessRecord(room));
+    } else {
+      room.endless.deck = deck;
+      room.endless.endlessLoop = state.endlessLoop;
+      await this.endlessSaveStore.save(toEndlessRecord(room));
+    }
+  }
+
+  /**
+   * Loads a durable Endless save by code (see checkpointEndlessSave) into a fresh LOBBY room, or — mirroring
+   * resumeLegacyCampaign — adds a joining player to that save's room if it's already been loaded and is still
+   * waiting to start. Refuses a save that already conquered the final round: there's no next round to deal into.
+   */
+  async loadEndlessSave(code: string, name: string): Promise<{ room: Room; player: RoomPlayer } | { error: string }> {
+    const upperCode = code.toUpperCase();
+    const existing = this.getRoom(upperCode);
+    if (existing?.endless) {
+      if (existing.gameState.phase !== 'LOBBY') return { error: 'This game is already in progress — wait for it to finish.' };
+      if (existing.playerOrder.length >= MAX_PLAYERS) return { error: 'This save already has 4 players.' };
+      const player: RoomPlayer = { id: randomUUID(), token: randomUUID(), name, socketId: null, connected: true };
+      existing.players.set(player.id, player);
+      existing.playerOrder.push(player.id);
+      return { room: existing, player };
+    }
+
+    const record = await this.endlessSaveStore.get(upperCode);
+    if (!record) return { error: 'No Endless save found with that code.' };
+    if (record.endlessLoop >= ENDLESS_MODE_MAX_LOOP) {
+      return { error: `This save already conquered Endless Mode's final round (${ENDLESS_MODE_MAX_LOOP}) — there's no further round to load into.` };
+    }
+
+    const endless: EndlessRoomData = { saveCode: record.code, deck: record.deck, endlessLoop: record.endlessLoop };
+    const player: RoomPlayer = { id: randomUUID(), token: randomUUID(), name, socketId: null, connected: true };
+    const room: Room = {
+      code: record.code,
+      createdAt: Date.now(),
+      hostPlayerId: player.id,
+      playerOrder: [player.id],
+      players: new Map([[player.id, player]]),
+      gameState: createLobbyState(),
+      endless,
+      pendingEndlessResume: true,
+    };
+    this.rooms.set(record.code, room);
+    return { room, player };
   }
 
   // ---------- Legacy campaigns ----------

@@ -613,14 +613,18 @@ describe('endless mode', () => {
     expect(newState.maxHandSize).toBe(10); // base 8 + 2 for loop 2
   });
 
-  it('the combo total-value cap scales with the endless loop (10 + 2*loop), 4-card count cap unaffected', () => {
+  it('the combo total-value cap scales with the endless loop (10 + loop), reaching 20 at the final round; 4-card count cap unaffected', () => {
+    // Two rounds in, so the cap (10 + loop) is 12 — matches the old test's card values without needing new ones.
     let state = winClassicGame(startGame('endless-cap', 1));
     let res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
-    state = (res as any).state as GameState; // loop 1, cap 12
+    state = (res as any).state as GameState;
+    state = winGame(state);
+    res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
+    state = (res as any).state as GameState; // loop 2, cap 12
     const twoSixes = [suited('H', '6'), suited('D', '6')];
     let s2 = rig(state, twoSixes);
     let r2 = applyAction(s2, { type: 'PLAY_CARDS', playerId: s2.players[0].id, cardIds: twoSixes.map((c) => c.id) });
-    expect(r2.ok).toBe(true); // sum 12 fits loop-1 cap of 12
+    expect(r2.ok).toBe(true); // sum 12 fits loop-2 cap of 12
 
     // A fresh non-endless game keeps the classic cap of 10 — the same play should now fail.
     let classic = startGame('classic-cap', 1);
@@ -637,7 +641,27 @@ describe('endless mode', () => {
     const fourThrees = [suited('H', '3'), suited('D', '3'), suited('C', '3'), suited('S', '3')];
     let s3 = rig(state, fourThrees);
     let r3 = applyAction(s3, { type: 'PLAY_CARDS', playerId: s3.players[0].id, cardIds: fourThrees.map((c) => c.id) });
-    expect(r3.ok).toBe(true); // 4 cards, sum 12, fits loop-1 cap
+    expect(r3.ok).toBe(true); // 4 cards, sum 12, fits loop-2 cap
+  });
+
+  it('Endless Mode ends at round 10: the combo cap tops out at exactly 20 (legal two-10s combo), and there is no round 11', () => {
+    let state = winClassicGame(startGame('endless-final-round', 1));
+    for (let i = 0; i < 10; i++) {
+      const res = applyAction(state, { type: 'START_ENDLESS_ROUND' });
+      expect(res.ok).toBe(true);
+      state = (res as any).state as GameState;
+      if (i < 9) state = winGame(state);
+    }
+    expect(state.endlessLoop).toBe(10);
+
+    const twoTens = [suited('H', '10'), suited('D', '10')];
+    const rigged = rig(state, twoTens);
+    const played = applyAction(rigged, { type: 'PLAY_CARDS', playerId: rigged.players[0].id, cardIds: twoTens.map((c) => c.id) });
+    expect(played.ok).toBe(true); // sum 20 fits the final round's cap of exactly 20
+
+    const wonAtFinalRound = winGame(state);
+    const nextRound = applyAction(wonAtFinalRound, { type: 'START_ENDLESS_ROUND' });
+    expect(nextRound.ok).toBe(false); // no round 11
   });
 
   describe('per-suit court card tier', () => {

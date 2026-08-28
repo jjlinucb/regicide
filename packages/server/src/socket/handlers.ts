@@ -1,6 +1,6 @@
 import type { Server, Socket } from 'socket.io';
 import { redactStateFor } from '@regicide/shared';
-import type { ClientToServerEvents, LegacyStatePayload, RoomStatePayload, ServerToClientEvents } from '@regicide/shared';
+import type { ClientToServerEvents, EndlessStatePayload, LegacyStatePayload, RoomStatePayload, ServerToClientEvents } from '@regicide/shared';
 import { RoomManager, type Room } from '../rooms/RoomManager.js';
 
 type IOServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -29,10 +29,17 @@ function legacyStatePayload(room: Room): LegacyStatePayload | null {
   };
 }
 
+function endlessStatePayload(room: Room): EndlessStatePayload | null {
+  if (!room.endless) return null;
+  return { saveCode: room.endless.saveCode, endlessLoop: room.endless.endlessLoop };
+}
+
 function broadcastRoom(io: IOServer, room: Room): void {
   io.to(room.code).emit('room:state', roomStatePayload(room));
   const legacyState = legacyStatePayload(room);
   if (legacyState) io.to(room.code).emit('legacy:state', legacyState);
+  const endlessState = endlessStatePayload(room);
+  if (endlessState) io.to(room.code).emit('endless:state', endlessState);
   if (room.gameState.phase !== 'LOBBY') {
     for (const playerId of room.playerOrder) {
       const player = room.players.get(playerId);
@@ -113,6 +120,17 @@ export function registerSocketHandlers(io: IOServer, socket: IOSocket, rooms: Ro
   socket.on('legacy:resume', async ({ code, name }, cb) => {
     const trimmed = (name || '').trim().slice(0, 24) || 'Player';
     const result = await rooms.resumeLegacyCampaign(code, trimmed);
+    if ('error' in result) return cb({ ok: false, error: result.error });
+    const { room, player } = result;
+    player.socketId = socket.id;
+    socket.join(room.code);
+    cb({ ok: true, code: room.code, playerToken: player.token, playerId: player.id });
+    broadcastRoom(io, room);
+  });
+
+  socket.on('endless:load', async ({ code, name }, cb) => {
+    const trimmed = (name || '').trim().slice(0, 24) || 'Player';
+    const result = await rooms.loadEndlessSave(code, trimmed);
     if ('error' in result) return cb({ ok: false, error: result.error });
     const { room, player } = result;
     player.socketId = socket.id;

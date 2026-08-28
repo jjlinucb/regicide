@@ -1181,7 +1181,14 @@ function finishEnemyDefeatTail(state: GameState, enemy: EnemyState, remaining: n
     if (state.ruleset === 'regicide' && state.players.length === 1) {
       state.victoryMedal = state.soloJestersUsed === 0 ? 'gold' : state.soloJestersUsed === 1 ? 'silver' : 'bronze';
     }
-    log(state, state.ruleset === 'legacy' ? 'All enemies defeated — the mission is complete!' : 'The last King has fallen — the realm is saved!');
+    log(
+      state,
+      state.ruleset === 'legacy'
+        ? 'All enemies defeated — the mission is complete!'
+        : state.endlessLoop >= ENDLESS_MODE_MAX_LOOP
+          ? `The last King has fallen — Endless Mode's final round is conquered!`
+          : 'The last King has fallen — the realm is saved!',
+    );
     return true;
   }
   state.currentEnemy = state.castleDeck.shift()!;
@@ -1501,15 +1508,25 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
 }
 
 /**
+ * Endless Mode's last playable round — there is no round after this one (see startEndlessRound /
+ * resumeEndlessSave). Chosen so the fight has a definite end instead of scaling forever: by this round the combo
+ * cap (see rules.ts's validatePlayShape) has grown to exactly 20, enough to legally combo two 10s or four 5s.
+ */
+export const ENDLESS_MODE_MAX_LOOP = 10;
+
+/**
  * Classic Regicide only: continues a WON game into another round instead of ending it. Reshuffles the SAME deck
  * the just-won game ended with (all 52 cards, plus any per-card tier bumps already earned — see
  * dealDamageAndCheckDefeat) into a fresh Tavern deck, rather than rebuilding from a template — Endless Mode is a
  * continuation of that one deck across loops, not a series of independent rounds. Hand size and the Castle
- * deck's enemy stats both scale with the loop count, so the fight escalates indefinitely.
+ * deck's enemy stats both scale with the loop count, up to ENDLESS_MODE_MAX_LOOP.
  */
 function startEndlessRound(state: GameState): EngineResult {
   if (state.phase !== 'WON') return fail('Endless Mode can only be started after winning.');
   if (state.ruleset !== 'regicide') return fail('Endless Mode is only available in classic Regicide.');
+  if (state.endlessLoop >= ENDLESS_MODE_MAX_LOOP) {
+    return fail(`Endless Mode ends at round ${ENDLESS_MODE_MAX_LOOP} — there is no next round to continue into.`);
+  }
 
   const n = state.players.length;
   const loop = state.endlessLoop + 1;
@@ -1521,8 +1538,8 @@ function startEndlessRound(state: GameState): EngineResult {
   const carriedCards = [...state.tavernDeck, ...state.discardPile, ...state.players.flatMap((p) => p.hand)];
   const tavernDeck = shuffle([...carriedCards, ...makeJesters(JESTERS_BY_PLAYER_COUNT[n] ?? 0)], rng);
   const castleDeck = buildEndlessCastleDeck(loop, rng);
-  // Hand size grows by 1 per loop on top of the normal player-count base, mirroring the same "+2 per loop" scaling
-  // already applied to the combo cap and the Castle deck's enemy stats (see validatePlayShape / buildEndlessCastleDeck).
+  // Hand size grows by 1 per loop on top of the normal player-count base, mirroring the same "+1 per loop" scaling
+  // already applied to the combo cap (see validatePlayShape / buildEndlessCastleDeck).
   const baseHandSize = MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5;
   state.maxHandSize = baseHandSize + loop;
 
@@ -1552,6 +1569,53 @@ function startEndlessRound(state: GameState): EngineResult {
   state.pendingJesterRefill = null;
   state.endlessLoop = loop;
 
+  log(
+    state,
+    `Endless Round ${loop} begins! Hand size grows to ${state.maxHandSize}. Defeating a Jack, Queen, or King strengthens that suit's card in your deck. First enemy: ${enemyLabel(state.currentEnemy)}.`,
+  );
+  return ok(state);
+}
+
+/**
+ * Classic Regicide only, from LOBBY: starts a brand-new game directly into a saved Endless run instead of a fresh
+ * classic game — the durable-save counterpart to startEndlessRound (see RoomManager's checkpointEndlessSave),
+ * for a save/load flow that lets a run resume across sessions instead of only within one live game. Reuses
+ * startGame wholesale to get every ordinary field (players, mission-only flags, etc.) into its normal fresh-game
+ * shape, then overwrites the deck/hand/castle fields exactly like startEndlessRound does for a live continuation
+ * — `action.deck` (the save's 52 suited cards, tier bumps included, no jesters — see checkpointEndlessSave) takes
+ * the place of startEndlessRound's carriedCards.
+ */
+function resumeEndlessSave(state: GameState, action: Extract<GameAction, { type: 'RESUME_ENDLESS_SAVE' }>): EngineResult {
+  if (action.endlessLoop >= ENDLESS_MODE_MAX_LOOP) {
+    return fail(`This save already conquered Endless Mode's final round (${ENDLESS_MODE_MAX_LOOP}) — there is no next round to load into.`);
+  }
+  const started = startGame(state, { type: 'START_GAME', playerIds: action.playerIds, playerNames: action.playerNames, seed: action.seed });
+  if (!started.ok) return started;
+
+  const n = action.playerIds.length;
+  const loop = action.endlessLoop + 1;
+  const rng = () => nextRandom(state);
+  const tavernDeck = shuffle([...action.deck, ...makeJesters(JESTERS_BY_PLAYER_COUNT[n] ?? 0)], rng);
+  const castleDeck = buildEndlessCastleDeck(loop, rng);
+  const baseHandSize = MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5;
+  state.maxHandSize = baseHandSize + loop;
+
+  for (const player of state.players) {
+    player.hand = [];
+  }
+  for (const player of state.players) {
+    for (let i = 0; i < state.maxHandSize; i++) {
+      const card = tavernDeck.shift();
+      if (card) player.hand.push(card);
+    }
+  }
+
+  state.castleDeck = castleDeck.slice(1);
+  state.currentEnemy = castleDeck[0];
+  state.tavernDeck = tavernDeck;
+  state.discardPile = [];
+  state.endlessLoop = loop;
+  state.log = [];
   log(
     state,
     `Endless Round ${loop} begins! Hand size grows to ${state.maxHandSize}. Defeating a Jack, Queen, or King strengthens that suit's card in your deck. First enemy: ${enemyLabel(state.currentEnemy)}.`,
@@ -2630,6 +2694,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return surrenderCardToZone(draft, action);
     case 'START_ENDLESS_ROUND':
       return startEndlessRound(draft);
+    case 'RESUME_ENDLESS_SAVE':
+      return resumeEndlessSave(draft, action);
     default:
       return fail('Unknown action.');
   }

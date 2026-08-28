@@ -55,8 +55,9 @@ export interface PlayShape {
  * Combos/Animal-or-Beast-Companion rules. Returns an error string or the resolved shape.
  *
  * `loop` is Endless Mode's `state.endlessLoop` (0 outside Endless Mode, or before its first extra round) — it
- * raises the combo total-value cap by 2 per loop (10 + 2*loop) so endless combos scale with the game's growing
- * card values. The 4-card-per-combo count cap is unaffected regardless of loop.
+ * raises the combo total-value cap by 1 per loop (10 + loop), reaching 20 at Endless Mode's final round (see
+ * engine.ts's ENDLESS_MODE_MAX_LOOP), so a full round of endless play tops out exactly enough to legally combo two
+ * 10s or four 5s together. The 4-card-per-combo count cap is unaffected regardless of loop.
  */
 export function validatePlayShape(cards: Card[], loop = 0): PlayShape | { error: string } {
   if (cards.length === 0) return { error: 'No cards selected.' };
@@ -102,7 +103,7 @@ export function validatePlayShape(cards: Card[], loop = 0): PlayShape | { error:
     return { error: 'Combos are limited to 4 cards.' };
   }
   const totalValue = suited.reduce((sum, c) => sum + (c.rank === resolvedRank ? cardValue(c) : Number(c.flexibleComboRank)), 0);
-  const comboCap = 10 + 2 * Math.max(0, loop);
+  const comboCap = 10 + Math.max(0, loop);
   if (totalValue > comboCap) {
     return { error: `Combo total must be ${comboCap} or less.` };
   }

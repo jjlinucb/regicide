@@ -7,6 +7,7 @@ import type { Card, ClientGameState, ClientToServerEvents, LegacyStatePayload, S
 import { RoomManager } from './rooms/RoomManager.js';
 import { registerSocketHandlers } from './socket/handlers.js';
 import { InMemoryCampaignStore } from './db/campaigns.js';
+import { InMemoryEndlessSaveStore } from './db/endlessSaves.js';
 
 type Client = ClientSocket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -45,7 +46,7 @@ describe('legacy campaign integration', () => {
   beforeAll(async () => {
     httpServer = createServer();
     const io = new Server(httpServer, { cors: { origin: '*' } });
-    rooms = new RoomManager(new InMemoryCampaignStore());
+    rooms = new RoomManager(new InMemoryCampaignStore(), new InMemoryEndlessSaveStore());
     io.on('connection', (socket) => registerSocketHandlers(io, socket, rooms));
     await new Promise<void>((resolve) => httpServer.listen(0, resolve));
     port = (httpServer.address() as AddressInfo).port;

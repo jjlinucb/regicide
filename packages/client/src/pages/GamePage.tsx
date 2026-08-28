@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   cardValue,
+  ENDLESS_MODE_MAX_LOOP,
   MAX_SOLO_JESTERS,
   matchesAscendingZoneSlot,
   SOLO_JESTER_ABILITY_TEXT,
   validatePlayShape,
   type ClientGameState,
+  type EndlessStatePayload,
   type GameAction,
   type Suit,
 } from '@regicide/shared';
@@ -37,6 +39,7 @@ export function GamePage({
   sendAction,
   onLeave,
   onRestart,
+  endlessState,
 }: {
   state: ClientGameState;
   myPlayerId: string;
@@ -44,6 +47,7 @@ export function GamePage({
   sendAction: (action: GameAction) => void;
   onLeave: () => void;
   onRestart: () => void;
+  endlessState?: EndlessStatePayload | null;
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // A Mercenary any-suit Ace (see SuitedCard.wildSuit) needs a suit picked client-side before it can be played
@@ -166,10 +170,21 @@ export function GamePage({
           </p>
         )}
         {state.phase === 'WON' && !isLegacy && state.endlessLoop > 0 && (
-          <p style={{ color: 'var(--ink-dim)' }}>Endless Mode: survived {state.endlessLoop} round{state.endlessLoop === 1 ? '' : 's'}.</p>
+          <p style={{ color: 'var(--ink-dim)' }}>
+            Endless Mode: survived {state.endlessLoop} round{state.endlessLoop === 1 ? '' : 's'}
+            {state.endlessLoop >= ENDLESS_MODE_MAX_LOOP ? ' — the final round!' : '.'}
+          </p>
+        )}
+        {state.phase === 'WON' && !isLegacy && endlessState && (
+          <p style={{ fontSize: '0.85rem', color: 'var(--ink-dim)' }}>
+            Endless save code: <strong>{endlessState.saveCode}</strong> — load it from the home screen to pick this run back up later.
+          </p>
         )}
         <ActionLog state={state} />
-        {state.phase === 'WON' && !isLegacy && isHost && (
+        {state.phase === 'WON' && !isLegacy && state.endlessLoop >= ENDLESS_MODE_MAX_LOOP && (
+          <p style={{ color: 'var(--ink-dim)' }}>Endless Mode ends here — there is no round {ENDLESS_MODE_MAX_LOOP + 1} to continue into.</p>
+        )}
+        {state.phase === 'WON' && !isLegacy && state.endlessLoop < ENDLESS_MODE_MAX_LOOP && isHost && (
           <button
             className="btn"
             title="Continue with the Kings shuffled into the Tavern deck and every enemy scaled up"
@@ -196,7 +211,12 @@ export function GamePage({
     <div className="game-page">
       <div className="game-top">
         <div className={`status-banner${isMyTurn ? ' your-turn' : ''}`}>
-          {state.endlessLoop > 0 && <span className="endless-badge" title="Endless Mode round">♛ Round {state.endlessLoop}</span>}
+          {state.endlessLoop > 0 && (
+            <span className="endless-badge" title="Endless Mode round">
+              ♛ Round {state.endlessLoop}
+              {state.endlessLoop >= ENDLESS_MODE_MAX_LOOP ? ' (final)' : ''}
+            </span>
+          )}
           {isComboAssistWindow
             ? isComboAttacker
               ? 'Your attack is open for the Scarlet Whistle — resolve it when ready.'
