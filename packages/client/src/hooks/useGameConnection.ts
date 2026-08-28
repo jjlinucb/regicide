@@ -3,6 +3,7 @@ import { io, type Socket } from 'socket.io-client';
 import type {
   ClientGameState,
   ClientToServerEvents,
+  EndlessStatePayload,
   GameAction,
   LegacySavePayload,
   LegacyStatePayload,
@@ -42,6 +43,7 @@ export function useGameConnection() {
   const [roomState, setRoomState] = useState<RoomStatePayload | null>(null);
   const [gameState, setGameState] = useState<ClientGameState | null>(null);
   const [legacyState, setLegacyState] = useState<LegacyStatePayload | null>(null);
+  const [endlessState, setEndlessState] = useState<EndlessStatePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rejoinAttempted, setRejoinAttempted] = useState(false);
 
@@ -59,6 +61,7 @@ export function useGameConnection() {
     });
     socket.on('game:state', (payload) => setGameState(payload));
     socket.on('legacy:state', (payload) => setLegacyState(payload));
+    socket.on('endless:state', (payload) => setEndlessState(payload));
     socket.on('error', (payload) => setError(payload.message));
 
     return () => {
@@ -121,6 +124,19 @@ export function useGameConnection() {
   const resumeLegacyCampaign = useCallback((code: string, name: string): Promise<{ ok: true } | { ok: false; error: string }> => {
     return new Promise((resolve) => {
       socketRef.current?.emit('legacy:resume', { code: code.toUpperCase(), name }, (res) => {
+        if (res.ok) {
+          const next: StoredSession = { code: res.code, playerToken: res.playerToken, playerId: res.playerId };
+          saveSession(next);
+          setSession(next);
+        }
+        resolve(res.ok ? { ok: true } : res);
+      });
+    });
+  }, []);
+
+  const loadEndlessSave = useCallback((code: string, name: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('endless:load', { code: code.toUpperCase(), name }, (res) => {
         if (res.ok) {
           const next: StoredSession = { code: res.code, playerToken: res.playerToken, playerId: res.playerId };
           saveSession(next);
@@ -197,6 +213,7 @@ export function useGameConnection() {
     setRoomState(null);
     setGameState(null);
     setLegacyState(null);
+    setEndlessState(null);
   }, []);
 
   return {
@@ -205,6 +222,7 @@ export function useGameConnection() {
     roomState,
     gameState,
     legacyState,
+    endlessState,
     error,
     clearError: () => setError(null),
     createRoom,
@@ -218,5 +236,6 @@ export function useGameConnection() {
     restoreLegacyCampaign,
     startLegacyMission,
     setMercenaryLoadout,
+    loadEndlessSave,
   };
 }

@@ -33,6 +33,16 @@ export interface LegacySavePayload {
   mercenaryProgress?: MercenaryProgress | null;
 }
 
+/**
+ * Classic Regicide's durable Endless Mode save — mirrors LegacyStatePayload's role, but with just a code and the
+ * round reached (the deck itself, with its per-card tier bumps, stays server-side; the client never needs it
+ * before RESUME_ENDLESS_SAVE deals it out). Checkpointed at every WON, same boundary Legacy checkpoints at.
+ */
+export interface EndlessStatePayload {
+  saveCode: string;
+  endlessLoop: number;
+}
+
 // Client -> server
 export interface ClientToServerEvents {
   'room:create': (payload: { name: string }, cb: (res: { ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
@@ -48,6 +58,8 @@ export interface ClientToServerEvents {
   'legacy:startMission': (payload: { code: string; missionId: number }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   /** Legacy-only sourced mechanic (see legacy/mercenaries.ts): sets the FULL mercenary loadout for whatever mission legacy:state's mercenaryProgress is currently tracking a loss streak on — a free re-pick each call (validated against the mission's current coin budget), not an incremental add/swap. */
   'legacy:setMercenaryLoadout': (payload: { code: string; loadout: Partial<Record<MercenaryTypeId, number>> }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
+  /** Loads a durable Endless Mode save by code, same shape as legacy:resume — joins the in-memory room if it's still in its post-load lobby, otherwise fetches it from storage and starts a fresh one. The host then fires room:start to actually deal into the next round (RESUME_ENDLESS_SAVE). */
+  'endless:load': (payload: { code: string; name: string }, cb: (res: { ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
 }
 
 // Server -> client
@@ -55,5 +67,6 @@ export interface ServerToClientEvents {
   'room:state': (payload: RoomStatePayload) => void;
   'game:state': (payload: ClientGameState) => void;
   'legacy:state': (payload: LegacyStatePayload) => void;
+  'endless:state': (payload: EndlessStatePayload) => void;
   error: (payload: { message: string }) => void;
 }

@@ -9,6 +9,7 @@ export function HomePage({
   onCreateLegacy,
   onResumeLegacy,
   onRestoreLegacy,
+  onLoadEndless,
   onShowRules,
 }: {
   onCreate: (name: string) => AsyncResult;
@@ -16,11 +17,13 @@ export function HomePage({
   onCreateLegacy: (name: string) => AsyncResult;
   onResumeLegacy: (code: string, name: string) => AsyncResult;
   onRestoreLegacy: (name: string, save: LegacySavePayload) => AsyncResult;
+  onLoadEndless: (code: string, name: string) => AsyncResult;
   onShowRules: () => void;
 }) {
   const [mode, setMode] = useState<'regicide' | 'legacy'>('regicide');
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
+  const [endlessCode, setEndlessCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -40,6 +43,15 @@ export function HomePage({
     if (!code.trim()) return setLocalError(isLegacy ? 'Enter your campaign code.' : 'Enter a room code.');
     setBusy(true);
     const res = isLegacy ? await onResumeLegacy(code.trim(), name.trim()) : await onJoin(code.trim(), name.trim());
+    setBusy(false);
+    if (!res.ok) setLocalError(res.error);
+  }
+
+  async function handleLoadEndless() {
+    if (!name.trim()) return setLocalError('Enter your name first.');
+    if (!endlessCode.trim()) return setLocalError('Enter your Endless save code.');
+    setBusy(true);
+    const res = await onLoadEndless(endlessCode.trim(), name.trim());
     setBusy(false);
     if (!res.ok) setLocalError(res.error);
   }
@@ -108,6 +120,26 @@ export function HomePage({
                 if (file) handleRestoreFile(file);
               }}
             />
+          </>
+        )}
+        {!isLegacy && (
+          <>
+            <p style={{ fontSize: '0.8rem', color: 'var(--ink-dim)', margin: 0 }}>
+              Won a game with Endless Mode enemies still standing? Its save code is shown on the victory screen —
+              load it here to keep going.
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                placeholder="Endless save code"
+                value={endlessCode}
+                onChange={(e) => setEndlessCode(e.target.value.toUpperCase())}
+                maxLength={6}
+                style={{ flex: 1 }}
+              />
+              <button className="btn btn-secondary" disabled={busy} onClick={handleLoadEndless}>
+                Load
+              </button>
+            </div>
           </>
         )}
         <button type="button" className="rules-link" onClick={onShowRules}>

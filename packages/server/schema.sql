@@ -15,3 +15,13 @@ CREATE TABLE IF NOT EXISTS campaigns (
 -- Mercenary loss/coin tracking (see shared/legacy/mercenaries.ts) — added after the table above already
 -- shipped; this backfills existing databases created before this column existed.
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS mercenary_progress JSONB;
+
+-- Classic Regicide's durable Endless Mode saves (see server/src/db/endlessSaves.ts). Checkpointed at every WON,
+-- the same round-boundary tradeoff as campaigns above — a live in-progress round lost to a server restart just
+-- means replaying that round.
+CREATE TABLE IF NOT EXISTS endless_saves (
+  code TEXT PRIMARY KEY,
+  deck JSONB NOT NULL,
+  endless_loop INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

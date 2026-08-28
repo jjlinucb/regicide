@@ -30,6 +30,7 @@ export function App() {
     roomState,
     gameState,
     legacyState,
+    endlessState,
     error,
     clearError,
     createRoom,
@@ -43,6 +44,7 @@ export function App() {
     restoreLegacyCampaign,
     startLegacyMission,
     setMercenaryLoadout,
+    loadEndlessSave,
   } = useGameConnection();
 
   // A page reload can only rejoin by stored token, so this component has no local memory of which
@@ -72,6 +74,10 @@ export function App() {
     setMode('legacy');
     return restoreLegacyCampaign(name, save);
   }
+  function handleLoadEndless(code: string, name: string) {
+    setMode('regicide');
+    return loadEndlessSave(code, name);
+  }
   function handleLeave() {
     setMode('regicide');
     leaveSession();
@@ -88,6 +94,7 @@ export function App() {
         onCreateLegacy={handleCreateLegacy}
         onResumeLegacy={handleResumeLegacy}
         onRestoreLegacy={handleRestoreLegacy}
+        onLoadEndless={handleLoadEndless}
         onShowRules={() => navigate('/rules')}
       />
     );
@@ -133,7 +140,9 @@ export function App() {
       );
     }
   } else if (!gameState) {
-    body = <LobbyPage roomState={roomState} myPlayerId={session.playerId} onStart={startGame} onLeave={handleLeave} />;
+    body = (
+      <LobbyPage roomState={roomState} myPlayerId={session.playerId} endlessState={endlessState} onStart={startGame} onLeave={handleLeave} />
+    );
   } else {
     const isHost = roomState.players.find((p) => p.id === session.playerId)?.isHost ?? false;
     body = (
@@ -144,6 +153,7 @@ export function App() {
         sendAction={sendAction}
         onLeave={handleLeave}
         onRestart={restartGame}
+        endlessState={endlessState}
       />
     );
   }
