@@ -752,10 +752,25 @@ describe('legacy: mission playthrough', () => {
     expect(state.currentEnemy?.damageTaken).toBe(4);
   });
 
-  it('a kill by an attack that included a Mage banishes its cards instead of sending them to the discard pile', () => {
+  it('HOUSE RULE (overrides the sourced default): an exact kill by an attack that included a Mage sends its cards to the discard pile as normal, not the banish pile', () => {
     const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 4, attack: 1 };
     let state = startMission(1, [enemy]);
     const mage4: SuitedCard = { ...suited('H', '4'), arcane: true };
+    state = rig(state, [mage4]);
+    state.tavernDeck = [];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage4.id] }));
+    state = res.state;
+    expect(state.currentEnemy).toBeNull(); // only enemy in the mission — WON
+    expect(state.phase).toBe('WON');
+    expect(state.discardPile.some((c) => c.id === mage4.id)).toBe(true);
+    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(false);
+  });
+
+  it('HOUSE RULE: an overkill by an attack that included a Mage still banishes its cards instead of sending them to the discard pile', () => {
+    const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 2, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const mage4: SuitedCard = { ...suited('H', '4'), arcane: true }; // 4 damage vs 2 health — overkill
     state = rig(state, [mage4]);
     state.tavernDeck = [];
 
