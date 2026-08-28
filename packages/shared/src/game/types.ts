@@ -421,6 +421,11 @@ export interface GameState {
    * spirals toward whatever the highest card played that turn happened to leave on top — surviving a hit (a
    * covered DEFEND) is exactly what hands the next attack its own worst-case bonus (see engine.ts's
    * pushToDiscardPile).
+   *
+   * The same flag also governs engine.ts's banishCards, for the identical reason one pile over: Mission 11
+   * routes a defeated enemy's played table cards to the BANISH pile instead of the discard pile (see
+   * finishEnemyDefeatTail), and pileTopEnemyBonus reads that pile's top value too (rules.ts's
+   * banishPileTopValue/pileTopImmuneSuits) — an unsorted batch there would reopen the same spiral one pile over.
    */
   discardCleanupLowToHigh: boolean;
   /**

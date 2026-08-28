@@ -573,11 +573,22 @@ function hasSpecial(cards: Card[], ability: SpecialAbilityId): boolean {
  * whenever this mission's mechanic isn't active, so it's safe to use at every banish-pile call site across the
  * whole engine, no matter which mission-specific mechanic (Reaver's tear, a corrupted card's own cost, mission-zone
  * cleanup, etc.) is doing the banishing.
+ *
+ * Also applies the same low-to-high cleanup ordering pushToDiscardPile does when GameState.discardCleanupLowToHigh
+ * is set (see that function's doc comment for the sourced rule and rationale) — Mission 11's own pileTopEnemyBonus
+ * reads the banish pile's top value exactly the way it reads the discard pile's (see rules.ts's
+ * banishPileTopValue/pileTopImmuneSuits, engine.ts's resolvedEnemyAttack), and a defeated enemy's accumulated
+ * table cards are routed here instead of to the discard pile for that same mission (see finishEnemyDefeatTail),
+ * so leaving this pile's ordering arbitrary would reopen the identical self-reinforcing spiral the discard-pile
+ * fix closed, just one pile over. Only reached via the plain (non-restored-card) branch below, since no mission
+ * sets both discardCleanupLowToHigh and restoredCardMechanic at once (Mission 12's own three-step cleanup bulk-
+ * banishes with order explicitly preserved instead — see missions.ts's restoredCardMechanic doc comment).
  */
 function banishCards(state: GameState, cards: Card[]): void {
   if (cards.length === 0) return;
   if (!state.restoredCardMechanic) {
-    state.banishPile.push(...cards);
+    const ordered = state.discardCleanupLowToHigh && cards.length > 1 ? lowToHighForCleanup(cards) : cards;
+    state.banishPile.push(...ordered);
     return;
   }
   for (const c of cards) {
@@ -608,14 +619,27 @@ function toReserveDeck(state: GameState, cards: Card[], position: 'top' | 'botto
 }
 
 /**
+ * Shared low-to-high cleanup sort used by both pushToDiscardPile and banishCards below when
+ * GameState.discardCleanupLowToHigh is active: reorders a same-batch cleanup push (2+ cards collected for a single
+ * covered DEFEND or a single enemy's played table cards) so the LOWEST-value card ends up on top of the
+ * destination pile (the array's last element, matching how rules.ts's discardPileTopValue/banishPileTopValue read
+ * "top") — sourced from an independent fan digital-reimplementation's rules doc's "M4+ Cleanup discard ordering:
+ * when discarding played cards during cleanup, place them low-to-high, lowest value on top." That quote is about
+ * ordering the cards WITHIN one such batch relative to each other, not about the batch versus whatever already
+ * sits on the pile — a single-card push has nothing to order and is intentionally left alone by both callers.
+ */
+function lowToHighForCleanup(cards: Card[]): Card[] {
+  // Descending by value: the highest card is pushed first, the lowest last — so the lowest ends up on top.
+  return [...cards].sort((a, b) => cardValue(b) - cardValue(a));
+}
+
+/**
  * Legacy-only (Missions 4 and 11): pushes `cards` onto the discard pile — the shared tail for both a covered
  * DEFEND and an enemy's played table cards on defeat (exact or overkill). When GameState.discardCleanupLowToHigh
- * is set, sorts the batch so the LOWEST-value card ends up on top (the array's last element, matching how
- * rules.ts's discardPileTopValue reads "top") instead of whatever order the caller collected them in — sourced
- * from an independent fan digital-reimplementation's rules doc's "M4+ Cleanup discard ordering: when discarding
- * played cards during cleanup, place them low-to-high, lowest value on top." A no-op wrapper (behaves exactly
- * like `state.discardPile.push(...)`) for every mission that doesn't set the flag, or for a single-card push
- * (nothing to order), same shape as banishCards/toReserveDeck above.
+ * is set, sorts the batch via lowToHighForCleanup (see its doc comment for the sourced rule) instead of using
+ * whatever order the caller collected the cards in. A no-op wrapper (behaves exactly like
+ * `state.discardPile.push(...)`) for every mission that doesn't set the flag, or for a single-card push (nothing
+ * to order), same shape as banishCards/toReserveDeck above.
  */
 function pushToDiscardPile(state: GameState, cards: Card[]): void {
   if (cards.length === 0) return;
@@ -623,9 +647,7 @@ function pushToDiscardPile(state: GameState, cards: Card[]): void {
     state.discardPile.push(...cards);
     return;
   }
-  // Descending by value: the highest card is pushed first, the lowest last — so the lowest ends up on top.
-  const ordered = [...cards].sort((a, b) => cardValue(b) - cardValue(a));
-  state.discardPile.push(...ordered);
+  state.discardPile.push(...lowToHighForCleanup(cards));
 }
 
 /**

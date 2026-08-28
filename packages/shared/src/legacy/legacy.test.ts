@@ -3687,6 +3687,76 @@ describe('legacy: mission 11 discard cleanup ordering fix (discardCleanupLowToHi
   });
 });
 
+describe('legacy: mission 11 banish-pile cleanup ordering fix (discardCleanupLowToHigh now also governs banishCards)', () => {
+  function startPileTopBonusMission(enemies: LegacyEnemySpec[], cleanup: boolean): GameState {
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'pile-top-bonus-banish-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      pileTopEnemyBonus: true,
+      discardCleanupLowToHigh: cleanup,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it("an enemy kill (overkill) sorts the whole accumulated table-cards batch low-to-high onto the BANISH pile (not the discard pile), capping the next enemy's pile-top bonus at the lowest card", () => {
+    const enemyA: LegacyEnemySpec = { name: 'Warden A', suit: 'D', health: 30, attack: 1 };
+    const enemyB: LegacyEnemySpec = { name: 'Warden B', suit: 'H', health: 20, attack: 10 };
+    let state = startPileTopBonusMission([enemyA, enemyB], true);
+    state = rig(state, [suited('C', '9')], { tableCards: [suited('H', '2'), suited('D', '3')], damageTaken: 25 }); // 5 health left
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    expect(state.currentEnemy?.name).toBe('Warden B'); // the 9 overkills Warden A's remaining 5 health
+    expect(state.discardPile.length).toBe(0); // pileTopEnemyBonus routes a defeated enemy's table cards to BANISH, not here
+    expect(state.banishPile.length).toBe(3);
+    const top = state.banishPile[state.banishPile.length - 1];
+    expect(top.kind === 'suited' && top.rank).toBe('2'); // lowest of the batch, regardless of table order
+    // Warden B's live attack reads only that lowest card: 10 base + 0 (discard pile empty) + 2 (banish pile top).
+    expect(resolvedEnemyAttack(state)).toBe(12);
+  });
+
+  it("without the flag, the kill (overkill) preserves table-card order on the banish pile too, so the finishing card can land on top and buff the next enemy at its worst", () => {
+    const enemyA: LegacyEnemySpec = { name: 'Warden A', suit: 'D', health: 30, attack: 1 };
+    const enemyB: LegacyEnemySpec = { name: 'Warden B', suit: 'H', health: 20, attack: 10 };
+    let state = startPileTopBonusMission([enemyA, enemyB], false);
+    state = rig(state, [suited('C', '9')], { tableCards: [suited('H', '2'), suited('D', '3')], damageTaken: 25 });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    // Whatever order the cards accumulated on the table lands in the banish pile unchanged — the finishing card
+    // (9) ends up on top, the pre-fix worst case.
+    expect(state.banishPile.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['2', '3', '9']);
+    expect(resolvedEnemyAttack(state)).toBe(19); // 10 base + 0 (discard) + 9 (unsorted banish-pile top)
+  });
+
+  it('a single-card banish is left alone regardless of the flag — nothing to order (mirrors pushToDiscardPile\'s own single-card guard)', () => {
+    const enemyA: LegacyEnemySpec = { name: 'Warden A', suit: 'D', health: 30, attack: 1 };
+    let state = startPileTopBonusMission([enemyA], true);
+    state = rig(state, [suited('C', '9')], { tableCards: [], damageTaken: 29 }); // 1 health left, single-card overkill
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    expect(state.banishPile.length).toBe(1);
+    const [only] = state.banishPile;
+    expect(only.kind === 'suited' && only.rank).toBe('9');
+  });
+});
+
 describe('legacy: mission 11 reward (Esme returns permanently upgraded)', () => {
   it("completes the mission immediately (WON) when the last enemy falls — no beast-card choice window", () => {
     const beasts = mission4BeastCards();
