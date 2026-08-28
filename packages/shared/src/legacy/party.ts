@@ -205,8 +205,8 @@ export function applyDualClassStickers(party: Card[], count: number, rng: () => 
 /**
  * Mission 9's "second Mage sticker" reward: picks one random eligible existing party member (suited, not
  * already Mage/Reaver/Guardian/Druid/Evergreen or already stickered) and gives it a bonus Mage sticker — unlike
- * a pure Mage recruit's `arcane` flag, the card keeps resolving its own suit power AND fires an arcane bolt (see
- * SuitedCard.secondClassArcane, engine.ts's resolveArcaneBolts). Unlike Dual-class Stickers' "Lucky 4" ranks,
+ * a pure Mage recruit's `arcane` flag, the card keeps resolving its own suit power AND triggers its own Mage
+ * reveal (see SuitedCard.secondClassArcane, engine.ts's revealForMage). Unlike Dual-class Stickers' "Lucky 4" ranks,
  * the physical game picks uniformly across the whole party (by revealing shuffled cards until an eligible one
  * turns up) — we don't track the "race" it also filters by, so this just draws uniformly from every eligible
  * rank instead. `rng` defaults to Math.random; see applyDualClassStickers's doc for why/when to pass a seeded one.

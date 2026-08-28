@@ -620,31 +620,174 @@ describe('legacy: mission playthrough', () => {
     expect(state.victoryMedal).toBeNull(); // Legacy doesn't use Regicide's solo victory-medal scoring
   });
 
-  it('a Mage bolt adds its own card value on top of the play\'s normal damage, and bypasses its suit\'s immunity', () => {
+  it("a Mage's reveal lets the player tuck a chosen card under the attack, adding its value and bypassing its own suit's immunity", () => {
     // Enemy is immune to Hearts (its own suit) — the Mage card is Hearts-suited, so a base Cleric play would be
-    // blocked, but its arcane bolt should land anyway since Mage powers aren't suit powers.
-    const enemy: LegacyEnemySpec = { name: 'Warded Foe', suit: 'H', health: 20, attack: 1 };
+    // blocked, but a Mage's power isn't a suit power, so its reveal (and the chosen card's bonus) lands anyway.
+    const enemy: LegacyEnemySpec = { name: 'Warded Foe', suit: 'H', health: 30, attack: 1 };
     let state = startMission(1, [enemy]);
     const mage7: SuitedCard = { ...suited('H', '7'), arcane: true };
     state = rig(state, [mage7]);
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage7.id] }));
+    const chosen = suited('D', '5');
+    // Fully controls the reveal (7 cards, the play's own attack strength) so the outcome is deterministic.
+    state.tavernDeck = [suited('S', '2'), suited('C', '2'), suited('S', '3'), chosen, suited('C', '3'), suited('S', '4'), suited('C', '4')];
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage7.id] }));
     state = res.state;
-    // 7 damage from the normal play (no Clubs doubling) + 7 from the arcane bolt = 14, no heal triggered.
-    expect(state.currentEnemy?.damageTaken).toBe(14);
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+    expect(state.mageReveal?.candidates.length).toBe(7);
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
+    state = res.state;
+    // 7 from the normal play (no Clubs doubling) + 5 from the chosen reveal card = 12, no heal triggered.
+    expect(state.currentEnemy?.damageTaken).toBe(12);
+    expect(state.mageReveal).toBeNull();
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    // Every candidate not chosen falls to the discard pile.
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '2')).toBe(true);
   });
 
-  it('Arcane Surge doubles a Mage card\'s own bolt, and multiple Mages in one combo each resolve at their own value', () => {
+  it("multiple Mages in one combo each trigger their own independent reveal, at the play's own total strength", () => {
+    const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const mageA: SuitedCard = { ...suited('H', '4'), arcane: true };
+    const mageB: SuitedCard = { ...suited('D', '4'), arcane: true };
+    state = rig(state, [mageA, mageB]);
+    const chosenFirst = suited('S', '5');
+    const chosenSecond = suited('S', '6');
+    // 16 filler cards: the first 8 (play total 4+4=8) feed mageA's own reveal, the next 8 feed mageB's.
+    state.tavernDeck = [
+      suited('H', '2'), suited('D', '2'), suited('C', '2'), chosenFirst, suited('H', '3'), suited('D', '3'), suited('C', '3'), suited('H', '9'),
+      suited('D', '9'), suited('C', '9'), suited('H', '8'), suited('D', '8'), chosenSecond, suited('C', '8'), suited('H', '7'), suited('D', '7'),
+    ];
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mageA.id, mageB.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+    expect(state.mageReveal?.candidates.length).toBe(8);
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: chosenFirst.id }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL'); // mageB's own reveal opens next
+    expect(state.mageReveal?.candidates.length).toBe(8);
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: chosenSecond.id }));
+    state = res.state;
+    // Normal combo damage 4+4=8, plus 5 (mageA's chosen card) and 6 (mageB's chosen card) = 19.
+    expect(state.currentEnemy?.damageTaken).toBe(19);
+  });
+
+  it("Arcane Surge doubles a Mage's own reveal count (unsourced for this mechanic — no recruit currently sets it)", () => {
     const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
     let state = startMission(1, [enemy]);
     const surged: SuitedCard = { ...suited('H', '4'), arcane: true, special: 'ARCANE_SURGE' };
-    const plain: SuitedCard = { ...suited('D', '4'), arcane: true };
-    state = rig(state, [surged, plain]);
-    const res = ensureOk(
-      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [surged.id, plain.id] }),
-    );
+    state = rig(state, [surged]);
+    state.tavernDeck = [
+      suited('S', '2'), suited('D', '2'), suited('S', '3'), suited('D', '3'), suited('S', '4'), suited('D', '4'), suited('S', '5'), suited('D', '5'),
+    ];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [surged.id] }));
     state = res.state;
-    // Normal combo damage: 4+4=8. Arcane bonus: surged card doubles to 8, plain card is 4. Total: 8+8+4=20.
-    expect(state.currentEnemy?.damageTaken).toBe(20);
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+    expect(state.mageReveal?.candidates.length).toBe(8); // doubled from the card's own value (4)
+  });
+
+  it('chains the reveal at the chosen card\'s own strength when it\'s itself a Mage', () => {
+    const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const mage3: SuitedCard = { ...suited('H', '3'), arcane: true };
+    state = rig(state, [mage3]);
+    const chainedMage: SuitedCard = { ...suited('D', '5'), arcane: true };
+    state.tavernDeck = [suited('S', '2'), suited('C', '2'), chainedMage];
+    const chainedChosen = suited('S', '6');
+    // Appended once the first reveal (3 cards) is consumed — the chain reveal pulls the next 5 (chainedMage's own value).
+    state.tavernDeck.push(suited('C', '3'), suited('S', '4'), chainedChosen, suited('C', '4'), suited('S', '5'));
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage3.id] }));
+    state = res.state;
+    expect(state.mageReveal?.candidates.length).toBe(3);
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: chainedMage.id }));
+    state = res.state;
+    // The chosen card is itself a Mage (value 5) — the reveal chains, pulling 5 more cards.
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+    expect(state.mageReveal?.candidates.length).toBe(5);
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: chainedChosen.id }));
+    state = res.state;
+    // 3 (play) + 5 (chained Mage tucked under) + 6 (final chosen card) = 14.
+    expect(state.currentEnemy?.damageTaken).toBe(14);
+  });
+
+  it('discards any Jesters/corrupted cards found in a Mage reveal instead of offering them as choices', () => {
+    const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const mage4: SuitedCard = { ...suited('H', '4'), arcane: true };
+    state = rig(state, [mage4]);
+    const corrupted: SuitedCard = { ...suited('D', '9'), corrupted: true };
+    state.tavernDeck = [jester(), corrupted, suited('S', '2'), suited('C', '2')];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage4.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+    expect(state.mageReveal?.candidates.length).toBe(2); // Jester and corrupted card set aside
+    expect(state.mageReveal?.candidates.some((c) => c.corrupted)).toBe(false);
+    expect(state.discardPile.some((c) => c.kind === 'jester')).toBe(true);
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.corrupted)).toBe(true);
+  });
+
+  it('auto-continues without opening a choice when the reserve deck has nothing left to reveal', () => {
+    const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const mage4: SuitedCard = { ...suited('H', '4'), arcane: true };
+    state = rig(state, [mage4]);
+    state.tavernDeck = [];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage4.id] }));
+    state = res.state;
+    // Nothing to reveal — resolves straight through to the normal deferred-attack tail.
+    expect(state.mageReveal).toBeNull();
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    expect(state.currentEnemy?.damageTaken).toBe(4);
+  });
+
+  it('a kill by an attack that included a Mage banishes its cards instead of sending them to the discard pile', () => {
+    const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 4, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const mage4: SuitedCard = { ...suited('H', '4'), arcane: true };
+    state = rig(state, [mage4]);
+    state.tavernDeck = [];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage4.id] }));
+    state = res.state;
+    expect(state.currentEnemy).toBeNull(); // only enemy in the mission — WON
+    expect(state.phase).toBe('WON');
+    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(true);
+    expect(state.discardPile.some((c) => c.id === mage4.id)).toBe(false);
+  });
+
+  it("a Mage's chosen reveal card buffs every other class power's amount too, not just damage", () => {
+    // Hearts heals by the play's total value — folding the chosen reveal card into that total, not just damage,
+    // is the real behavior change from the old, simpler arcane-bolt mechanic (see tutorial_vids/summaries/mission-3.md).
+    // A pure Mage card contributes no suit power of its own (see nonArcaneCards), so it's combo'd here with a
+    // same-rank Hearts card that supplies the actual heal.
+    const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const mage2: SuitedCard = { ...suited('C', '2'), arcane: true };
+    const hearts2: SuitedCard = suited('H', '2');
+    state = rig(state, [mage2, hearts2]);
+    state.discardPile = [suited('C', '3'), suited('C', '4'), suited('C', '5'), suited('C', '6'), suited('C', '7'), suited('C', '8')];
+    const chosen = suited('H', '9');
+    state.tavernDeck = [chosen, suited('S', '2'), suited('S', '3'), suited('S', '4')]; // N=4, the play's own total value (2+2)
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage2.id, hearts2.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+    expect(state.mageReveal?.candidates.length).toBe(4);
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
+    state = res.state;
+    // Effective total value 2+2+9=13 — Hearts heals that many cards back from the discard pile (only 6 there).
+    expect(state.discardPile.length).toBe(0);
   });
 });
 
@@ -1623,7 +1766,7 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     state = res.state;
 
     expect(state.turnPhase).toBe('AWAIT_ZONE_VENGEANCE_CHOICE');
-    expect(state.zoneVengeanceChoice).toEqual({ remaining: -1, attackIncludesGuardian: false });
+    expect(state.zoneVengeanceChoice).toEqual({ remaining: -1, attackIncludesGuardian: false, attackIncludesMage: false });
     expect(state.missionZone.length).toBe(1); // Myla only — nothing sacrificed yet
     expect(state.currentEnemy?.tableCards.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')).toBe(true);
 
@@ -1701,7 +1844,7 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     state = rig(state, [shield]);
 
     state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
-    expect(state.zoneVengeanceChoice).toEqual({ remaining: 0, attackIncludesGuardian: true });
+    expect(state.zoneVengeanceChoice).toEqual({ remaining: 0, attackIncludesGuardian: true, attackIncludesMage: false });
     state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
 
     expect(state.missionZone.length).toBe(2); // the zone still grows — only the team-damage step is cancelled
@@ -1957,6 +2100,11 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
     return res.state;
   }
 
+  /** Fully controls the reserve deck so a single mage4's own reveal (4 cards, its own attack strength) is deterministic — none are Jesters/corrupted, so all 4 become choosable candidates. */
+  function mageRevealDeck(chosen: SuitedCard): Card[] {
+    return [suited('S', '2'), suited('C', '3'), chosen, suited('D', '5')];
+  }
+
   it("opens a window for the Mage's OWN player (not the others) once a Mage card joins the attack, deferring the enemy retaliation", () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     let state = startEmblemMission(3, [boss]);
@@ -1964,13 +2112,18 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
     const player0Id = state.players[0].id;
     const played = mageCard('H', '4');
     state.players[0].hand = [played];
+    const chosen = suited('H', '4');
+    state.tavernDeck = mageRevealDeck(chosen);
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] }));
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: player0Id, cardId: chosen.id }));
     state = res.state;
 
     expect(state.turnPhase).toBe('AWAIT_AZURE_EMBLEM');
     expect(state.azureEmblemWindow).toEqual({ pendingPlayerIds: [player0Id], eligibleCardIds: [played.id], blockNextAttack: false });
-    expect(state.currentEnemy?.damageTaken).toBe(8); // 4 from the normal play + 4 from the arcane bolt, as usual
+    expect(state.currentEnemy?.damageTaken).toBe(8); // 4 from the normal play + 4 from the chosen reveal card, as usual
   });
 
   it("lets the Mage's own player bank that Mage card onto the reserve deck instead of losing it to the discard pile", () => {
@@ -1980,8 +2133,11 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
     const player0Id = state.players[0].id;
     const played = mageCard('H', '4');
     state.players[0].hand = [played];
+    const chosen = suited('H', '4');
+    state.tavernDeck = mageRevealDeck(chosen);
 
     state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: player0Id, cardId: chosen.id })).state;
 
     const res = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id, cardId: played.id }));
     state = res.state;
@@ -2000,8 +2156,11 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
     const player0Id = state.players[0].id;
     const played = mageCard('H', '4');
     state.players[0].hand = [played];
+    const chosen = suited('H', '4');
+    state.tavernDeck = mageRevealDeck(chosen);
 
     state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: player0Id, cardId: chosen.id })).state;
     state = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id })).state;
 
     expect(state.azureEmblemWindow).toBeNull();
@@ -3116,17 +3275,23 @@ describe('legacy: Evergreen class power (Gøran — all four powers at once, ign
   });
 });
 
-describe('legacy: bonus Mage sticker (secondClassArcane — keeps its own suit power AND fires an arcane bolt)', () => {
-  it('resolves both its printed suit power and an arcane bolt when played', () => {
+describe('legacy: bonus Mage sticker (secondClassArcane — keeps its own suit power AND triggers a Mage reveal)', () => {
+  it('resolves both its printed suit power and its own Mage reveal when played', () => {
     const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 10 };
     let state = startMission(1, [boss]);
-    const stickered: SuitedCard = { ...suited('C', '4'), secondClassArcane: true }; // Warrior + bonus Mage bolt
+    const stickered: SuitedCard = { ...suited('C', '4'), secondClassArcane: true }; // Warrior + bonus Mage reveal
     state = rig(state, [stickered]);
+    const chosen = suited('D', '2');
+    state.tavernDeck = [suited('S', '3'), suited('H', '5'), chosen, suited('S', '6')]; // N=4, the card's own value
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    let s = res.state;
+    expect(s.turnPhase).toBe('AWAIT_MAGE_REVEAL');
 
-    // Clubs doubles the play's value (4*2=8) PLUS the arcane bolt (4) on top = 12.
-    expect(res.state.currentEnemy?.damageTaken).toBe(12);
+    res = ensureOk(applyAction(s, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
+    s = res.state;
+    // Clubs doubles the play's effective value ((4 play + 2 chosen) * 2) = 12.
+    expect(s.currentEnemy?.damageTaken).toBe(12);
   });
 
   it('applyMageSticker gives one random eligible party member secondClassArcane, skipping Mage/Reaver/Guardian/Druid/Evergreen cards', () => {
