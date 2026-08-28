@@ -5,9 +5,13 @@ import { CLASS_THEME } from './classes.js';
 
 const ALL_SUITS: Suit[] = ['H', 'D', 'C', 'S'];
 
-// '12' and '19' only ever appear on Mercenary cards (see legacy/mercenaries.ts), never on a human party member —
-// excluded here too so STARTING_NAMES doesn't need dummy entries for ranks it will never actually be looked up with.
-type NonRoyalRank = Exclude<Rank, 'J' | 'Q' | 'K' | '12' | '19'>;
+// '12', '19', and '25' never appear on one of the 40 starting party members (12/19 are Mercenary-only, see
+// legacy/mercenaries.ts; 25 is Mission 1's one-off "High Arcana" recruit, see missions.ts) — excluded here too so
+// STARTING_NAMES doesn't need dummy entries for ranks it will never actually be looked up with.
+type NonRoyalRank = Exclude<Rank, 'J' | 'Q' | 'K' | '12' | '19' | '25'>;
+
+/** Like NonRoyalRank, but keeps '25' — a mission-reward recruit (unlike a starting member) can carry it. */
+type RecruitRank = Exclude<Rank, 'J' | 'Q' | 'K' | '12' | '19'>;
 
 /**
  * Original names for the Golden Blade Syndicate's 40 starting members, by class and rank. Not the physical game's
@@ -78,7 +82,7 @@ export function buildInitialParty(): Card[] {
 export interface RecruitSpec {
   name: string;
   class: ClassId;
-  rank: NonRoyalRank;
+  rank: RecruitRank;
   /** True for a standout reward: grants the recruit's class's signature ability permanently, alongside their name. */
   special?: boolean;
   /** Required for MAGE, REAVER, GUARDIAN, DRUID, and EVERGREEN recruits only — none has a suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */

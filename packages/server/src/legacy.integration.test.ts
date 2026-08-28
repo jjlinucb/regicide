@@ -103,7 +103,7 @@ describe('legacy campaign integration', () => {
     const legacyAfterWin = await legacyAfterWinPromise;
     expect(legacyAfterWin.missionsCompleted).toEqual([1]);
     expect(legacyAfterWin.currentMission).toBe(2);
-    expect(legacyAfterWin.party.length).toBe(40); // mission 1's reward is the Kinfolk Flute relic only, no recruits
+    expect(legacyAfterWin.party.length).toBe(41); // mission 1's reward: the Kinfolk Flute relic, corrupting one of the 40 starting members, and the High Arcana recruit
     expect(legacyAfterWin.permanentRules).toEqual(['KINFOLK_FLUTE']);
 
     // Same flow as classic Regicide: after a mission ends, the host restarts (LOBBY) before the
@@ -122,9 +122,23 @@ describe('legacy campaign integration', () => {
     );
     expect(resumed.ok).toBe(true);
     const resumedLegacyState = await resumedLegacyStatePromise;
-    expect(resumedLegacyState.party.length).toBe(40);
+    expect(resumedLegacyState.party.length).toBe(41);
     expect(resumedLegacyState.permanentRules).toEqual(['KINFOLK_FLUTE']);
     expect(resumedLegacyState.currentMission).toBe(2);
+  });
+
+  it('a solo (1-player) Legacy mission still shuffles in both Jesters, unlike classic Regicide\'s player-count-scaled table', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Solo' });
+
+    const result = rooms.startLegacyMission(created.code, created.playerId, 1);
+    if ('error' in result) throw new Error(result.error);
+
+    const allCards = [...result.room.gameState.tavernDeck, ...result.room.gameState.players.flatMap((p) => p.hand)];
+    const jesterCount = allCards.filter((c) => c.kind === 'jester').length;
+    expect(jesterCount).toBe(2);
+    client.close();
   });
 
   it('jumping straight to mission 3 auto-grants missions 1 and 2\'s rewards first', async () => {
