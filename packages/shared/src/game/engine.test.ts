@@ -81,6 +81,28 @@ describe('basic damage', () => {
     state = (res as any).state;
     expect(state.currentEnemy!.damageTaken).toBe(16);
   });
+
+  it('logs the final, post-multiplier damage for a Clubs-doubled combo, not the pre-multiplier combo total', () => {
+    let state = startGame('clubs-log', 2);
+    state.currentEnemy!.suit = 'H'; // avoid colliding with the Clubs/Spades cards played below
+    // Combo: two 4s (Clubs + Spades) sum to 8, then Clubs doubles the whole play to 16.
+    const card1 = suited('C', '4');
+    const card2 = suited('S', '4');
+    const attacker = state.players[0];
+    state = rig(state, [card1, card2]);
+    const res = applyAction(state, {
+      type: 'PLAY_CARDS',
+      playerId: attacker.id,
+      cardIds: [card1.id, card2.id],
+    });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    // Game state (enemy HP) reflects the real, doubled damage...
+    expect(newState.currentEnemy!.damageTaken).toBe(16);
+    // ...and the player-facing log must say the same number, not the pre-doubling combo total (8).
+    expect(newState.log.some((e) => e.message === `${attacker.name} plays a combo for 16.`)).toBe(true);
+    expect(newState.log.some((e) => e.message.includes('plays a combo for 8'))).toBe(false);
+  });
 });
 
 describe('suit powers', () => {

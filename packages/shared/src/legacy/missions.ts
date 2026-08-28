@@ -114,6 +114,25 @@ function reserveCompanion(name: string, suit: Suit, rank: Rank): Card {
 }
 
 /**
+ * Mission 5's own fight SETUP (not a reward — see this mission's reward comment below, and the mission-5
+ * transcript note: "Four new Reaver party members join"): four Reaver-flagged cards added straight to the fight's
+ * reserve deck via extraReserveCards, same non-persistent "mission-only" shape as chanterCompanion below (Mission
+ * 8 reuses this identical pattern for its own Chanters). BUG FIX (playtest cross-check, 2026-08-28): the shipped
+ * version had NO Reaver cards anywhere in Mission 5's own reserve deck — only reward.recruits granted one
+ * (Haror) permanently, at mission END. That left this mission's signature deck-milling mechanic (a Reaver play
+ * tears a card off the reserve deck and banishes it — see resolveCommittedPlay's reaverCards handling) with
+ * nothing to ever trigger it during the actual fight, since the party held zero Reaver cards to play. That in
+ * turn starved rollingZoneBonus (see GameState.rollingZoneCards / engine.ts's rollMissionZoneBonusCard), which
+ * recycles the BANISH pile's top card each turn: with the banish pile never receiving anything, the rolling zone
+ * buff could never grow, no matter how the fight was played. Only rank 5 (Haror) is ever granted permanently via
+ * reward.recruits — same "no separate grant-then-retire step needed" simplification Mission 8's Chanters use —
+ * the other 3 exist only for this one fight.
+ */
+function reaverCompanion(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `reaver-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, reaver: true };
+}
+
+/**
  * A named survivor card, shared by Mission 7's extraReserveCards (see GameState.pilgrimMechanic) and Mission 8's
  * ascending mission zone (see GameState.ascendingZone) — both missions independently reused "Pilgrim" as flavor
  * for stranded survivors, and both read the `pilgrim` flag, gated by their own separate mission flag so the two
@@ -148,6 +167,30 @@ function chanterCompanion(name: string, suit: Suit, rank: Rank): Card {
  */
 function zoneWildcard(name: string, suit: Suit): Card {
   return { id: `zone-wildcard-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank: '5', flexibleComboRank: '2', name };
+}
+
+/**
+ * Mission 6's own fight SETUP (not a reward — see this mission's own comment below): the 4 Guardian cards,
+ * seeded straight into the fight's reserve deck via extraReserveCards, same non-persistent "mission-only" shape
+ * chanterCompanion above already established for Mission 8's 4 Chanters. Sourced from this repo's own
+ * tutorial_vids/summaries/mission-6.md transcript, under the mission's "How it plays / special rules" (not its
+ * reward section): "Four new 'Guardian' party members join" this fight — i.e. all 4 are meant to be drawable
+ * and playable DURING Mission 6 itself, not merely named in the eventual reward roster. This is what makes the
+ * mission's own central Guardian-cancels-Myla mechanic (zoneVengeanceOnKill's attackIncludesGuardian check,
+ * see engine.ts) actually reachable during the fight it's meant to counter — before this fix, no Guardian-class
+ * card existed anywhere before Mission 6's reward granted one, at which point the fight was already won.
+ * Ferro's rank ('3') and suit ('S') match the one Guardian this mission's reward keeps permanently (see
+ * recruit('Ferro', ...) below) for narrative continuity — the fight-only card and the eventual permanent
+ * recruit are still two separate Card instances (buildRecruitCard mints a fresh id), same as Mission 8's Bram.
+ * Kesh/Ambrey/Dorna's specific ranks and suits have no source at all (the transcript names only "four Guardian
+ * party members," not which one is which) — UNSOURCED JUDGMENT CALL: spread across the remaining 3 suits at
+ * ranks 5/7/9, mirroring Mission 8's own 3/5/7/9 spread for its 4 Chanters. None of the 3 carry a `special`
+ * ability card here (Dorna's AEGIS is a permanent-recruit-only upgrade this mission's reward explicitly drops —
+ * see the reward comment below), matching how Mission 8's 3 non-kept Chanters are likewise plain companions
+ * during the fight, with only the specialRecruit-granted survivor carrying its class's signature ability.
+ */
+function guardianCompanion(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `guardian-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, guardian: true };
 }
 
 /**
@@ -408,7 +451,22 @@ export const MISSIONS: Mission[] = [
     // here; she's just another reserve-deck body this mission, same shape as Mission 9/12's own one-off flavor
     // cards (see reserveCompanion above). She only becomes a real permanent party member starting Mission 6,
     // via this mission's reward below.
-    extraReserveCards: [reserveCompanion('Myla', 'H', '7')],
+    //
+    // The 4 Reavers named in the mission-5 transcript ("Four new Reaver party members join") also ride along
+    // here, for real — see reaverCompanion's own doc comment for why this matters beyond flavor: without them
+    // actually in the fight's reserve deck, nothing can ever trigger this mission's Reaver deck-tear mechanic,
+    // which is the ONLY thing that ever puts a card into the banish pile during Mission 5 — and rollingZoneBonus
+    // below reads its buff from exactly that pile. Haror (rank 5, Clubs) matches the identity reward.recruits
+    // grants permanently below; the other 3's names/suits/ranks are an unsourced judgment call (no source names
+    // them individually) — all rank 5 like Haror, one per remaining suit, so "only the Clubs one survives" reads
+    // cleanly at the reward.
+    extraReserveCards: [
+      reserveCompanion('Myla', 'H', '7'),
+      reaverCompanion('Haror', 'C', '5'),
+      reaverCompanion('Skarn Hollowtooth', 'S', '5'),
+      reaverCompanion('Petra Duskfang', 'H', '5'),
+      reaverCompanion('Yorrin Grimtide', 'D', '5'),
+    ],
     // The grove's rolling zone, per the tutorial transcript ("a rolling mission zone/banish-pile cycle each turn
     // feeds bonus strength to the current enemy"): every turn, the top card of the BANISH pile recycles into the
     // rolling zone, accumulating there — never replaced, never cleared on its own — until the next kill banishes
@@ -430,8 +488,12 @@ export const MISSIONS: Mission[] = [
     // rank 5 (Haror) for good. Implemented as a straight, permanent single-recruit grant rather than
     // modeling "recruit all 4, then retire 3" as two separate steps — this campaign's reward model elsewhere
     // (e.g. Mission 11's applyBeastCardChoice) only ever tracks the FINAL kept roster, never an intermediate
-    // grant-then-retire history, so the net effect (only Haror ends up in the permanent party) is the same either
-    // way. Also adds the sourced-but-missing "corrupt another card" effect (see party.ts's
+    // grant-then-retire history, so the net effect (only Haror ends up in the permanent campaign PARTY roster) is
+    // the same either way. That equivalence is scoped to the permanent roster only, though — it does NOT excuse
+    // the 4 Reavers from also needing to actually join THIS FIGHT'S reserve deck (see extraReserveCards above and
+    // reaverCompanion's doc comment): a prior version of this comment conflated the two and skipped seeding them
+    // into extraReserveCards entirely, which silently broke rollingZoneBonus by starving it of anything to ever
+    // put in the banish pile. Also adds the sourced-but-missing "corrupt another card" effect (see party.ts's
     // applyCorruptAnotherCard) and a second round of Dual-class Stickers. Myla (value 7) — who spent this fight
     // as an ordinary reserve-deck card, not a mission-zone fixture (see extraReserveCards above) — now joins the
     // party for real: a normal, drawable, playable Cleric card from Mission 6 onward.
@@ -472,6 +534,21 @@ export const MISSIONS: Mission[] = [
     // player-choice shape and the Guardian cancellation are sourced fixes over the original shipped
     // auto-sacrifice-with-no-Guardian-interaction — see legacy-missions-transcript-mismatches.md).
     zoneVengeanceOnKill: true,
+    // Bug fix: the Guardian-cancels-Myla mechanic just above is this mission's one real counter to its own
+    // central threat, but no Guardian-class card existed anywhere in the game before this same mission's reward
+    // granted one (see the reward comment below) — by which point the fight that mechanic is meant to counter
+    // is already over. Sourced from this repo's own tutorial_vids/summaries/mission-6.md transcript: "Four new
+    // 'Guardian' party members join" is listed under the mission's "How it plays / special rules," not its
+    // reward — i.e. all 4 Guardians (Ferro, Kesh, Ambrey, Dorna) are meant to be drawable and playable DURING
+    // this fight, same shape as Mission 8's 4 Chanter cards entering THAT fight via extraReserveCards before
+    // its own reward keeps only 1 of them permanently (see guardianCompanion's doc comment above for the
+    // ranks/suits judgment call on the 3 that aren't sourced by name).
+    extraReserveCards: [
+      guardianCompanion('Ferro', 'S', '3'),
+      guardianCompanion('Kesh', 'H', '5'),
+      guardianCompanion('Ambrey', 'D', '7'),
+      guardianCompanion('Dorna', 'C', '9'),
+    ],
     // Reward, sourced fix (legacy-missions-transcript-mismatches.md): the Guardian faction, but only Ferro
     // (rank 3) is kept as a permanent new recruit — the shipped version over-granted all 4 (Kesh, Ambrey, and
     // Dorna's special Aegis are dropped). Playing a Guardian card raises an absolute shield, blocking the
@@ -703,12 +780,15 @@ export const MISSIONS: Mission[] = [
     // every pile cycles its face-up card to the bottom and reveals the next one instead. An exact kill sends a
     // chosen pile's face-up card straight to the top of the reserve deck (see GameState.capturedPilesActive).
     //
-    // UNSOURCED BALANCE JUDGMENT CALL (see deck.ts's buildCapturedPiles): the pile split itself scales down for a
-    // smaller table now (engine.ts's startLegacyMission picks the actual pile size) instead of always carving out
-    // a fixed 30 regardless of player count — real playtesting found a solo game left with almost nothing in the
-    // tavern deck for this whole fight. No source specifies scaling by player count; the split size still lands
-    // on the sourced 30-card figure exactly once there are enough players (3-4) for that to plausibly be the
-    // tested case.
+    // UNSOURCED BALANCE JUDGMENT CALL (see deck.ts's buildCapturedPiles and engine.ts's startLegacyMission for the
+    // full history): the pile split itself scales down for a smaller table now (engine.ts picks the actual pile
+    // size) instead of always carving out a fixed 30 regardless of player count — real playtesting found a solo
+    // game left with almost nothing in the tavern deck for this whole fight. A second playtesting pass later
+    // found the first fix's own scaling let the pile size climb back toward that sourced 30-card figure exactly
+    // at the player counts (3-4) where this engine's per-count hand-size table deals the most total cards up
+    // front — draining the tavern deck to 0-1 cards before a single turn was played. No source specifies scaling
+    // by player count at all, so the pile size is now capped to keep a real post-deal buffer in the tavern deck
+    // at every player count instead of ever reaching that sourced 30-card figure exactly.
     capturedPilesActive: true,
     // SOURCED CORRECTION (fan-reimplementation rules doc setup step: "Shuffle the pilgrim deck + remaining party
     // cards + holding pile together to form the tavern deck"; post-mission step: "The pilgrim deck is dissolved —
@@ -884,18 +964,20 @@ export const MISSIONS: Mission[] = [
     // which is exactly what keeps feeding this same mechanic forward through the rest of the fight.
     pileTopEnemyBonus: true,
     // SOURCED FIX (playtest-confirmed, see legacy-mission-playtest-findings): a normal covered DEFEND dumps the
-    // defending player's chosen cards onto the discard pile in whatever order they were selected — the ONLY
-    // multi-card discard-pile push this mission has, since pileTopEnemyBonus (above) already routes every
-    // defeated enemy's played cards to the BANISH pile instead. Without an ordering rule, surviving a hit is
-    // exactly what hands the next attack an unpredictable, potentially large discard-pile-top bonus — the same
-    // self-reinforcing shape independently found and fixed for Mission 4's discardTopBuffsAttack. The same
-    // independent fan digital-reimplementation's rules doc documents this as a permanent rule introduced at
-    // Mission 4 ("M4+ Cleanup discard ordering: place them low-to-high, lowest value on top") that stays in
-    // effect for every later mission — including this one, which reads the identical discard-pile-top value (see
-    // GameState.discardCleanupLowToHigh / engine.ts's pushToDiscardPile). This also restores the player agency an
-    // independent player-review blog explicitly describes using in this exact mission ("banish a low card...
-    // reducing the strength of the enemy") — the low-to-high sort is what guarantees that choice actually lands
-    // on top instead of being overwritten by whichever card the player happened to select last.
+    // defending player's chosen cards onto the discard pile in whatever order they were selected, and
+    // pileTopEnemyBonus (above) routes every defeated enemy's accumulated table cards to the BANISH pile the same
+    // unordered way. Either one left arbitrary is exactly what hands the next attack an unpredictable, potentially
+    // large pile-top bonus — the same self-reinforcing shape independently found and fixed for Mission 4's
+    // discardTopBuffsAttack, just against two piles instead of one here. The same independent fan
+    // digital-reimplementation's rules doc documents this as a permanent rule introduced at Mission 4 ("M4+
+    // Cleanup discard ordering: place them low-to-high, lowest value on top") that stays in effect for every later
+    // mission — including this one, which this flag now applies to BOTH the discard-pile push (a covered DEFEND)
+    // and the banish-pile push (a defeated enemy's table cards), since pileTopEnemyBonus reads both piles' top
+    // values identically (see GameState.discardCleanupLowToHigh / engine.ts's pushToDiscardPile and banishCards).
+    // This also restores the player agency an independent player-review blog explicitly describes using in this
+    // exact mission ("banish a low card... reducing the strength of the enemy") — the low-to-high sort on the
+    // banish-pile side is what guarantees a low card played into an overkill actually lands on top instead of
+    // being overwritten by whichever card in that batch happened to be collected last.
     discardCleanupLowToHigh: true,
     // Sourced correction: the reward is NOT a beast-card pick — the previously-shipped AWAIT_BEAST_REWARD_CHOICE
     // window and CHOOSE_BEAST_REWARD action (and party.ts's applyBeastCardChoice) have been removed entirely, no

@@ -1,4 +1,4 @@
-import type { Card, CapturedPile, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit, SuitedCard, TurnPhase } from './types.js';
+import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit, SuitedCard, TurnPhase } from './types.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,
@@ -573,11 +573,22 @@ function hasSpecial(cards: Card[], ability: SpecialAbilityId): boolean {
  * whenever this mission's mechanic isn't active, so it's safe to use at every banish-pile call site across the
  * whole engine, no matter which mission-specific mechanic (Reaver's tear, a corrupted card's own cost, mission-zone
  * cleanup, etc.) is doing the banishing.
+ *
+ * Also applies the same low-to-high cleanup ordering pushToDiscardPile does when GameState.discardCleanupLowToHigh
+ * is set (see that function's doc comment for the sourced rule and rationale) — Mission 11's own pileTopEnemyBonus
+ * reads the banish pile's top value exactly the way it reads the discard pile's (see rules.ts's
+ * banishPileTopValue/pileTopImmuneSuits, engine.ts's resolvedEnemyAttack), and a defeated enemy's accumulated
+ * table cards are routed here instead of to the discard pile for that same mission (see finishEnemyDefeatTail),
+ * so leaving this pile's ordering arbitrary would reopen the identical self-reinforcing spiral the discard-pile
+ * fix closed, just one pile over. Only reached via the plain (non-restored-card) branch below, since no mission
+ * sets both discardCleanupLowToHigh and restoredCardMechanic at once (Mission 12's own three-step cleanup bulk-
+ * banishes with order explicitly preserved instead — see missions.ts's restoredCardMechanic doc comment).
  */
 function banishCards(state: GameState, cards: Card[]): void {
   if (cards.length === 0) return;
   if (!state.restoredCardMechanic) {
-    state.banishPile.push(...cards);
+    const ordered = state.discardCleanupLowToHigh && cards.length > 1 ? lowToHighForCleanup(cards) : cards;
+    state.banishPile.push(...ordered);
     return;
   }
   for (const c of cards) {
@@ -608,14 +619,27 @@ function toReserveDeck(state: GameState, cards: Card[], position: 'top' | 'botto
 }
 
 /**
+ * Shared low-to-high cleanup sort used by both pushToDiscardPile and banishCards below when
+ * GameState.discardCleanupLowToHigh is active: reorders a same-batch cleanup push (2+ cards collected for a single
+ * covered DEFEND or a single enemy's played table cards) so the LOWEST-value card ends up on top of the
+ * destination pile (the array's last element, matching how rules.ts's discardPileTopValue/banishPileTopValue read
+ * "top") — sourced from an independent fan digital-reimplementation's rules doc's "M4+ Cleanup discard ordering:
+ * when discarding played cards during cleanup, place them low-to-high, lowest value on top." That quote is about
+ * ordering the cards WITHIN one such batch relative to each other, not about the batch versus whatever already
+ * sits on the pile — a single-card push has nothing to order and is intentionally left alone by both callers.
+ */
+function lowToHighForCleanup(cards: Card[]): Card[] {
+  // Descending by value: the highest card is pushed first, the lowest last — so the lowest ends up on top.
+  return [...cards].sort((a, b) => cardValue(b) - cardValue(a));
+}
+
+/**
  * Legacy-only (Missions 4 and 11): pushes `cards` onto the discard pile — the shared tail for both a covered
  * DEFEND and an enemy's played table cards on defeat (exact or overkill). When GameState.discardCleanupLowToHigh
- * is set, sorts the batch so the LOWEST-value card ends up on top (the array's last element, matching how
- * rules.ts's discardPileTopValue reads "top") instead of whatever order the caller collected them in — sourced
- * from an independent fan digital-reimplementation's rules doc's "M4+ Cleanup discard ordering: when discarding
- * played cards during cleanup, place them low-to-high, lowest value on top." A no-op wrapper (behaves exactly
- * like `state.discardPile.push(...)`) for every mission that doesn't set the flag, or for a single-card push
- * (nothing to order), same shape as banishCards/toReserveDeck above.
+ * is set, sorts the batch via lowToHighForCleanup (see its doc comment for the sourced rule) instead of using
+ * whatever order the caller collected the cards in. A no-op wrapper (behaves exactly like
+ * `state.discardPile.push(...)`) for every mission that doesn't set the flag, or for a single-card push (nothing
+ * to order), same shape as banishCards/toReserveDeck above.
  */
 function pushToDiscardPile(state: GameState, cards: Card[]): void {
   if (cards.length === 0) return;
@@ -623,9 +647,7 @@ function pushToDiscardPile(state: GameState, cards: Card[]): void {
     state.discardPile.push(...cards);
     return;
   }
-  // Descending by value: the highest card is pushed first, the lowest last — so the lowest ends up on top.
-  const ordered = [...cards].sort((a, b) => cardValue(b) - cardValue(a));
-  state.discardPile.push(...ordered);
+  state.discardPile.push(...lowToHighForCleanup(cards));
 }
 
 /**
@@ -701,6 +723,16 @@ function resolveArcaneBolts(state: GameState, cards: Card[]): number {
  * multiplier to apply (1 normally, 2 for Clubs, 3 for Clubs + a Cleave card). `ignoreImmunity` is Legacy-only:
  * true for an attack combined with a claimed Jester, which ignores immunity for that attack only (unlike classic
  * Regicide's Jester, this does NOT permanently set enemy.immunityBroken).
+ *
+ * DECISION (see the Spades branch below): since Legacy's own Jester claim never sets enemy.immunityBroken — that's
+ * deliberate and tested, not a bug, see legacy.test.ts's "not a permanent immunity break" case — a Spades play
+ * blocked by immunity under ruleset 'legacy' banks into enemy.blockedSpadesShield but can NEVER be redeemed:
+ * the only code that ever folds blockedSpadesShield into real spadesShield is activateJester, which is classic
+ * Regicide's Jester action and is never reachable in a Legacy game (Legacy uses playJester/claimJester instead,
+ * gated separately). Rewiring claimJester to also permanently break immunity was considered and rejected — it
+ * would contradict the sourced, footage-confirmed, already-tested one-shot behavior above, for every Legacy
+ * mission's Jester interactions, not just the dual-immune/Paladin edge case this was found from. Instead, the log
+ * message below is ruleset-aware so it never promises a payoff that can't happen.
  */
 function resolveSuitPowers(
   state: GameState,
@@ -713,26 +745,37 @@ function resolveSuitPowers(
   const enemy = state.currentEnemy!;
   // Mission 11: the current enemy is also immune to whatever class(es) sit on top of the discard pile and the
   // banish pile right now — recomputed live rather than stored, since both piles keep changing across the fight
-  // (see GameState.pileTopEnemyBonus / rules.ts's pileTopImmuneSuits).
-  const pileImmuneSuits = state.pileTopEnemyBonus ? pileTopImmuneSuits(state.discardPile, state.banishPile) : [];
+  // (see GameState.pileTopEnemyBonus / rules.ts's pileTopImmuneSuits, which bounds this against the enemy's own
+  // inherent immunity so the two piles can never combine into an all-4-classes lockout).
+  const pileImmuneSuits = state.pileTopEnemyBonus ? pileTopImmuneSuits(state.discardPile, state.banishPile, enemy) : [];
   const blocked = (s: 'H' | 'D' | 'C' | 'S') =>
     !ignoreImmunity &&
     !enemy.immunityBroken &&
     !corruptedSuits.includes(s) &&
     (isSuitBlockedByImmunity(s, enemy) || state.zoneImmuneSuits.includes(s) || pileImmuneSuits.includes(s));
   const immuneNoun = state.ruleset === 'legacy' ? 'class' : 'suit';
+  // Which of blocked()'s three OR'd sources is actually responsible for a given blocked suit, so the log names
+  // the real cause instead of always implying the enemy's own printed class/suit. Checked in the same precedence
+  // blocked()'s OR uses (own class, then Mission 12's mission-zone flip, then Mission 11's discard/banish pile
+  // tops), so a suit blocked by more than one source at once reports the first that applies. Only meaningful to
+  // call when blocked(s) is already known true.
+  const blockedClause = (s: 'H' | 'D' | 'C' | 'S') => {
+    if (isSuitBlockedByImmunity(s, enemy)) return `the enemy is immune to its own ${immuneNoun}`;
+    if (state.zoneImmuneSuits.includes(s)) return `the enemy is immune to ${immuneNoun} via the mission zone`;
+    return `the enemy is immune to ${immuneNoun} via the discard/banish piles`;
+  };
 
   if (suits.includes('H')) {
-    if (blocked('H')) log(state, `${powerLabel(state, 'H')} blocked — the enemy is immune to its own ${immuneNoun}.`);
+    if (blocked('H')) log(state, `${powerLabel(state, 'H')} blocked — ${blockedClause('H')}.`);
     else resolveHearts(state, totalValue, hasSpecial(cards, 'REVIVE') ? 2 : 0);
   }
   if (suits.includes('D')) {
-    if (blocked('D')) log(state, `${powerLabel(state, 'D')} blocked — the enemy is immune to its own ${immuneNoun}.`);
+    if (blocked('D')) log(state, `${powerLabel(state, 'D')} blocked — ${blockedClause('D')}.`);
     else resolveDiamonds(state, totalValue, hasSpecial(cards, 'INSPIRE') ? 2 : 0);
   }
   let clubsMultiplier = 1;
   if (suits.includes('C')) {
-    if (blocked('C')) log(state, `${powerLabel(state, 'C')} blocked — the enemy is immune to its own ${immuneNoun}.`);
+    if (blocked('C')) log(state, `${powerLabel(state, 'C')} blocked — ${blockedClause('C')}.`);
     else {
       clubsMultiplier = hasSpecial(cards, 'CLEAVE') ? 3 : 2;
       if (clubsMultiplier === 3) log(state, `${powerLabel(state, 'C')}: damage tripled (Cleave).`);
@@ -741,7 +784,14 @@ function resolveSuitPowers(
   if (suits.includes('S')) {
     if (blocked('S')) {
       enemy.blockedSpadesShield += totalValue;
-      log(state, `${powerLabel(state, 'S')} blocked — the enemy is immune to its own ${immuneNoun} (shield banked for later).`);
+      // Only classic Regicide's Jester (activateJester) ever redeems blockedSpadesShield — Legacy's claimJester
+      // never sets immunityBroken (see this function's own doc comment above), so under ruleset 'legacy' this
+      // value can never convert into real shield. Don't promise a payoff Legacy can't deliver.
+      const canRedeemLater = state.ruleset !== 'legacy';
+      log(
+        state,
+        `${powerLabel(state, 'S')} blocked — ${blockedClause('S')}${canRedeemLater ? ' (shield banked for later).' : '.'}`,
+      );
     } else if (hasSpecial(cards, 'BULWARK')) {
       enemy.spadesShield = enemy.baseAttack;
       log(state, `${powerLabel(state, 'S')}: the enemy's attack is reduced to 0 (Bulwark).`);
@@ -848,16 +898,25 @@ function finishDeferredAttackTurn(state: GameState, blockNextAttack: boolean): E
  * GameState.zoneVengeanceOnKill / finishEnemyDefeatTail). Absent for the recursive splash-damage self-call
  * (Mission 5's exactKillSplashDamage — never combined with Mission 6's zoneVengeanceOnKill in practice, but
  * threaded through anyway so a chained kill from the same play stays covered by the same shield).
+ * `forcedPlay` — true when the play that landed this hit only happened because YIELD was rejected by
+ * allOtherPlayersYieldedLastTurn (every other player at the table had already yielded, leaving the current player
+ * no legal way to pass — see playCards/resolveComboAssist, which compute this fresh from state right before
+ * calling in). Exempts the exactKillOnly overkill-recycle branch just below: with no real choice but to play
+ * *something*, an overkill here isn't a decision the player made, so the enemy should go down for good like any
+ * other kill instead of shrugging it off and healing (see legacy-mission-playtest-findings for the bug this
+ * closes). Absent (false) for the recursive splash-damage self-call and for CLAIM_JESTER's call, neither of
+ * which is a response to a rejected yield.
  */
-function dealDamageAndCheckDefeat(state: GameState, damage: number, attackIncludesGuardian = false): boolean {
+function dealDamageAndCheckDefeat(state: GameState, damage: number, attackIncludesGuardian = false, forcedPlay = false): boolean {
   const enemy = state.currentEnemy!;
   enemy.damageTaken += damage;
   const remaining = enemy.maxHealth - enemy.damageTaken;
   if (remaining > 0) return false;
 
-  if (state.ruleset === 'legacy' && state.exactKillOnly && remaining < 0) {
+  if (state.ruleset === 'legacy' && state.exactKillOnly && remaining < 0 && !forcedPlay) {
     // Overkill on an exact-kill-only enemy doesn't defeat it — it recycles to the back of the enemy line,
-    // wounds healed, to be fought again later (see GameState.exactKillOnly).
+    // wounds healed, to be fought again later (see GameState.exactKillOnly). Exempted when forcedPlay is true —
+    // see this function's own doc comment.
     log(state, `${enemyLabel(enemy)} shrugs off the overkill and slinks to the back of the line, wounds healed!`);
     state.discardPile.push(...enemy.tableCards);
     enemy.damageTaken = 0;
@@ -889,7 +948,17 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number, attackInclud
   if (state.ruleset === 'legacy') {
     // Legacy enemies always go to the discard pile — no exact-damage/return-to-deck effect (that's mission-specific
     // in the physical game, and doesn't apply cleanly since Legacy enemies don't carry a J/Q/K-style card value).
-    log(state, state.exactKillOnly ? `${enemyLabel(enemy)} felled by an exact hit — banished for good!` : `${enemyLabel(enemy)} defeated!`);
+    // `state.exactKillOnly` alone used to be enough to tell this was an exact hit, since every overkill was caught
+    // by the recycle branch above — no longer true now that a forcedPlay overkill can fall through here too, so
+    // this checks `remaining === 0` directly instead.
+    log(
+      state,
+      state.exactKillOnly
+        ? remaining === 0
+          ? `${enemyLabel(enemy)} felled by an exact hit — banished for good!`
+          : `${enemyLabel(enemy)} is overwhelmed by the forced attack — banished for good despite the overkill!`
+        : `${enemyLabel(enemy)} defeated!`,
+    );
     if (state.exactKillToReserveDeck && remaining === 0) {
       // Mission 4: an exact hit seals a card representing the specimen onto the top of the reserve deck instead
       // of letting it fall into the discard pile — its value mirrors the enemy's attack tier (10/15/20).
@@ -1306,10 +1375,33 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   let reserveDeck: Card[];
   if (capturedPilesActive) {
     // UNSOURCED BALANCE JUDGMENT CALL (see buildCapturedPiles's own doc comment): scale each pile down for a
-    // smaller table instead of always carving out the sourced 30-card fixed split — reaches that sourced figure
-    // exactly once there are enough players (3-4) for it to plausibly be the tested case, and leaves more of the
-    // party in the actual tavern deck for a solo or 2-player fight.
-    const pileSize = Math.min(10, 4 + 2 * n);
+    // smaller table instead of always carving out the sourced 30-card fixed split — a solo or 2-player fight gets
+    // a smaller pile, leaving more of the party in the actual tavern deck.
+    //
+    // SECOND-PASS BALANCE FIX (2026-08-28, unsourced — see the mission-9-recheck sim, deleted after use, and the
+    // legacy-mission-playtest-findings memory doc): the first pass's `Math.min(10, 4 + 2*n)` grows the pile size
+    // monotonically with player count, reaching the sourced 10/pile (30 total) "once there are enough players
+    // (3-4)" — but this engine's OWN per-player-count hand limit (8/7/6/5) times player count means the initial
+    // hand deal alone claims MORE total cards as n grows (8, 14, 18, 20) even though each individual hand shrinks,
+    // while the leftover-party pool the first pass left behind actually SHRANK as n grew (22, 16, 10, 10 before
+    // extras/jesters). Measured against the actual numbers this produces: a solo game keeps 22 cards in the
+    // tavern deck after the opening deal (fine — this is what the first pass fixed) and a 2-player game keeps 10
+    // (tight but survivable), but a 3-player game is left with exactly 1 card and a 4-player game is left with
+    // exactly 0 — the entire reserve deck is consumed by dealing starting hands, before a single turn is played,
+    // at precisely the player counts (3-4) the sourced 30-card split was supposedly tested at. That's a
+    // reintroduction of the same bug the first pass fixed, just relocated to higher player counts instead of
+    // solo. This now additionally caps the pile size so the tavern deck always keeps a minimum buffer of cards
+    // after the opening deal, computed directly from this mission's own actual numbers (party size, extras,
+    // jesters, and the real per-count hand limit) rather than a flat player-count formula, so it holds regardless
+    // of how those inputs change — and only trims the pile size, never grows it past the first pass's own
+    // `Math.min(10, 4 + 2*n)` cap, so a solo/2-player fight (already comfortably above the buffer) is unaffected.
+    const MIN_STARTING_RESERVE = 10;
+    const initialHandDeal = n * (MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5);
+    const extrasAndJesters = (action.extraReserveCards?.length ?? 0) + action.jesterCount;
+    const maxPileSizeForReserve = Math.floor(
+      (partyForReserve.length + extrasAndJesters - initialHandDeal - MIN_STARTING_RESERVE) / 3,
+    );
+    const pileSize = Math.max(1, Math.min(10, 4 + 2 * n, maxPileSizeForReserve));
     const split = buildCapturedPiles(partyForReserve, buildRng, pileSize);
     capturedPiles = split.piles;
     reserveDeck = buildLegacyReserveDeck([...split.leftoverParty, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);
@@ -1472,15 +1564,15 @@ function startEndlessRound(state: GameState): EngineResult {
  * class powers, damage, and the resulting AWAIT_DEFEND/turn-advance. Shared by the immediate PLAY_CARDS path
  * (including a Kinfolk Flute combo card folded in), by RESOLVE_COMBO once an open Scarlet Whistle assist window
  * is locked in, and by claimJester's synthetic 8-strength Jester attack.
+ * `forcedPlay` — see dealDamageAndCheckDefeat's own doc comment; threaded straight through to it. playCards and
+ * resolveComboAssist both compute this fresh (allOtherPlayersYieldedLastTurn(state)) right before calling in,
+ * since neither path has done anything by that point that would change what that check reports; claimJester never
+ * passes it (defaults to false) since a Jester claim isn't a response to a rejected yield.
  */
-function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null): EngineResult {
+function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null, forcedPlay = false): EngineResult {
   const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
 
-  log(
-    state,
-    `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${shape.totalValue}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
-  );
   const arcaneBonus = state.ruleset === 'legacy' ? resolveArcaneBolts(state, cards) : 0;
   // Mage, Reaver, Guardian, Druid, Chanter, and Evergreen cards' printed suits don't join the combined
   // suit-power resolution below — a Mage's (or a secondClassArcane card's bonus) class power is the arcane bolt
@@ -1629,18 +1721,38 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   // Mission 10: an enemy Paladin's extra power reduces the damage it takes by its own base strength (see
   // applyEnemyPaladinDamageReduction) — a no-op for every other mission/enemy.
   const damage = applyEnemyPaladinDamageReduction(state, rawDamage);
+  // Logged here — after Clubs' clubsMultiplier, a Reaver's reaverBonus, an Arcane bolt's arcaneBonus, and any
+  // Paladin damage reduction are all folded in — rather than up front off the pre-bonus shape.totalValue, so the
+  // number shown always matches what actually lands on the enemy (enemy.damageTaken below).
+  log(
+    state,
+    `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${damage}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
+  );
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
   // Mission 6, sourced fix: a winning attack that includes a Guardian cancels Myla's zoneVengeanceOnKill
   // team-damage step entirely (see finishEnemyDefeatTail) — a documented mechanic missing from the shipped
   // version. Inert on every other mission, since guardianCards is always empty there.
-  const defeated = dealDamageAndCheckDefeat(state, damage, guardianCards.length > 0);
+  const defeated = dealDamageAndCheckDefeat(state, damage, guardianCards.length > 0, forcedPlay);
 
   if (state.phase !== 'IN_PROGRESS') return ok(state);
-  if (defeated) return ok(state); // enemy was defeated, same player continues against the next one
+
+  if (defeated) {
+    // Sourced fix: a Chanter's chant fires on ANY play it's part of, including one that also lands the killing
+    // blow — dealDamageAndCheckDefeat has already fully resolved what happens next (continue against the newly
+    // revealed enemy, Mission 9's exact-kill rescue choice, etc.); beginChant's forced draw (and any resulting
+    // trim window) now runs on top of that, restoring this already-decided turnPhase/pendingDamage once trimming
+    // is done rather than resolving a deferred attack against an enemy that's already dead (see
+    // ChanterResolution's 'resumeResolved'). The shipped version only ever called beginChant below this early
+    // return, so a play that included BOTH a Chanter and the killing blow silently dropped the chant entirely.
+    if (chantCount > 0) {
+      return beginChant(state, chantCount, { kind: 'resumeResolved', turnPhase: state.turnPhase, pendingDamage: state.pendingDamage });
+    }
+    return ok(state); // enemy was defeated, same player continues against the next one
+  }
 
   if (chantCount > 0) {
-    return beginChant(state, chantCount, guardianBlocksNextAttack);
+    return beginChant(state, chantCount, { kind: 'deferredAttack', blockNextAttack: guardianBlocksNextAttack });
   }
 
   // Azure Emblem (Mission 6 relic), sourced fix: whenever a Mage joins the attack, the Mage's OWN player gets
@@ -1760,7 +1872,11 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
     return ok(state);
   }
 
-  return resolveCommittedPlay(state, player, shapeCards, null);
+  // See dealDamageAndCheckDefeat's own doc comment: true here means every other player had already yielded, so
+  // this player's own YIELD would have been rejected by allOtherPlayersYieldedLastTurn — this play was compulsory,
+  // not a voluntary choice to attack (let alone to overkill).
+  const forcedPlay = allOtherPlayersYieldedLastTurn(state);
+  return resolveCommittedPlay(state, player, shapeCards, null, forcedPlay);
 }
 
 /**
@@ -1833,9 +1949,14 @@ function resolveComboAssist(state: GameState, action: Extract<GameAction, { type
 
   const player = currentPlayer(state);
   const cards = state.currentEnemy!.tableCards.filter((c) => state.comboAssist!.cardIds.includes(c.id));
+  // Recomputed fresh rather than carried over from playCards' own opening of this window — nothing that happens
+  // during an open assist window (only ASSIST_COMBO, which never touches lastActionWasYield) can change what this
+  // reports, so it's exactly what it would have been back when the attacker committed to this play instead of
+  // yielding. See dealDamageAndCheckDefeat's own doc comment.
+  const forcedPlay = allOtherPlayersYieldedLastTurn(state);
   state.comboAssist = null;
   state.turnPhase = 'AWAIT_PLAY';
-  return resolveCommittedPlay(state, player, cards, null);
+  return resolveCommittedPlay(state, player, cards, null, forcedPlay);
 }
 
 function yieldTurn(state: GameState, action: Extract<GameAction, { type: 'YIELD' }>): EngineResult {
@@ -2224,21 +2345,33 @@ function resolveZonePurge(state: GameState, action: Extract<GameAction, { type: 
 }
 
 /**
+ * Legacy-only (Mission 8): runs whatever a chant's `onResolved` (see ChanterResolution) says to do once every
+ * pending player has trimmed back down — either resolving the play's own deferred enemy-attack-back tail, or
+ * restoring the turnPhase/pendingDamage dealDamageAndCheckDefeat had already resolved before the chant ran.
+ */
+function runChantResolution(state: GameState, onResolved: ChanterResolution): EngineResult {
+  if (onResolved.kind === 'deferredAttack') return finishDeferredAttackTurn(state, onResolved.blockNextAttack);
+  state.turnPhase = onResolved.turnPhase;
+  state.pendingDamage = onResolved.pendingDamage;
+  return ok(state);
+}
+
+/**
  * Legacy-only (Mission 8): opens (or immediately clears) a chant — every player at the table draws `count`
  * cards at once, even past their hand limit, then whoever's now over their limit trims back down one player at
- * a time via RESOLVE_CHANT. `blockNextAttack` mirrors a Guardian shield raised in the same play; it's carried
- * through to whenever the chant's tail (the deferred enemy-attack resolution) finally runs.
+ * a time via RESOLVE_CHANT. `onResolved` (see ChanterResolution) is carried through to whenever the chant's tail
+ * finally runs — either right away, if nobody ended up over their limit, or once the last trim resolves.
  */
-function beginChant(state: GameState, count: number, blockNextAttack: boolean): EngineResult {
+function beginChant(state: GameState, count: number, onResolved: ChanterResolution): EngineResult {
   const totalDrawn = state.players.reduce((sum, p) => sum + forceDrawCards(state, p, count), 0);
   if (totalDrawn > 0) log(state, `The chant draws ${totalDrawn} card(s) across the table.`);
 
   const pendingPlayerIds = state.players.filter((p) => p.hand.length > state.maxHandSize).map((p) => p.id);
   if (pendingPlayerIds.length === 0) {
-    return finishDeferredAttackTurn(state, blockNextAttack);
+    return runChantResolution(state, onResolved);
   }
 
-  state.chanterWindow = { pendingPlayerIds, blockNextAttack };
+  state.chanterWindow = { pendingPlayerIds, onResolved };
   state.turnPhase = 'AWAIT_CHANT_TRIM';
   log(state, `${pendingPlayerIds.length} player(s) are over their hand limit and must trim back down.`);
   return ok(state);
@@ -2268,14 +2401,13 @@ function resolveChant(state: GameState, action: Extract<GameAction, { type: 'RES
   state.discardPile.push(...cards);
   log(state, `${player.name} trims ${cards.length} card(s) back down to their hand limit.`);
 
-  const { blockNextAttack } = state.chanterWindow;
+  const { onResolved } = state.chanterWindow;
   if (rest.length === 0) {
     state.chanterWindow = null;
-    state.turnPhase = 'AWAIT_PLAY';
-    return finishDeferredAttackTurn(state, blockNextAttack);
+    return runChantResolution(state, onResolved);
   }
 
-  state.chanterWindow = { pendingPlayerIds: rest, blockNextAttack };
+  state.chanterWindow = { pendingPlayerIds: rest, onResolved };
   return ok(state);
 }
 

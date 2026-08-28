@@ -214,7 +214,13 @@ export interface EnemyState {
   damageTaken: number;
   /** Active cumulative spade-shield reduction to this enemy's attack. */
   spadesShield: number;
-  /** Spade values played while this enemy was immune to spades; folded into spadesShield if immunity is later broken. */
+  /**
+   * Spade values played while this enemy was immune to spades; folded into spadesShield if immunity is later
+   * broken. That redemption only happens in classic Regicide (engine.ts's activateJester) — Legacy's own Jester
+   * claim (claimJester) never sets immunityBroken (deliberate, one-shot-only, see legacy.test.ts), so this value
+   * accumulates but can never be redeemed in a Legacy game; see resolveSuitPowers's Spades branch, which keeps
+   * its blocked-play log message ruleset-aware so it doesn't promise a payoff Legacy can't deliver.
+   */
   blockedSpadesShield: number;
   /** True once a Jester has cancelled this enemy's suit immunity. */
   immunityBroken: boolean;
@@ -274,6 +280,21 @@ export type TurnPhase =
   | 'AWAIT_END_OF_TURN'
   | 'AWAIT_RESCUE_CHOICE'
   | 'AWAIT_BARD_SURRENDER';
+
+/**
+ * Legacy-only (Mission 8): what engine.ts's resolveChant does once the last pending player finishes trimming
+ * their hand back down from an open chant window (see GameState.chanterWindow):
+ * - `deferredAttack` — the play that opened the chant did NOT defeat the enemy, so the play's own deferred
+ *   enemy-attack-back tail (mirroring an ordinary play's resolution) still needs to run once trimming is done,
+ *   honoring a Guardian shield (`blockNextAttack`) raised in the same play.
+ * - `resumeResolved` — the play ALSO defeated the enemy: dealDamageAndCheckDefeat already fully resolved what
+ *   happens next (continue against the newly-revealed enemy, Mission 9's exact-kill rescue choice, etc.) before
+ *   the chant's forced draw ever ran. Restores that already-decided `turnPhase`/`pendingDamage` once trimming is
+ *   done, instead of resolving a deferred attack against an enemy that's already dead.
+ */
+export type ChanterResolution =
+  | { kind: 'deferredAttack'; blockNextAttack: boolean }
+  | { kind: 'resumeResolved'; turnPhase: TurnPhase; pendingDamage: number };
 
 /**
  * Legacy-only (Mission 9): one of the 3 captured piles seeding GameState.capturedPiles. `faceDown[0]` is the
@@ -400,6 +421,11 @@ export interface GameState {
    * spirals toward whatever the highest card played that turn happened to leave on top — surviving a hit (a
    * covered DEFEND) is exactly what hands the next attack its own worst-case bonus (see engine.ts's
    * pushToDiscardPile).
+   *
+   * The same flag also governs engine.ts's banishCards, for the identical reason one pile over: Mission 11
+   * routes a defeated enemy's played table cards to the BANISH pile instead of the discard pile (see
+   * finishEnemyDefeatTail), and pileTopEnemyBonus reads that pile's top value too (rules.ts's
+   * banishPileTopValue/pileTopImmuneSuits) — an unsorted batch there would reopen the same spiral one pile over.
    */
   discardCleanupLowToHigh: boolean;
   /**
@@ -517,10 +543,9 @@ export interface GameState {
    * Legacy-only (Mission 8): the open chant window, opened when a Chanter card is played (see SuitedCard.chanter).
    * Every player has already drawn the chant's card count at once, even past their hand limit; `pendingPlayerIds`
    * queues whoever is now over their hand limit and still needs to trim back down via RESOLVE_CHANT, front of
-   * the queue first. `blockNextAttack` mirrors a Guardian shield raised in the same play, applied once the last
-   * trim resolves and the turn's enemy-attack tail finally runs.
+   * the queue first. `onResolved` — see ChanterResolution — carries what to do once the last trim resolves.
    */
-  chanterWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
+  chanterWindow: { pendingPlayerIds: string[]; onResolved: ChanterResolution } | null;
   /**
    * Legacy-only (Mission 9): when true, gates the whole captured-piles deckbuilding mechanic — the 3
    * `capturedPiles`, the AWAIT_END_OF_TURN banish-to-rescue/decline choice at the end of every turn (skipped
@@ -866,7 +891,7 @@ export interface ClientGameState {
   /** See GameState.zonePurge. Public information — it's on the table. */
   zonePurge: { playerId: string } | null;
   /** See GameState.chanterWindow. Public information — it's on the table. */
-  chanterWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
+  chanterWindow: { pendingPlayerIds: string[]; onResolved: ChanterResolution } | null;
   /** See GameState.capturedPilesActive. */
   capturedPilesActive: boolean;
   /** See GameState.capturedPiles — each pile's face-down cards are redacted to a count, its face-up card is public. */

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
+import { makeRng } from '../game/deck.js';
+import { missionZoneValueSum } from '../game/rules.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
@@ -205,6 +207,40 @@ describe('legacy: exact-kill-only recycling (hydra mission)', () => {
     state = res.state;
     expect(state.phase).toBe('WON');
   });
+
+  it('a forced play (YIELD rejected because everyone else already yielded) that overkills defeats the enemy for real, instead of recycling it', () => {
+    // Same overkill setup as the voluntary-overkill test above (15 taken, +10 overkills a 20-health hydra), but
+    // with a second player whose last action was a yield — so allOtherPlayersYieldedLastTurn is true and the
+    // current player has no legal way to yield instead of playing.
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0', 'p1'],
+      playerNames: ['Player 0', 'Player 1'],
+      seed: 'hydra-forced-test',
+      party: buildInitialParty(),
+      enemies: [hydra, { name: 'Second Hydra', suit: 'C', health: 15, attack: 5 }],
+      jesterCount: 0,
+      exactKillOnly: true,
+    });
+    let state = ensureOk(res).state;
+    state = rig(state, [suited('C', '10')], { damageTaken: 15 });
+    state.lastActionWasYield[1] = true; // Player 1 (the only other player) already yielded last turn
+
+    // YIELD is rejected outright — the current player has no legal way to pass.
+    const yieldRes = applyAction(state, { type: 'YIELD', playerId: state.players[0].id });
+    expect(yieldRes.ok).toBe(false);
+
+    // Forced to play instead: this overkills the hydra by 5, but since the player never had a real choice, the
+    // enemy must go down for good rather than shrugging it off and healing back up.
+    const playRes = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }),
+    );
+    state = playRes.state;
+    expect(state.currentEnemy?.name).toBe('Second Hydra'); // moved on to the next enemy
+    expect(state.castleDeck.length).toBe(0); // NOT recycled to the back of the line (contrast: 1, healed, above)
+    expect(state.log.some((e) => e.message.includes('shrugs off the overkill'))).toBe(false);
+    expect(state.log.some((e) => e.message.includes('overwhelmed by the forced attack'))).toBe(true);
+  });
 });
 
 describe('legacy: feign death', () => {
@@ -339,6 +375,74 @@ describe('legacy: jester claim', () => {
     state = rig(state, [j]);
     const res = applyAction(state, { type: 'PLAY_JESTER', playerId: state.players[0].id, cardId: j.id });
     expect(res.ok).toBe(false);
+  });
+
+  it('a claimed Jester never redeems a Paladin/dual-immune enemy\'s already-banked Spades value (one-shot only, unlike classic Regicide)', () => {
+    // Dual immune, Paladin-class (Spades) among them — the shape of the dual-immune bosses (Mission 3, Mission
+    // 12's original Hierarch, etc.) that actually surfaced this interaction: a Spades play against a Paladin
+    // (or dual-immune) enemy banks into blockedSpadesShield instead of applying, and — per resolveSuitPowers's
+    // own doc comment and this suite's "not a permanent immunity break" case above — nothing in Legacy ever sets
+    // enemy.immunityBroken, so that banked value can never convert into real spadesShield the way classic
+    // Regicide's Jester (activateJester) would (see engine.test.ts's mirror-image "retroactively activates"
+    // case). Regression coverage for the fix: the blocked-Spades log message must not promise a payoff under
+    // Legacy that structurally can never happen.
+    const enemy: LegacyEnemySpec = { name: 'Ironclad Warden', suit: 'S', secondSuit: 'H', health: 100, attack: 5 };
+    let state = startMission(2, [enemy], 0);
+    const [p1, p2] = state.players;
+
+    // Player 1 plays a Spades card against the Paladin-immune enemy — blocked and banked, not applied.
+    const spadeCard = suited('S', '5');
+    state = rig(state, [spadeCard]);
+    let logLenBefore = state.log.length;
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: p1.id, cardIds: [spadeCard.id] }));
+    state = res.state;
+    expect(state.currentEnemy?.spadesShield).toBe(0);
+    expect(state.currentEnemy?.blockedSpadesShield).toBe(5);
+    let newLogs = state.log.slice(logLenBefore).map((e) => e.message);
+    expect(newLogs.some((m) => m.includes('blocked'))).toBe(true);
+    // THE FIX: Legacy has no mechanism that can ever redeem this, so the log must not claim otherwise.
+    expect(newLogs.some((m) => m.includes('banked for later'))).toBe(false);
+
+    // Cover the counterattack so play passes to player 2.
+    state = rig(state, [suited('D', '9')]);
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: p1.id, cardIds: [state.players[state.currentPlayerIndex].hand[0].id] }));
+    state = res.state;
+    expect(state.currentPlayerIndex).toBe(1);
+
+    // Player 2 plays the Jester into the open, then claims it themselves: a free 8-strength attack (in Diamonds,
+    // so it can't be confused with a fresh Spades play) plus a full hand refill.
+    const j = jester();
+    state = rig(state, [j]);
+    res = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId: p2.id, cardId: j.id }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: p2.id, attackSuit: 'D' }));
+    state = res.state;
+
+    // The claim resolves (8 damage dealt, on top of the 5 already dealt = 13) but does NOT retroactively unlock
+    // the value banked before it, and does not permanently break immunity either.
+    expect(state.currentEnemy?.damageTaken).toBe(13);
+    expect(state.currentEnemy?.immunityBroken).toBe(false);
+    expect(state.currentEnemy?.blockedSpadesShield).toBe(5);
+    expect(state.currentEnemy?.spadesShield).toBe(0);
+
+    // Cover the claimed attack's own counterattack so play passes back to player 1.
+    state = rig(state, [suited('D', '9')]);
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: p2.id, cardIds: [state.players[state.currentPlayerIndex].hand[0].id] }));
+    state = res.state;
+    expect(state.currentPlayerIndex).toBe(0);
+
+    // Proof this is a genuine dead end, not just a bookkeeping quirk: immunity is still fully live afterward — a
+    // brand new Spades play still gets blocked and banked on top, exactly as if the Jester had never been claimed.
+    const spadeCard2 = suited('S', '3');
+    state = rig(state, [spadeCard2]);
+    logLenBefore = state.log.length;
+    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: p1.id, cardIds: [spadeCard2.id] }));
+    state = res.state;
+    expect(state.currentEnemy?.blockedSpadesShield).toBe(8); // 5 (still stuck from before the claim) + 3 (freshly blocked)
+    expect(state.currentEnemy?.spadesShield).toBe(0);
+    expect(state.currentEnemy?.immunityBroken).toBe(false);
+    newLogs = state.log.slice(logLenBefore).map((e) => e.message);
+    expect(newLogs.some((m) => m.includes('banked for later'))).toBe(false);
   });
 });
 
@@ -509,6 +613,54 @@ describe('legacy: Dual-class Stickers reward (mission 2)', () => {
     const alreadyStickered: Card = { ...suited('D', '5'), secondSuit: 'C' };
     const stickered = applyDualClassStickers([arcaneCard, alreadyStickered], 2);
     expect(stickered).toEqual([arcaneCard, alreadyStickered]); // neither was eligible
+  });
+});
+
+describe('legacy: party.ts reward randomness accepts a seeded rng (determinism)', () => {
+  // These four functions used to call Math.random() directly, breaking reproducibility for any seeded campaign
+  // simulation/test from the point a mission grants one of these rewards onward. They now take an optional
+  // `rng: () => number` (defaulting to Math.random so every existing call site is unaffected) — this locks in
+  // that a shared seed reproduces the exact same pick, and a different seed can (not must, just in general)
+  // diverge.
+  it('applyDualClassStickers is reproducible under the same seed', () => {
+    const party = buildInitialParty();
+    const a = applyDualClassStickers(party, 4, makeRng('sticker-seed'));
+    const b = applyDualClassStickers(party, 4, makeRng('sticker-seed'));
+    expect(a).toEqual(b);
+  });
+
+  it('applyMageSticker is reproducible under the same seed', () => {
+    const party = buildInitialParty();
+    const a = applyMageSticker(party, makeRng('mage-seed'));
+    const b = applyMageSticker(party, makeRng('mage-seed'));
+    expect(a).toEqual(b);
+  });
+
+  it('applyGuardianSticker is reproducible under the same seed', () => {
+    const party = buildInitialParty();
+    const a = applyGuardianSticker(party, makeRng('guardian-seed'));
+    const b = applyGuardianSticker(party, makeRng('guardian-seed'));
+    expect(a).toEqual(b);
+  });
+
+  it('applyCorruptAnotherCard is reproducible under the same seed', () => {
+    const party = buildInitialParty();
+    const a = applyCorruptAnotherCard(party, new Set(), makeRng('corrupt-seed'));
+    const b = applyCorruptAnotherCard(party, new Set(), makeRng('corrupt-seed'));
+    expect(a).toEqual(b);
+  });
+
+  it('applyReward threads the same seeded rng through to every sub-reward it applies', () => {
+    // Mission 5's reward exercises both dualClassStickers and corruptAnotherCard in one call. The SAME base
+    // party is reused for both runs (rather than calling buildInitialParty() twice) so only the rng-driven
+    // picks can differ; ids are stripped before comparing since buildRecruitCard mints each new recruit's id
+    // from Date.now()/Math.random() independent of this threading, and that's out of scope here.
+    const mission5 = getMission(5)!;
+    const basePartyForReward = buildInitialParty();
+    const stripIds = (party: Card[]) => party.map(({ id: _id, ...rest }) => rest);
+    const a = applyReward(basePartyForReward, mission5.reward, makeRng('reward-seed'));
+    const b = applyReward(basePartyForReward, mission5.reward, makeRng('reward-seed'));
+    expect(stripIds(a)).toEqual(stripIds(b));
   });
 });
 
@@ -1317,6 +1469,68 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, rolling banish-pile 
     expect(state.rollingZoneCards).toEqual([]);
     expect(state.banishPile).toMatchObject([{ suit: 'C', rank: '4' }, { suit: 'D', rank: '3' }]);
   });
+
+  it('REGRESSION (playtest cross-check, 2026-08-28): the ACTUAL mission-5 definition seeds Reaver cards into its own fight, so the banish pile — and the rolling zone buff it feeds — isn\'t permanently inert in real play', () => {
+    // Earlier bug: mission-5's extraReserveCards carried Myla only; the only Reaver cards ever created for this
+    // campaign came from reward.recruits, granted AFTER the mission already ended. With zero Reaver cards ever
+    // playable during the fight itself, nothing could ever call banishCards, so rollingZoneBonus's accumulator
+    // (fed exclusively from the banish pile — see rollMissionZoneBonusCard) could never grow no matter how the
+    // fight was played. This test uses the mission's own real definition end-to-end (not a hand-rigged banishPile,
+    // unlike the accumulation-mechanics test above) to prove that's no longer true.
+    const mission5 = getMission(5)!;
+
+    // Structural guard on the root cause: Mission 5's own fight setup must actually include playable Reaver
+    // cards, not just Myla.
+    const reaverSetupCards = mission5.extraReserveCards?.filter((c) => c.kind === 'suited' && c.reaver) ?? [];
+    expect(reaverSetupCards.length).toBeGreaterThan(0);
+
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'crimson-regression-test',
+      party: buildInitialParty(),
+      enemies: missionEnemiesToSpecs(mission5.enemies),
+      jesterCount: 0,
+      extraReserveCards: mission5.extraReserveCards,
+      rollingZoneBonus: mission5.rollingZoneBonus,
+      exactKillSplashDamage: mission5.exactKillSplashDamage,
+    });
+    if (!res.ok) throw new Error(res.error);
+    let state = res.state;
+    expect(state.banishPile).toEqual([]);
+    expect(state.rollingZoneCards).toEqual([]);
+
+    // Simulate having drawn one of the mission's own Reaver companions into hand (the deterministic equivalent of
+    // it eventually coming up in the shuffled reserve deck during real play), and play it against the live enemy.
+    // Deliberately picked as a non-Clubs Reaver so playing it alone doesn't also trigger Warrior doubling and
+    // overkill the boss — this test is about the banish pile/rolling zone plumbing, not attack math.
+    const drawnReaver = reaverSetupCards.find((c) => c.kind === 'suited' && c.suit !== 'C') as SuitedCard;
+    expect(drawnReaver).toBeDefined();
+    state = structuredClone(state);
+    state.tavernDeck = [suited('C', '6'), ...state.tavernDeck]; // top card the Reaver tears and banishes
+    // A second hand card, untouched by the Reaver play, to cover the boss's own attack once the turn is yielded.
+    state = rig(state, [{ ...drawnReaver, id: 'hand-reaver' }, suited('D', '10')]);
+
+    let step = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: ['hand-reaver'] }));
+    state = step.state;
+
+    // The Reaver's own deck-tear mechanic actually fired: the banish pile now holds the torn reserve card.
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')).toBe(true);
+    expect(state.currentEnemy).not.toBeNull(); // not an overkill — still fighting the same boss
+
+    // A non-killing attack immediately triggers the enemy's own counter-attack (AWAIT_DEFEND) within this same
+    // action — cover it so the turn actually ends and rollMissionZoneBonusCard's end-of-turn cycle runs.
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    step = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }));
+    state = step.state;
+    expect(state.phase).not.toBe('LOST');
+
+    // The rolling zone actually accumulated the banished card — the buff is no longer permanently stuck at zero.
+    expect(state.rollingZoneCards.length).toBeGreaterThan(0);
+    expect(state.rollingZoneCards.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')).toBe(true);
+    expect(missionZoneValueSum(state.rollingZoneCards)).toBeGreaterThan(0);
+  });
 });
 
 describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
@@ -1465,6 +1679,85 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
 
     expect(state.missionZone.length).toBe(2); // Myla + the sacrificed 5, permanently
+  });
+});
+
+describe('legacy: mission 6 setup, bug fix — Guardian cards seeded as fight setup, not just the eventual reward', () => {
+  it('seeds all 4 Guardian faction cards into extraReserveCards — before this fix, no Guardian card existed anywhere until the mission was already won', () => {
+    const mission6 = getMission(6)!;
+    expect(mission6.extraReserveCards?.length).toBe(4);
+    expect(mission6.extraReserveCards?.every((c) => c.kind === 'suited' && c.guardian)).toBe(true);
+    expect(mission6.extraReserveCards?.some((c) => c.kind === 'suited' && c.name === 'Ferro')).toBe(true);
+    // The base 40-card party alone (no extraReserveCards) has zero Guardian cards — confirming the fight-setup
+    // seeding above, not the base party, is what makes the mission's own Guardian-cancels-Myla mechanic
+    // (zoneVengeanceOnKill) reachable during Mission 6 itself instead of only after it's already won.
+    expect(buildInitialParty().some((c) => c.kind === 'suited' && c.guardian)).toBe(false);
+  });
+
+  it('shuffles the 4 fight-setup Guardian cards into the live reserve deck at mission start, alongside the party', () => {
+    const mission6 = getMission(6)!;
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'garden-setup-test',
+      party: buildInitialParty(),
+      enemies: missionEnemiesToSpecs(mission6.enemies),
+      jesterCount: 0,
+      presetMissionZone: mission6.presetMissionZone,
+      zoneVengeanceOnKill: mission6.zoneVengeanceOnKill,
+      extraReserveCards: mission6.extraReserveCards,
+    });
+    const state = ensureOk(res).state;
+    expect(state.missionZone.length).toBe(1); // Myla, preset per presetMissionZone
+    const allCirculatingCards = [...state.players.flatMap((p) => p.hand), ...state.tavernDeck];
+    // 40 party + 4 fight-setup Guardians = 44 total in circulation (Myla's preset zone card isn't drawable).
+    expect(allCirculatingCards.length).toBe(44);
+    expect(allCirculatingCards.filter((c) => c.kind === 'suited' && c.guardian).length).toBe(4);
+  });
+
+  it("playing one of the mission's own fight-setup Guardian cards in the winning attack cancels Myla's strike entirely", () => {
+    const mission6 = getMission(6)!;
+    const ferro = mission6.extraReserveCards!.find((c) => c.kind === 'suited' && c.name === 'Ferro')!;
+    // Boss suit deliberately not Spades (Ferro's suit) — a Guardian's shield power is never immunity-gated (see
+    // engine.ts's guardianCards handling), but keeping suits distinct rules that out as a confound for this test.
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'H', health: 3, attack: 1 };
+    const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'D', health: 20, attack: 1 };
+
+    const started = ensureOk(
+      applyAction(createLobbyState(), {
+        type: 'START_LEGACY_MISSION',
+        playerIds: ['p0'],
+        playerNames: ['Player 0'],
+        seed: 'garden-guardian-test',
+        party: buildInitialParty(),
+        enemies: [boss, next],
+        jesterCount: 0,
+        presetMissionZone: mission6.presetMissionZone,
+        zoneVengeanceOnKill: mission6.zoneVengeanceOnKill,
+        extraReserveCards: mission6.extraReserveCards,
+      }),
+    );
+    let state = rig(started.state, [ferro]); // Ferro (value 3) exactly kills the 3-health boss
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    ).state;
+
+    expect(state.turnPhase).toBe('AWAIT_ZONE_VENGEANCE_CHOICE');
+    expect(state.zoneVengeanceChoice?.attackIncludesGuardian).toBe(true);
+
+    state = ensureOk(
+      applyAction(state, {
+        type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE',
+        playerId: state.players[0].id,
+        cardId: state.currentEnemy!.tableCards[0].id,
+      }),
+    ).state;
+
+    expect(state.missionZone.length).toBe(2); // the zone still grows — only the team-damage step is cancelled
+    expect(state.turnPhase).toBe('AWAIT_PLAY'); // no Myla strike, no AWAIT_DEFEND
+    expect(state.pendingDamage).toBe(0);
   });
 });
 
@@ -2450,7 +2743,10 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
     expect(state.players[0].hand.length).toBe(3);
     expect(state.players[1].hand.length).toBe(9);
     expect(state.turnPhase).toBe('AWAIT_CHANT_TRIM');
-    expect(state.chanterWindow).toEqual({ pendingPlayerIds: [player1Id], blockNextAttack: false });
+    expect(state.chanterWindow).toEqual({
+      pendingPlayerIds: [player1Id],
+      onResolved: { kind: 'deferredAttack', blockNextAttack: false },
+    });
   });
 
   it("rejects a trim attempt from anyone but the front of the queue, and rejects the wrong discard count", () => {
@@ -2503,6 +2799,62 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
     state = res.state;
 
     expect(state.players[0].hand.length).toBe(6); // 0 (played) + 6 drawn (Encore doubles 3 -> 6)
+  });
+
+  it('REGRESSION: a Chanter whose own play also lands the killing blow still fires the chant, then the same player continues against the newly-revealed enemy', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    const next: LegacyEnemySpec = { name: 'Drake', suit: 'S', health: 100, attack: 5 };
+    let state = startMission(1, [boss, next]);
+    // A single Diamonds Chanter card worth 5, with the current enemy's health set to exactly 5 — this one card
+    // both lands the killing blow AND should still trigger the chant (the bug: the shipped version's beginChant
+    // call sat behind the "enemy defeated" early return, so the chant was silently dropped whenever the killing
+    // play included a Chanter).
+    state = rig(state, [chanterCard('D', '5')], { maxHealth: 5 });
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    // The kill resolved (new enemy revealed, same player continues, no defend) ...
+    expect(state.currentEnemy?.name).toBe('Drake');
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+    expect(state.pendingDamage).toBe(0);
+    // ... AND the chant still fired: the played card is gone, then 5 were drawn back.
+    expect(state.players[0].hand.length).toBe(5);
+    expect(state.chanterWindow).toBeNull();
+  });
+
+  it('REGRESSION: when the killing play also overflows a hand, the chant trim window still opens, then resumes to "continue against the new enemy" instead of a deferred attack', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    const next: LegacyEnemySpec = { name: 'Drake', suit: 'S', health: 100, attack: 5 };
+    let state = startMission(2, [boss, next]); // hand limit 7 for 2 players
+    state = structuredClone(state);
+    state.players[0].hand = [chanterCard('D', '3')];
+    state.players[1].hand = Array.from({ length: 6 }, () => suited('H', '2'));
+    if (state.currentEnemy) state.currentEnemy.maxHealth = 3; // this single card is also the killing blow
+    const player0Id = state.players[0].id;
+    const player1Id = state.players[1].id;
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    // The kill already revealed the next enemy before the chant's trim window even opens.
+    expect(state.currentEnemy?.name).toBe('Drake');
+    expect(state.turnPhase).toBe('AWAIT_CHANT_TRIM');
+    expect(state.chanterWindow).toEqual({
+      pendingPlayerIds: [player1Id],
+      onResolved: { kind: 'resumeResolved', turnPhase: 'AWAIT_PLAY', pendingDamage: 0 },
+    });
+
+    const toDiscard = state.players[1].hand.slice(0, 2).map((c) => c.id);
+    const trimRes = ensureOk(applyAction(state, { type: 'RESOLVE_CHANT', playerId: player1Id, discardCardIds: toDiscard }));
+    state = trimRes.state;
+
+    // Resumes to "same player continues their turn against the new enemy" — NOT a deferred attack, since the
+    // enemy that would have attacked back is already dead.
+    expect(state.chanterWindow).toBeNull();
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+    expect(state.pendingDamage).toBe(0);
+    expect(state.currentPlayerIndex).toBe(0);
   });
 });
 
@@ -2579,15 +2931,23 @@ describe('legacy: mission 9 mechanics (captured piles)', () => {
     expect(handCount + state.tavernDeck.length).toBe(22);
   });
 
-  it('reaches the sourced fixed 30-card split (10/pile) once there are enough players (4) for that to be the tested case', () => {
+  it('SECOND-PASS BALANCE FIX: caps the pile split for a 4-player game well below the sourced 30-card figure, since this engine\'s own hand-size table means the opening deal alone would otherwise drain the tavern deck to 0', () => {
     const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 20, attack: 10 };
+    // No extras/jesters here (see startTempleMission's own jesterCount: 0 and unset extraReserveCards) — the real
+    // Mission 9 has 8 Pilgrim extras + 2 jesters at 4p to help absorb the opening deal, so this synthetic
+    // no-extras scenario needs an even smaller pile than the real mission does to keep the same reserve buffer.
     const state = startTempleMission(4, [boss]);
 
-    for (const pile of state.capturedPiles) {
-      expect(pile.faceDown.length).toBe(9);
-    }
     const totalCaptured = state.capturedPiles.reduce((sum, p) => sum + p.faceDown.length + (p.faceUp ? 1 : 0), 0);
-    expect(totalCaptured).toBe(30);
+    // The first pass's Math.min(10, 4+2*4)=10/pile (30 total) left the tavern deck at exactly 0 cards after the
+    // opening 4-player deal (4 * 5-card hand limit = 20 cards, against a 40-card party with none of this
+    // scenario's extras/jesters to help) — see the mission-9-recheck sim (deleted after use). This mission's
+    // actual reserve-deck math now also caps the pile size so at least 10 cards remain in the tavern deck after
+    // the opening deal.
+    const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
+    expect(handCount + state.tavernDeck.length).toBe(40 - totalCaptured);
+    expect(state.tavernDeck.length).toBeGreaterThanOrEqual(10);
+    expect(totalCaptured).toBeLessThan(30);
   });
 
   it('shuffles extraReserveCards into the ordinary reserve deck, not the captured piles', () => {
@@ -3151,15 +3511,37 @@ describe('legacy: mission 10 mission-zone defeat handling + deck-rehabilitation 
 });
 
 describe('legacy: mission 10 reward (applyRestoredPartyCards — "deck rehabilitation")', () => {
-  it('adds every restored card back into the campaign party, skipping any id already present', () => {
+  it(
+    'REPLACES (not skips) a party card whose id matches a restored card, cleansing its `corrupted` flag — this is ' +
+      "the realistic case: RoomManager never removes the chosen card from the party when it becomes a Mission " +
+      '10 enemy, so the restored card IS the same still-corrupted party card, still present at the same id. ' +
+      'Regression test for a silent no-op: the old skip-if-present dedup treated this normal case as the rare ' +
+      "\"came back another way\" edge case and threw the restoration away entirely.",
+    () => {
+      const party = buildInitialParty();
+      const stillCorrupted = { ...party[0], corrupted: true };
+      const partyWithCorruption = party.map((c) => (c.id === stillCorrupted.id ? stillCorrupted : c));
+
+      const next = applyRestoredPartyCards(partyWithCorruption, [stillCorrupted]);
+
+      expect(next.length).toBe(party.length); // replaced in place, not appended as a duplicate
+      expect(next.filter((c) => c.id === stillCorrupted.id).length).toBe(1);
+      const restored = next.find((c) => c.id === stillCorrupted.id)!;
+      expect(restored.kind).toBe('suited');
+      expect(restored.kind === 'suited' && restored.corrupted).toBeFalsy();
+    },
+  );
+
+  it('appends a restored card whose id is genuinely absent from the party (defensive fallback)', () => {
     const party = buildInitialParty();
-    const alreadyThere = party[0];
-    const brandNew: Card = { id: 'restored-hero-1', kind: 'suited', suit: 'H', rank: '5', name: 'Cleansed Hero' };
+    const brandNew: Card = { id: 'restored-hero-1', kind: 'suited', suit: 'H', rank: '5', name: 'Cleansed Hero', corrupted: true };
 
-    const next = applyRestoredPartyCards(party, [alreadyThere, brandNew]);
+    const next = applyRestoredPartyCards(party, [brandNew]);
 
-    expect(next.length).toBe(party.length + 1); // the duplicate was skipped, only the new card was added
-    expect(next.some((c) => c.id === 'restored-hero-1')).toBe(true);
+    expect(next.length).toBe(party.length + 1);
+    const added = next.find((c) => c.id === 'restored-hero-1');
+    expect(added).toBeDefined();
+    expect(added!.kind === 'suited' && added!.corrupted).toBeFalsy(); // appended cards are cleansed too
   });
 
   it('is a no-op (same reference) for an empty restored list', () => {
@@ -3417,6 +3799,36 @@ describe('legacy: mission 11 pile-top bonus strength & immunity, and banish-on-d
   });
 });
 
+describe('legacy: mission 11 pile-top immunity ceiling (regression — no more all-4-class lockout)', () => {
+  it('a Dual-class Stickers card on top of one pile no longer combines with the other pile to immunize the enemy to every class at once', () => {
+    // Regression test for a reported bug: rules.ts's pileTopImmuneSuits had no ceiling on how many classes it
+    // could add beyond the enemy's own inherent immunity. A single Dual-class Stickers card (see
+    // SuitedCard.secondSuit) on top of the discard pile carries 2 classes by itself — combined with an ordinary
+    // single-suited card on top of the banish pile, that's 3 classes from the piles plus the enemy's own class,
+    // covering all 4 at once, including BOTH hand-refill suits (Hearts AND Diamonds) simultaneously. See rules.ts's
+    // pileTopImmuneSuits doc comment for the fix and its reasoning (each pile-top card now grants at most ONE new
+    // class, never both suits of a dual-suited card from a single pile).
+    const diamondsCard: SuitedCard = suited('D', '5');
+    // No beast cards in the party — an empty beast deck is a guaranteed no-op (see the discard-cleanup describe
+    // block's own note below), isolating this from Mission 11's OTHER start-of-turn mechanic.
+    let state = startMission11(1, { party: buildInitialParty() });
+    state = rig(state, [diamondsCard], { suit: 'C', baseAttack: 0, spadesShield: 0, maxHealth: 100, damageTaken: 0 }); // Warrior suit
+    // Discard-pile top carries BOTH hand-refill suits (Hearts and Diamonds) on one card. Banish-pile top adds a
+    // 3rd class (Spades), unrelated to the enemy's own Clubs — uncapped, all 4 classes would be immune together.
+    state.discardPile = [{ ...suited('H', '9'), secondSuit: 'D' }];
+    state.banishPile = [suited('S', '9')];
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [diamondsCard.id] }),
+    );
+
+    // Diamonds must still work: at most one of the dual-suited discard-top's two classes can ever be granted, so
+    // the other hand-refill suit is never simultaneously locked out by the same card.
+    expect(res.state.log.some((e) => e.message.includes('blocked'))).toBe(false);
+    expect(res.state.log.some((e) => e.message.includes('card(s) drawn'))).toBe(true);
+  });
+});
+
 describe('legacy: mission 11 discard cleanup ordering fix (discardCleanupLowToHigh)', () => {
   it('the mission enables discardCleanupLowToHigh — the only multi-card discard-pile push this mission has (pileTopEnemyBonus routes every enemy-defeat table-card batch to the BANISH pile instead)', () => {
     const mission11 = getMission(11)!;
@@ -3493,6 +3905,76 @@ describe('legacy: mission 11 discard cleanup ordering fix (discardCleanupLowToHi
     // 5 base + 2 (the lowest defended card, now on top of the discard pile) + 0 (banish pile empty) = 7 — not
     // 5 + 9 = 14, which is what the pre-fix arbitrary ordering could have handed back.
     expect(res2.state.pendingDamage).toBe(7);
+  });
+});
+
+describe('legacy: mission 11 banish-pile cleanup ordering fix (discardCleanupLowToHigh now also governs banishCards)', () => {
+  function startPileTopBonusMission(enemies: LegacyEnemySpec[], cleanup: boolean): GameState {
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'pile-top-bonus-banish-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      pileTopEnemyBonus: true,
+      discardCleanupLowToHigh: cleanup,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it("an enemy kill (overkill) sorts the whole accumulated table-cards batch low-to-high onto the BANISH pile (not the discard pile), capping the next enemy's pile-top bonus at the lowest card", () => {
+    const enemyA: LegacyEnemySpec = { name: 'Warden A', suit: 'D', health: 30, attack: 1 };
+    const enemyB: LegacyEnemySpec = { name: 'Warden B', suit: 'H', health: 20, attack: 10 };
+    let state = startPileTopBonusMission([enemyA, enemyB], true);
+    state = rig(state, [suited('C', '9')], { tableCards: [suited('H', '2'), suited('D', '3')], damageTaken: 25 }); // 5 health left
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    expect(state.currentEnemy?.name).toBe('Warden B'); // the 9 overkills Warden A's remaining 5 health
+    expect(state.discardPile.length).toBe(0); // pileTopEnemyBonus routes a defeated enemy's table cards to BANISH, not here
+    expect(state.banishPile.length).toBe(3);
+    const top = state.banishPile[state.banishPile.length - 1];
+    expect(top.kind === 'suited' && top.rank).toBe('2'); // lowest of the batch, regardless of table order
+    // Warden B's live attack reads only that lowest card: 10 base + 0 (discard pile empty) + 2 (banish pile top).
+    expect(resolvedEnemyAttack(state)).toBe(12);
+  });
+
+  it("without the flag, the kill (overkill) preserves table-card order on the banish pile too, so the finishing card can land on top and buff the next enemy at its worst", () => {
+    const enemyA: LegacyEnemySpec = { name: 'Warden A', suit: 'D', health: 30, attack: 1 };
+    const enemyB: LegacyEnemySpec = { name: 'Warden B', suit: 'H', health: 20, attack: 10 };
+    let state = startPileTopBonusMission([enemyA, enemyB], false);
+    state = rig(state, [suited('C', '9')], { tableCards: [suited('H', '2'), suited('D', '3')], damageTaken: 25 });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    // Whatever order the cards accumulated on the table lands in the banish pile unchanged — the finishing card
+    // (9) ends up on top, the pre-fix worst case.
+    expect(state.banishPile.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['2', '3', '9']);
+    expect(resolvedEnemyAttack(state)).toBe(19); // 10 base + 0 (discard) + 9 (unsorted banish-pile top)
+  });
+
+  it('a single-card banish is left alone regardless of the flag — nothing to order (mirrors pushToDiscardPile\'s own single-card guard)', () => {
+    const enemyA: LegacyEnemySpec = { name: 'Warden A', suit: 'D', health: 30, attack: 1 };
+    let state = startPileTopBonusMission([enemyA], true);
+    state = rig(state, [suited('C', '9')], { tableCards: [], damageTaken: 29 }); // 1 health left, single-card overkill
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = res.state;
+
+    expect(state.banishPile.length).toBe(1);
+    const [only] = state.banishPile;
+    expect(only.kind === 'suited' && only.rank).toBe('9');
   });
 });
 
@@ -3799,6 +4281,62 @@ describe('legacy: mission 12 start-of-turn banish-pile zone flip', () => {
 
     const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
     expect(res.state.missionZone.length).toBe(0);
+  });
+});
+
+describe('legacy: resolveSuitPowers blocked-log names the actual immunity source', () => {
+  it("distinguishes the enemy's own class from Mission 12's mission-zone immunity and Mission 11's discard/banish-pile immunity, instead of always claiming the enemy's own class", () => {
+    // A single Boss immune (by its own printed class) to Hearts only. Diamonds is blocked purely via a
+    // Mission-12-style zoneImmuneSuits entry; Clubs is blocked purely via Mission 11's pileTopEnemyBonus reading
+    // the discard pile's top card — neither mission's OWN flip/flip-timing mechanic is exercised here, just the
+    // fields resolveSuitPowers actually reads (see its comment: the check "isn't gated per mission").
+    const enemy: LegacyEnemySpec = { name: 'Test Boss', suit: 'H', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    state.zoneImmuneSuits = ['D'];
+    state.pileTopEnemyBonus = true;
+    state.discardPile = [suited('C', 'K')]; // top of discard is Clubs-suited — pile-immune, not the enemy's own class
+
+    const combo = [suited('H', '2'), suited('D', '2'), suited('C', '2')]; // same rank, combo total 6 — under the cap
+    state = rig(state, combo);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: combo.map((c) => c.id) }),
+    );
+
+    const blockedMessages = res.state.log.map((e) => e.message).filter((m) => m.includes('blocked'));
+    expect(blockedMessages.length).toBe(3); // Hearts, Diamonds, and Clubs all blocked, for three different reasons
+
+    const inherent = blockedMessages.filter((m) => m.includes('is immune to its own class') && !m.includes('via'));
+    const zone = blockedMessages.filter((m) => m.includes('via the mission zone'));
+    const pile = blockedMessages.filter((m) => m.includes('via the discard/banish piles'));
+    expect(inherent.length).toBe(1); // Hearts — the enemy's own printed class
+    expect(zone.length).toBe(1); // Diamonds — the mission zone, not the enemy's own class
+    expect(pile.length).toBe(1); // Clubs — the discard/banish pile tops, not the enemy's own class
+
+    // The bug: all three used to read identically ("immune to its own class") regardless of source.
+    expect(new Set([inherent[0], zone[0], pile[0]]).size).toBe(3);
+  });
+
+  it('still says "its own class" for a Mission-11 pile-driven block that happens to match the class the pile-top card actually belongs to', () => {
+    // Regression guard for the precedence order: an enemy inherently immune to Hearts, with a Hearts card ALSO
+    // sitting on top of the discard pile, must report the inherent reason (its own class), not the pile — the
+    // two sources overlap on the same suit here, and inherent immunity takes precedence in resolveSuitPowers's
+    // own blocked() check (isSuitBlockedByImmunity is checked first).
+    const enemy: LegacyEnemySpec = { name: 'Overlap Boss', suit: 'H', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    state.pileTopEnemyBonus = true;
+    state.discardPile = [suited('H', '9')]; // top of discard is ALSO Hearts — same suit as the enemy's own class
+    const heartsCard = suited('H', '5');
+    state = rig(state, [heartsCard]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [heartsCard.id] }),
+    );
+
+    const blockedMessages = res.state.log.map((e) => e.message).filter((m) => m.includes('blocked'));
+    expect(blockedMessages.length).toBe(1);
+    expect(blockedMessages[0]).toContain('is immune to its own class');
+    expect(blockedMessages[0]).not.toContain('via the discard/banish piles');
   });
 });
 

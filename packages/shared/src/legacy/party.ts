@@ -165,8 +165,12 @@ const LUCKY_FOUR_RANKS: NonRoyalRank[] = ['3', '5', '7', '9'];
  * a second class icon (a random suit other than their own) — from then on, that single card triggers both
  * class powers whenever it's played (see rules.ts's cardSuits). `count` caps how many of the 4 ranks get a
  * sticker, in case fewer than 4 are eligible.
+ *
+ * `rng` defaults to Math.random (live play doesn't need this pick to be reproducible) but accepts any
+ * `() => number` source, e.g. deck.ts's seeded `makeRng`, so a seeded campaign simulation/test can get a
+ * deterministic pick instead. Every other rng-taking function below follows this same convention.
  */
-export function applyDualClassStickers(party: Card[], count: number): Card[] {
+export function applyDualClassStickers(party: Card[], count: number, rng: () => number = Math.random): Card[] {
   const chosenIds = new Set<string>();
   for (const rank of LUCKY_FOUR_RANKS) {
     if (chosenIds.size >= count) break;
@@ -183,13 +187,13 @@ export function applyDualClassStickers(party: Card[], count: number): Card[] {
         !c.secondSuit,
     );
     if (eligible.length === 0) continue;
-    const pick = eligible[Math.floor(Math.random() * eligible.length)];
+    const pick = eligible[Math.floor(rng() * eligible.length)];
     chosenIds.add(pick.id);
   }
   return party.map((c) => {
     if (c.kind !== 'suited' || !chosenIds.has(c.id)) return c;
     const options = ALL_SUITS.filter((s) => s !== c.suit);
-    const secondSuit = options[Math.floor(Math.random() * options.length)];
+    const secondSuit = options[Math.floor(rng() * options.length)];
     return { ...c, secondSuit };
   });
 }
@@ -201,14 +205,14 @@ export function applyDualClassStickers(party: Card[], count: number): Card[] {
  * SuitedCard.secondClassArcane, engine.ts's resolveArcaneBolts). Unlike Dual-class Stickers' "Lucky 4" ranks,
  * the physical game picks uniformly across the whole party (by revealing shuffled cards until an eligible one
  * turns up) — we don't track the "race" it also filters by, so this just draws uniformly from every eligible
- * rank instead.
+ * rank instead. `rng` defaults to Math.random; see applyDualClassStickers's doc for why/when to pass a seeded one.
  */
-export function applyMageSticker(party: Card[]): Card[] {
+export function applyMageSticker(party: Card[], rng: () => number = Math.random): Card[] {
   const eligible = party.filter(
     (c) => c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.evergreen && !c.secondClassArcane,
   );
   if (eligible.length === 0) return party;
-  const pick = eligible[Math.floor(Math.random() * eligible.length)];
+  const pick = eligible[Math.floor(rng() * eligible.length)];
   return party.map((c) => (c.id === pick.id ? { ...c, secondClassArcane: true } : c));
 }
 
@@ -216,14 +220,19 @@ export function applyMageSticker(party: Card[]): Card[] {
  * A mixed-bag reward step (see MissionReward.corruptAnotherCard): permanently corrupts one random eligible
  * existing party member, excluding any card id in `excludeIds` (the recruits this same reward just granted —
  * "another" card, not the new arrival) and any card already `corrupted` or `restored` (mutually exclusive with
- * `corrupted` — see SuitedCard.restored). A no-op if nothing is eligible.
+ * `corrupted` — see SuitedCard.restored). A no-op if nothing is eligible. `rng` defaults to Math.random; see
+ * applyDualClassStickers's doc for why/when to pass a seeded one.
  */
-export function applyCorruptAnotherCard(party: Card[], excludeIds: Set<string> = new Set()): Card[] {
+export function applyCorruptAnotherCard(
+  party: Card[],
+  excludeIds: Set<string> = new Set(),
+  rng: () => number = Math.random,
+): Card[] {
   const eligible = party.filter(
     (c) => c.kind === 'suited' && !c.corrupted && !c.restored && !excludeIds.has(c.id),
   );
   if (eligible.length === 0) return party;
-  const pick = eligible[Math.floor(Math.random() * eligible.length)];
+  const pick = eligible[Math.floor(rng() * eligible.length)];
   return party.map((c) => (c.id === pick.id ? { ...c, corrupted: true } : c));
 }
 
@@ -233,9 +242,10 @@ export function applyCorruptAnotherCard(party: Card[], excludeIds: Set<string> =
  * sticker — unlike a pure Guardian recruit's `guardian` flag (which replaces suit-power resolution entirely),
  * the card keeps resolving its own suit power AND raises the Guardian's absolute shield when played (see
  * SuitedCard.secondClassGuardian, engine.ts's resolveCommittedPlay's guardianCards handling). Mirrors
- * applyMageSticker's eligibility/selection shape, narrowed to rank 8 per the sourced reward.
+ * applyMageSticker's eligibility/selection shape, narrowed to rank 8 per the sourced reward. `rng` defaults to
+ * Math.random; see applyDualClassStickers's doc for why/when to pass a seeded one.
  */
-export function applyGuardianSticker(party: Card[]): Card[] {
+export function applyGuardianSticker(party: Card[], rng: () => number = Math.random): Card[] {
   const eligible = party.filter(
     (c) =>
       c.kind === 'suited' &&
@@ -249,7 +259,7 @@ export function applyGuardianSticker(party: Card[]): Card[] {
       !c.secondClassGuardian,
   );
   if (eligible.length === 0) return party;
-  const pick = eligible[Math.floor(Math.random() * eligible.length)];
+  const pick = eligible[Math.floor(rng() * eligible.length)];
   return party.map((c) => (c.id === pick.id ? { ...c, secondClassGuardian: true } : c));
 }
 
@@ -290,14 +300,22 @@ export function applyEvergreenUpgradeByName(party: Card[], name?: string): Card[
   return upgraded ? next : party;
 }
 
-/** Adds a mission's reward — recruits, any Dual-class Stickers, any Mage sticker, any corrupt-another-card effect, any Guardian sticker, and any sidelined-card or existing-card evergreen upgrade — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
-export function applyReward(party: Card[], reward: MissionReward): Card[] {
+/**
+ * Adds a mission's reward — recruits, any Dual-class Stickers, any Mage sticker, any corrupt-another-card effect,
+ * any Guardian sticker, and any sidelined-card or existing-card evergreen upgrade — to the campaign's permanent
+ * party roster. Relics are tracked separately (see RoomManager's permanentRules).
+ *
+ * `rng` defaults to Math.random, matching every live call site (mission rewards don't need to be reproducible
+ * in actual play) — pass a seeded source (e.g. deck.ts's `makeRng`) from a campaign simulation/test that needs
+ * this call's random picks to be deterministic.
+ */
+export function applyReward(party: Card[], reward: MissionReward, rng: () => number = Math.random): Card[] {
   const newRecruits = reward.recruits.map(buildRecruitCard);
   let next = [...party, ...newRecruits];
-  if (reward.dualClassStickers) next = applyDualClassStickers(next, reward.dualClassStickers);
-  if (reward.mageSticker) next = applyMageSticker(next);
-  if (reward.corruptAnotherCard) next = applyCorruptAnotherCard(next, new Set(newRecruits.map((c) => c.id)));
-  if (reward.guardianSticker) next = applyGuardianSticker(next);
+  if (reward.dualClassStickers) next = applyDualClassStickers(next, reward.dualClassStickers, rng);
+  if (reward.mageSticker) next = applyMageSticker(next, rng);
+  if (reward.corruptAnotherCard) next = applyCorruptAnotherCard(next, new Set(newRecruits.map((c) => c.id)), rng);
+  if (reward.guardianSticker) next = applyGuardianSticker(next, rng);
   if (reward.upgradeSidelinedCard) next = applyEvergreenUpgrade(next, reward.upgradeSidelinedCard);
   if (reward.upgradeEvergreenCard) next = applyEvergreenUpgradeByName(next, reward.upgradeEvergreenCard);
   return next;
@@ -305,15 +323,24 @@ export function applyReward(party: Card[], reward: MissionReward): Card[] {
 
 /**
  * Mission 10's "deck rehabilitation" mechanic (community research, best-effort — see legacy/missions.ts's Mission
- * 10 entry): folds GameState.restoredPartyCards — the pristine, cleansed original cards of every corrupted hero
- * exact-killed during the mission — back into the campaign's permanent party roster at mission end. Unlike
+ * 10 entry): folds GameState.restoredPartyCards — the original cards of every corrupted hero exact-killed during
+ * the mission — back into the campaign's permanent party roster at mission end, cleansed of `corrupted`. Unlike
  * applyReward's recruits (freshly minted via buildRecruitCard), these are the SAME cards the party already had —
- * they were only pulled out of circulation for the fight (see deck.ts's buildCorruptedPartyEnemies) — so this
- * just re-adds them, skipping any id already present in case a card somehow made it back another way.
+ * conceptually pulled out of circulation for the fight (see deck.ts's buildCorruptedPartyEnemies) — but
+ * RoomManager never actually removes the chosen cards from the persisted party when a Mission 10 fight starts
+ * (deck.ts only carves them out of the ephemeral in-mission reserve deck), so `enemy.sourceCard` is literally the
+ * same still-`corrupted` object this function's `party` argument already contains. A card whose id is already
+ * present is therefore REPLACED in place with its cleansed form rather than skipped — skipping it (the previous
+ * behavior) silently threw away every genuine restoration, since the "already present" case was actually the
+ * normal path, not the rare one. Appending is kept as a fallback for an id genuinely missing from `party` (e.g.
+ * if that removal is ever wired up later).
  */
 export function applyRestoredPartyCards(party: Card[], restored: Card[]): Card[] {
   if (restored.length === 0) return party;
-  const existingIds = new Set(party.map((c) => c.id));
-  const toRestore = restored.filter((c) => !existingIds.has(c.id));
-  return [...party, ...toRestore];
+  const cleanse = (c: Card): Card => (c.kind === 'suited' && c.corrupted ? { ...c, corrupted: false } : c);
+  const restoredById = new Map(restored.map((c) => [c.id, cleanse(c)]));
+  const next = party.map((c) => restoredById.get(c.id) ?? c);
+  const partyIds = new Set(party.map((c) => c.id));
+  const additions = restored.filter((c) => !partyIds.has(c.id)).map(cleanse);
+  return additions.length > 0 ? [...next, ...additions] : next;
 }
