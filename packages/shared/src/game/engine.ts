@@ -1,4 +1,4 @@
-import type { Card, CapturedPile, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit, SuitedCard } from './types.js';
+import type { Card, CapturedPile, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit, SuitedCard, TurnPhase } from './types.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,
@@ -1220,6 +1220,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.soloJestersUsed = 0;
   state.victoryMedal = null;
   state.jesterClaim = null;
+  state.pendingJesterRefill = null;
   state.endlessLoop = 0;
   state.exactKillOnly = false;
   state.relics = [];
@@ -1350,6 +1351,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.soloJestersUsed = 0;
   state.victoryMedal = null;
   state.jesterClaim = null;
+  state.pendingJesterRefill = null;
   state.endlessLoop = 0;
   state.exactKillOnly = action.exactKillOnly ?? false;
   state.relics = action.relics ?? [];
@@ -1455,6 +1457,7 @@ function startEndlessRound(state: GameState): EngineResult {
   state.soloJestersUsed = 0;
   state.victoryMedal = null;
   state.jesterClaim = null;
+  state.pendingJesterRefill = null;
   state.endlessLoop = loop;
 
   log(
@@ -1909,6 +1912,16 @@ function playJester(state: GameState, action: Extract<GameAction, { type: 'PLAY_
 }
 
 /**
+ * Reads state.turnPhase through a function boundary rather than inline — used by claimJester right after a call
+ * that can reassign it (resolveCommittedPlay), where TS's control-flow narrowing would otherwise keep treating
+ * state.turnPhase as whatever literal it was narrowed to just before that call, since TS can't see into an
+ * arbitrary function to know it mutates a passed-in object's property.
+ */
+function currentTurnPhase(state: GameState): TurnPhase {
+  return state.turnPhase;
+}
+
+/**
  * Legacy-only: claims an open Jester window. Validated against the window being open, not turn ownership — any
  * player may claim. Resolves immediately as its own attack (see below) rather than handing the claimant a
  * separate PLAY_CARDS step, matching the base game's own printed Jester text ("play it on its own, instead of
@@ -1950,17 +1963,41 @@ function claimJester(state: GameState, action: Extract<GameAction, { type: 'CLAI
   const result = resolveCommittedPlay(state, player, [syntheticAttack], jesterCard);
   if (!result.ok || state.phase !== 'IN_PROGRESS') return result;
 
-  refillHandFromDeck(state, player, 'the Jester');
+  // Bug-fix (see GameState.pendingJesterRefill): if the synthetic attack didn't kill the enemy, the claimant now
+  // owes a defend against its dealt damage (turnPhase is AWAIT_DEFEND). Refilling right here, before that defend
+  // is resolved, would swap the claimant's hand out from under them while they're still deciding how to cover
+  // that damage — turning what might have been a coverable hit into a lethal one. Defer the refill to defend()
+  // instead; every other outcome (the enemy died, or dealt no damage back) has nothing left to resolve, so it
+  // still refills immediately, exactly as before.
+  // (Routed through currentTurnPhase() rather than reading state.turnPhase inline: TS's control-flow narrowing
+  // otherwise carries the 'AWAIT_PLAY' literal this same function assigned a few lines above straight through the
+  // resolveCommittedPlay() call — which does reassign it internally, TS just has no way to see that — and flags
+  // the comparison below as comparing non-overlapping literals. A function-call boundary resets that narrowing.)
+  if (currentTurnPhase(state) === 'AWAIT_DEFEND') {
+    state.pendingJesterRefill = { playerId: player.id };
+  } else {
+    refillHandFromDeck(state, player, 'the Jester');
+  }
   return ok(state);
 }
 
 /**
  * Discards `player`'s entire hand and redraws it back up to `state.maxHandSize` — the base game's own printed
  * Jester power (see useSoloJester), reused here for Legacy's CLAIM_JESTER, which never suspends it.
+ *
+ * Two bug-fixes layered on top of that discard:
+ *  - Routes through pushToDiscardPile instead of a raw push, so Missions 4/11/12's discardCleanupLowToHigh
+ *    ordering (which their pileTopEnemyBonus-style mechanics depend on) isn't silently bypassed just because the
+ *    discard happened to originate from a Jester claim instead of a covered DEFEND.
+ *  - Mission 7's Pilgrim hand-trap (see GameState.pilgrimMechanic): a Pilgrim card can never be discarded once
+ *    drawn into a hand, by ANY path, this one included. A stuck Pilgrim is carved out of the discard and simply
+ *    stays in `player.hand` across the refill, same as it would survive a normal PLAY_CARDS/DEFEND rejection.
  */
 function refillHandFromDeck(state: GameState, player: PlayerState, sourceLabel: string): void {
-  state.discardPile.push(...player.hand);
-  player.hand = [];
+  const stuckPilgrims = state.pilgrimMechanic ? player.hand.filter((c) => c.kind === 'suited' && c.pilgrim) : [];
+  const discardable = stuckPilgrims.length > 0 ? player.hand.filter((c) => !(c.kind === 'suited' && c.pilgrim)) : player.hand;
+  pushToDiscardPile(state, discardable);
+  player.hand = stuckPilgrims;
   while (player.hand.length < state.maxHandSize && drawOneCard(state, player)) {
     // keep drawing until the hand limit or the deck runs dry
   }
@@ -2060,6 +2097,15 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
   } else {
     log(state, `${player.name} discards ${cards.length} card(s) to cover ${state.pendingDamage} damage.`);
   }
+
+  // Bug-fix (see GameState.pendingJesterRefill / claimJester): this specific attack's damage is now fully
+  // resolved — a claimed Jester's own hand-refill deferred past the defend above happens right here, using
+  // whatever's left of the claimant's hand AFTER they chose how to cover the damage, never before.
+  if (state.pendingJesterRefill && state.pendingJesterRefill.playerId === player.id) {
+    state.pendingJesterRefill = null;
+    refillHandFromDeck(state, player, 'the Jester');
+  }
+
   endTurnOrAwaitRescue(state);
   return ok(state);
 }
@@ -2360,6 +2406,7 @@ export function createLobbyState(): GameState {
     soloJestersUsed: 0,
     victoryMedal: null,
     jesterClaim: null,
+    pendingJesterRefill: null,
     endlessLoop: 0,
     exactKillOnly: false,
     relics: [],

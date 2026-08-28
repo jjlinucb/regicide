@@ -267,8 +267,9 @@ describe('legacy: feign death', () => {
 });
 
 describe('legacy: jester claim', () => {
-  it('lets any player claim an open jester for a free 8-strength attack that ignores immunity, then refills their hand (not a permanent immunity break)', () => {
-    // Cleric-class enemy (suit H) — immune to Cleric (Hearts) powers until the claimed attack ignores it.
+  it('lets any player claim an open jester for a free 8-strength attack that ignores immunity, deferring the hand refill until the resulting damage is defended (not a permanent immunity break)', () => {
+    // Cleric-class enemy (suit H) — immune to Cleric (Hearts) powers until the claimed attack ignores it. Health
+    // is high enough to survive the 8-strength attack, so it retaliates for its own attack (5) afterward.
     const enemy: LegacyEnemySpec = { name: 'Warden', suit: 'H', health: 100, attack: 5 };
     let state = startMission(2, [enemy], 0);
     const [p1, p2] = state.players;
@@ -282,6 +283,11 @@ describe('legacy: jester claim', () => {
 
     const toHeal = [suited('C', '2'), suited('C', '3'), suited('C', '4')];
     state.discardPile = toHeal; // something to heal back
+    // p2's own hand, rigged to a single card worth exactly the enemy's retaliation (5). The regression this
+    // guards against is refillHandFromDeck firing BEFORE the defend below, which would silently swap this exact
+    // card out from under p2 and could turn a coverable hit into a lethal one.
+    const oldHand = [suited('S', '5')];
+    state.players[1].hand = oldHand;
 
     // Player 2 (not the jester's player) claims it, attacking in Hearts — normally blocked by this enemy's own-class immunity.
     res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: p2.id, attackSuit: 'H' }));
@@ -290,13 +296,25 @@ describe('legacy: jester claim', () => {
     expect(state.jesterClaim).toBeNull(); // consumed
     expect(state.currentPlayerIndex).toBe(1);
     expect(state.currentEnemy?.damageTaken).toBe(8); // flat 8-strength attack, Hearts doesn't double
-    // Hearts healed the 3-card discard pile back under the deck despite matching the enemy's class; the only
-    // cards left in the discard pile afterward are p2's own OLD hand, dumped by the Jester's own hand-refill.
+    // Hearts healed the 3-card discard pile back under the deck despite matching the enemy's class.
     expect(toHeal.every((c) => !state.discardPile.some((d) => d.id === c.id))).toBe(true);
-    expect(state.discardPile.length).toBe(state.maxHandSize);
     expect(state.currentEnemy?.immunityBroken).toBe(false); // one-shot only — NOT a permanent break like classic Regicide
-    // The base game's own printed Jester power also refreshes the claimant's hand.
+
+    // Bug-fix regression: the enemy survived and retaliates for its own attack (5) — the refill must NOT have
+    // happened yet, so p2's hand is still their pre-claim hand, intact, while they decide how to cover it.
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    expect(state.pendingDamage).toBe(5);
+    expect(state.players[1].hand).toEqual(oldHand);
+    expect(state.discardPile.length).toBe(0); // old hand not discarded yet either
+
+    // Defending with the OLD hand's exact card would fail with "not in your hand" if the refill had already
+    // silently replaced it — which is exactly the bug this test exists to catch.
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: p2.id, cardIds: [oldHand[0].id] }));
+    state = res.state;
+    expect(state.phase).toBe('IN_PROGRESS'); // exactly covered — not lethal
+    // The base game's own printed Jester power refreshes the claimant's hand — but only now, after the defend.
     expect(state.players[1].hand.length).toBe(state.maxHandSize);
+    expect(state.discardPile.some((c) => c.id === oldHand[0].id)).toBe(true); // the defended card lands in the discard pile
   });
 
   it('rejects a claim with no attackSuit chosen, or an invalid one', () => {
@@ -321,6 +339,51 @@ describe('legacy: jester claim', () => {
     state = rig(state, [j]);
     const res = applyAction(state, { type: 'PLAY_JESTER', playerId: state.players[0].id, cardId: j.id });
     expect(res.ok).toBe(false);
+  });
+});
+
+describe('legacy: jester claim discard-cleanup low-to-high ordering (bug-fix)', () => {
+  it("sorts the claimant's discarded old hand low-to-high on the discard pile when discardCleanupLowToHigh is set, same as a normal covered DEFEND", () => {
+    // Health low enough that the flat 8-strength claim attack overkills it outright — no defend to resolve
+    // first, so the refill (and its discard) fires immediately inside claimJester itself. A second enemy keeps
+    // the mission IN_PROGRESS after that kill (defeating the party's only remaining enemy would WON the mission
+    // instead, and claimJester's own pre-existing "nothing left to resolve" early-return skips the refill
+    // entirely once the game's already over — not what this test is trying to isolate).
+    const enemy: LegacyEnemySpec = { name: 'Weakling', suit: 'S', health: 5, attack: 1 };
+    const filler: LegacyEnemySpec = { name: 'Filler', suit: 'D', health: 50, attack: 1 };
+    const res0 = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'jester-cleanup-test',
+      party: buildInitialParty(),
+      enemies: [enemy, filler],
+      jesterCount: 0,
+      discardCleanupLowToHigh: true,
+    });
+    if (!res0.ok) throw new Error(res0.error);
+    let state = res0.state;
+
+    const j = jester();
+    const oldHand = [suited('H', '9'), suited('C', '4'), suited('D', '7')];
+    state.players[0].hand = [j, ...oldHand];
+    const playerId = state.players[0].id;
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId, cardId: j.id }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId, attackSuit: 'S' }));
+    state = res.state;
+
+    expect(state.currentEnemy?.name).not.toBe('Weakling'); // defeated — a new enemy (or WON) follows
+    // The claimant's OLD hand (9, 4, 7) was discarded by the refill — sorted low-to-high, lowest value on top,
+    // the same ordering rule Missions 4/11/12's pileTopEnemyBonus-style mechanics depend on (see
+    // engine.ts's pushToDiscardPile). Filtered to just this batch since the defeated enemy's own Jester card
+    // also lands in the discard pile as a separate, earlier (single-card) push.
+    const oldHandIds = new Set(oldHand.map((c) => c.id));
+    const oldHandInDiscard = state.discardPile.filter((c) => oldHandIds.has(c.id));
+    expect(oldHandInDiscard.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['9', '7', '4']);
+    const top = state.discardPile[state.discardPile.length - 1];
+    expect(top.kind === 'suited' && top.rank).toBe('4'); // lowest of the whole pile, regardless of claim order
   });
 });
 
@@ -1824,6 +1887,30 @@ describe('legacy: mission 7 mechanics (Pilgrim hand-trap)', () => {
     res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [nonPilgrimId] }));
     state = res.state;
     expect(state.phase).toBe('LOST'); // 3 < 20, not the whole hand (Pilgrim left behind) — no Feign Death exception
+  });
+
+  it('does not free or discard a stuck Pilgrim via a Jester claim/refill — only an exact kill does that (bug-fix)', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 }; // survives; 0 attack means no defend to resolve first
+    let state = startWellMission(1, [boss]);
+    const j = jester();
+    const ordinary = suited('D', '4');
+    state = rig(state, [j, fenwick, ordinary]);
+    const playerId = state.players[0].id;
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId, cardId: j.id }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId, attackSuit: 'S' }));
+    state = res.state;
+
+    expect(state.currentEnemy?.damageTaken).toBe(8); // flat 8-strength attack, survives (100 health)
+    // The stuck Pilgrim rode out the refill untouched — never discarded, never freed.
+    expect(state.players[0].hand.some((c) => c.id === 'fenwick')).toBe(true);
+    expect(state.discardPile.some((c) => c.id === 'fenwick')).toBe(false);
+    // Everything else in the old hand (the ordinary card) WAS discarded and replaced as normal.
+    expect(state.players[0].hand.some((c) => c.id === ordinary.id)).toBe(false);
+    expect(state.discardPile.some((c) => c.id === ordinary.id)).toBe(true);
+    // Refilled back up to the hand limit, the still-stuck Pilgrim occupying one of those slots.
+    expect(state.players[0].hand.length).toBe(state.maxHandSize);
   });
 });
 
