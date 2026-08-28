@@ -229,13 +229,6 @@ export interface EnemyState {
   /** All cards played against this enemy so far this fight (go to discard together on defeat). */
   tableCards: Card[];
   /**
-   * Legacy-only (Mission 4): true for an enemy that's already been through the fight queue once and come back
-   * corrupted (see GameState.corruptedReturnQueue). Follows the same rule as a corrupted party card (see
-   * SuitedCard.corrupted): every play against it ignores its class immunity, at the cost of banishing the top of
-   * the reserve deck (see engine.ts's resolveCommittedPlay / applyCorruptedCost).
-   */
-  corrupted?: boolean;
-  /**
    * Legacy-only (Mission 10), set only for enemies built by GameState.corruptedPartyEnemies: the original,
    * pristine party card this enemy was twisted from (see deck.ts's buildCorruptedPartyEnemies). Unrelated to
    * `corrupted` above — a Mission 10 enemy is immune to its own class exactly like any other enemy (per the
@@ -438,14 +431,6 @@ export interface GameState {
    * The cards played against it still go to the discard pile as normal either way.
    */
   exactKillToReserveDeck: boolean;
-  /**
-   * Legacy-only (Mission 4): when true, a defeated enemy doesn't just vanish to the discard pile — it rejoins
-   * the fight queue later, corrupted (see EnemyState.corrupted): every play against it from then on ignores its
-   * class immunity, at the cost of banishing the reserve deck's top card (the same rule a corrupted party card
-   * follows — see SuitedCard.corrupted / engine.ts's applyCorruptedCost). A corrupted enemy that's defeated
-   * again does not re-queue a second time.
-   */
-  corruptedReturnQueue: boolean;
   /**
    * Legacy-only (Missions 4 and 11): when true, any batch of 2+ cards pushed onto the discard pile during
    * cleanup (a covered DEFEND, or an enemy's played table cards on defeat — exact or overkill) is sorted so the
@@ -739,8 +724,6 @@ export type GameAction =
       discardTopBuffsAttack?: boolean;
       /** See GameState.exactKillToReserveDeck. */
       exactKillToReserveDeck?: boolean;
-      /** See GameState.corruptedReturnQueue. */
-      corruptedReturnQueue?: boolean;
       /** See GameState.discardCleanupLowToHigh. */
       discardCleanupLowToHigh?: boolean;
       /** See GameState.exactKillSplashDamage. */

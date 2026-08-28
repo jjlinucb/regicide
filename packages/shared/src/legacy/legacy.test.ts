@@ -158,11 +158,10 @@ describe('legacy: mission setup', () => {
     ]);
   });
 
-  it('mission 4 buffs enemy attack from the discard pile, seals exact kills to the reserve deck, requeues defeats corrupted, and rewards Beast Companions + Goran + the Scarlet Whistle relic', () => {
+  it('mission 4 buffs enemy attack from the discard pile, seals exact kills to the reserve deck, and rewards Beast Companions + Goran + the Scarlet Whistle relic', () => {
     const mission4 = getMission(4)!;
     expect(mission4.discardTopBuffsAttack).toBe(true);
     expect(mission4.exactKillToReserveDeck).toBe(true);
-    expect(mission4.corruptedReturnQueue).toBe(true);
     expect(mission4.discardCleanupLowToHigh).toBe(true);
     expect(mission4.reward.relics).toEqual(['SCARLET_WHISTLE']);
     expect(mission4.reward.recruits.length).toBe(5);
@@ -1413,60 +1412,6 @@ describe('legacy: mission 4 discard-cleanup low-to-high ordering (sourced fix fo
     expect(state.discardPile.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['2', '3', '9']);
     // The next enemy inherits the worst case: +9 instead of +2 — exactly the self-reinforcing spiral the fix closes.
     expect(resolvedEnemyAttack(state)).toBe(19);
-  });
-});
-
-describe('legacy: mission 4 corrupted-return-queue (defeated enemies rejoin, corrupted)', () => {
-  function startFusionMission(enemies: LegacyEnemySpec[]): GameState {
-    const res = applyAction(createLobbyState(), {
-      type: 'START_LEGACY_MISSION',
-      playerIds: ['p0'],
-      playerNames: ['Player 0'],
-      seed: 'fusion-corrupt-test',
-      party: buildInitialParty(),
-      enemies,
-      jesterCount: 0,
-      corruptedReturnQueue: true,
-    });
-    if (!res.ok) throw new Error(res.error);
-    return res.state;
-  }
-
-  it('requeues a defeated enemy to the back of the fight queue, corrupted, instead of removing it for good', () => {
-    const first: LegacyEnemySpec = { name: 'Specimen A', suit: 'S', health: 10, attack: 1 };
-    const second: LegacyEnemySpec = { name: 'Specimen B', suit: 'H', health: 10, attack: 1 };
-    let state = startFusionMission([first, second]);
-    state = rig(state, [suited('C', '9')]); // Clubs doubles: 18 damage, overkills the 10-health Specimen A
-
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
-
-    expect(state.currentEnemy?.name).toBe('Specimen B'); // next enemy up front, as normal
-    expect(state.castleDeck.some((e) => e.name === 'Specimen A' && e.corrupted)).toBe(true);
-  });
-
-  it("a corrupted enemy's immunity is ignored automatically and costs a reserve-deck banish, without needing a Jester", () => {
-    let state = startFusionMission([{ name: 'Specimen A', suit: 'S', health: 10, attack: 1 }]);
-    state = structuredClone(state);
-    state.tavernDeck = [suited('C', '9'), ...state.tavernDeck]; // will be banished as the corrupted-enemy cost
-    state = rig(state, [suited('S', '2')], { corrupted: true }); // Spades card vs a Spades-immune corrupted enemy
-
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
-
-    expect(state.log.some((e) => e.message.includes('blocked'))).toBe(false);
-    expect(state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '9')).toBe(true);
-    expect(state.currentEnemy?.spadesShield).toBe(2); // Spades power actually resolved, immunity ignored
-  });
-
-  it('does not requeue a corrupted enemy a second time once it is defeated again', () => {
-    let state = startFusionMission([{ name: 'Specimen A', suit: 'S', health: 10, attack: 1 }]);
-    state = rig(state, [suited('C', '9')], { corrupted: true }); // overkill, already corrupted
-
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
-
-    expect(state.phase).toBe('WON'); // no further enemies, and no re-requeue keeping the fight open
   });
 });
 
