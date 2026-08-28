@@ -1304,7 +1304,12 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   let capturedPiles: CapturedPile[] = [];
   let reserveDeck: Card[];
   if (capturedPilesActive) {
-    const split = buildCapturedPiles(partyForReserve, buildRng);
+    // UNSOURCED BALANCE JUDGMENT CALL (see buildCapturedPiles's own doc comment): scale each pile down for a
+    // smaller table instead of always carving out the sourced 30-card fixed split — reaches that sourced figure
+    // exactly once there are enough players (3-4) for it to plausibly be the tested case, and leaves more of the
+    // party in the actual tavern deck for a solo or 2-player fight.
+    const pileSize = Math.min(10, 4 + 2 * n);
+    const split = buildCapturedPiles(partyForReserve, buildRng, pileSize);
     capturedPiles = split.piles;
     reserveDeck = buildLegacyReserveDeck([...split.leftoverParty, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);
   } else {

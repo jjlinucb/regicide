@@ -147,17 +147,26 @@ export function buildLegacyReserveDeck(party: Card[], jesterCount: number, rng: 
 }
 
 /**
- * Legacy-only (Mission 9): shuffles the party and splits the first 30 cards into 3 face-down piles of 10, each
- * with its top card immediately flipped face-up. Returns the piles plus whatever's left of the party (not
- * captured) — the caller shuffles that remainder (plus jesters, plus any mission-only extras) into the actual
- * reserve deck via buildLegacyReserveDeck.
+ * Legacy-only (Mission 9): shuffles the party and splits the first `pileSize * 3` cards into 3 face-down piles of
+ * `pileSize`, each with its top card immediately flipped face-up. Returns the piles plus whatever's left of the
+ * party (not captured) — the caller shuffles that remainder (plus jesters, plus any mission-only extras) into the
+ * actual reserve deck via buildLegacyReserveDeck.
+ *
+ * `pileSize` defaults to the sourced fan-reimplementation figure (10 per pile, 30 total, fixed regardless of
+ * player count in that source). UNSOURCED BALANCE JUDGMENT CALL: real playtesting (see
+ * legacy-mission-playtest-findings) found the fixed 30-card carve-out left a SOLO game with almost nothing in the
+ * tavern deck for the whole fight (40-card fresh party minus 30 captured minus a full hand leaves ~2 cards) — no
+ * source specifies scaling this by player count, so callers (see engine.ts's startLegacyMission) pass a smaller
+ * `pileSize` for fewer players instead of always using the sourced default, capped so it never exceeds — and
+ * exactly matches — that sourced 10/pile figure once there are enough players for it to have plausibly been
+ * tested at (3-4p).
  */
-export function buildCapturedPiles(party: Card[], rng: () => number): { piles: CapturedPile[]; leftoverParty: Card[] } {
+export function buildCapturedPiles(party: Card[], rng: () => number, pileSize = 10): { piles: CapturedPile[]; leftoverParty: Card[] } {
   const shuffled = shuffle(party, rng);
-  const captured = shuffled.slice(0, 30);
-  const leftoverParty = shuffled.slice(30);
+  const captured = shuffled.slice(0, pileSize * 3);
+  const leftoverParty = shuffled.slice(pileSize * 3);
   const piles: CapturedPile[] = [0, 1, 2].map((i) => {
-    const pileCards = captured.slice(i * 10, i * 10 + 10);
+    const pileCards = captured.slice(i * pileSize, i * pileSize + pileSize);
     const faceUp = pileCards.shift() ?? null;
     return { faceDown: pileCards, faceUp };
   });

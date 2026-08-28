@@ -142,6 +142,18 @@ export interface MissionReward {
    * persisted campaign roster, only excluded from this one mission's active fight.
    */
   upgradeSidelinedCard?: { suit: Suit; rank: Rank };
+  /**
+   * Mission 9's reward ("Hope from Ashes"), sourced correction over the shipped "brand-new Gøran recruit" — see
+   * missions.ts's Mission 9 entry: upgrades the existing party member with this NAME (Goran, introduced as a
+   * plain recruit by Mission 8's own reward) to SuitedCard.evergreen (see applyEvergreenUpgradeByName).
+   * Deliberately NOT a suit+rank identity like Mission 11's upgradeSidelinedCard: Goran is a brand-new recruit
+   * appended to the party, not a rename of one of the original 40 starting cards, so his suit+rank is always
+   * already claimed by a pre-existing party member (every suit+rank combo across the 4 base suits is already in
+   * use — see STARTING_NAMES) — a suit+rank lookup would silently upgrade that OTHER, unrelated card instead
+   * (caught by this pass's own regression test). His name has no such collision, so matching by name is the
+   * correct fix here specifically, not a general-purpose replacement for the identity-based lookup.
+   */
+  upgradeEvergreenCard?: string;
 }
 
 /** The "Lucky 4" ranks Dual-class Stickers target — one sticker per rank, matching the physical game's 4-sticker sheets. */
@@ -242,13 +254,14 @@ export function applyGuardianSticker(party: Card[]): Card[] {
 }
 
 /**
- * Mission 11's reward mechanic ("Descent into Darkness"): finds the sidelined party member matching `identity`
- * (suit + rank) and permanently gives it SuitedCard.evergreen — the same all-four-base-suits-at-once,
- * immunity-ignoring power Mission 9's Gøran reward already grants (see engine.ts's resolveCommittedPlay's
- * evergreenActive branch). This card was never removed from the persisted roster to begin with — it only sat out
- * this one mission's active fight (see missions.ts's Mission 11 sidelineIdentity / RoomManager's
- * startLegacyMission) — so this is a plain in-place upgrade, not an add. A no-op (same reference) if `identity`
- * is unset or no matching card is found.
+ * Finds the existing party member matching `identity` (suit + rank) and permanently gives it
+ * SuitedCard.evergreen — the all-four-base-suits-at-once, immunity-ignoring power (see engine.ts's
+ * resolveCommittedPlay's evergreenActive branch). Shared by two mission rewards that both upgrade an existing
+ * card in place rather than adding a new one: Mission 11's upgradeSidelinedCard (the card sat out that one
+ * mission's active fight — see missions.ts's Mission 11 sidelineIdentity/RoomManager's startLegacyMission — but
+ * was never removed from the persisted roster) and Mission 9's upgradeEvergreenCard (Goran, an ordinary in-play
+ * party member the whole time, never sidelined at all). A no-op (same reference) if `identity` is unset or no
+ * matching card is found.
  */
 export function applyEvergreenUpgrade(party: Card[], identity?: { suit: Suit; rank: Rank }): Card[] {
   if (!identity) return party;
@@ -261,7 +274,23 @@ export function applyEvergreenUpgrade(party: Card[], identity?: { suit: Suit; ra
   return upgraded ? next : party;
 }
 
-/** Adds a mission's reward — recruits, any Dual-class Stickers, any Mage sticker, any corrupt-another-card effect, any Guardian sticker, and any sidelined-card upgrade — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
+/**
+ * Mission 9's own variant of applyEvergreenUpgrade (see MissionReward.upgradeEvergreenCard's doc for why a
+ * suit+rank identity doesn't work for Goran specifically): matches by name instead. A no-op (same reference) if
+ * `name` is unset or no matching card is found.
+ */
+export function applyEvergreenUpgradeByName(party: Card[], name?: string): Card[] {
+  if (!name) return party;
+  let upgraded = false;
+  const next = party.map((c) => {
+    if (upgraded || c.kind !== 'suited' || c.name !== name) return c;
+    upgraded = true;
+    return { ...c, evergreen: true };
+  });
+  return upgraded ? next : party;
+}
+
+/** Adds a mission's reward — recruits, any Dual-class Stickers, any Mage sticker, any corrupt-another-card effect, any Guardian sticker, and any sidelined-card or existing-card evergreen upgrade — to the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). */
 export function applyReward(party: Card[], reward: MissionReward): Card[] {
   const newRecruits = reward.recruits.map(buildRecruitCard);
   let next = [...party, ...newRecruits];
@@ -270,6 +299,7 @@ export function applyReward(party: Card[], reward: MissionReward): Card[] {
   if (reward.corruptAnotherCard) next = applyCorruptAnotherCard(next, new Set(newRecruits.map((c) => c.id)));
   if (reward.guardianSticker) next = applyGuardianSticker(next);
   if (reward.upgradeSidelinedCard) next = applyEvergreenUpgrade(next, reward.upgradeSidelinedCard);
+  if (reward.upgradeEvergreenCard) next = applyEvergreenUpgradeByName(next, reward.upgradeEvergreenCard);
   return next;
 }
 

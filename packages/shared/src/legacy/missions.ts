@@ -660,9 +660,16 @@ export const MISSIONS: Mission[] = [
       "of a dark swamp for longer than the Syndicate has existed — now offering rather less light than usual, " +
       "on account of being on fire. Myla and her cronies are here to destroy whatever the temple was built to " +
       "protect, and half the party is already scattered and captured before the first blow lands.",
-    // 4-5-boss escalating lineup: 4 Loreguards (15/30), 5 Lorekeepers (20/40, the 5th dual-immune as a preview
-    // of the boss to come), then Myla herself — 80 health, 20 attack, and immune to both Bard and Paladin at
-    // once, no Jester-breakable weak point to lean on.
+    // 4-4-boss escalating lineup: 4 Loreguards (15/30), 4 Lorekeepers (20/40), then Myla herself — 80 health, 20
+    // attack, and immune to both Bard and Paladin (Diamonds + Spades) at once, no Jester-breakable weak point to
+    // lean on.
+    //
+    // SOURCED CORRECTION (fan-reimplementation rules doc: "4x 15 atk / 30 hp + 4x 20 atk / 40 hp... then Myla (20
+    // atk / 80 hp, Spades + Diamonds)"; independently corroborated by a search-engine summary of the official
+    // compendium giving the same 4+4+Myla, 20/80, Spades+Diamonds figures): the shipped roster had a 10th, 5th
+    // "Lorekeeper: Myla's Chosen" enemy the code's own prior comment admitted was invented as "a preview of the
+    // boss to come" — removed. The other 9 enemies' names/stats (including Myla's own Bard+Paladin = Diamonds+
+    // Spades immunity) were already correct and are unchanged.
     enemies: [
       enemy('Loreguard: Ember-Wrought', 'WARRIOR', 30, 15),
       enemy('Loreguard: Cinder-Tongue', 'BARD', 30, 15),
@@ -672,35 +679,68 @@ export const MISSIONS: Mission[] = [
       enemy('Lorekeeper: Smoke-Herald', 'BARD', 40, 20),
       enemy('Lorekeeper: Pyre-Anointed', 'CLERIC', 40, 20),
       enemy('Lorekeeper: Blaze-Warden', 'PALADIN', 40, 20),
-      enemy('Lorekeeper: Myla\'s Chosen', 'BARD', 40, 20, 'PALADIN'),
       enemy('Myla', 'BARD', 80, 20, 'PALADIN'),
     ],
-    // The captured-piles deckbuilding mechanic: 30 party cards are split into 3 face-down piles of 10 (top card
-    // revealed) instead of joining the reserve deck. At the end of every turn (skipped entirely after a kill),
-    // banish a hand card to rescue one pile's face-up card into the discard pile and flip its next card — or
-    // decline, and every pile cycles its face-up card to the bottom and reveals the next one instead. An exact
-    // kill sends a chosen pile's face-up card straight to the top of the reserve deck (see
-    // GameState.capturedPilesActive).
+    // The captured-piles deckbuilding mechanic: party cards are split into 3 face-down piles (top card revealed)
+    // instead of joining the reserve deck. At the end of every turn (skipped entirely after a kill), banish a
+    // hand card to rescue one pile's face-up card into the discard pile and flip its next card — or decline, and
+    // every pile cycles its face-up card to the bottom and reveals the next one instead. An exact kill sends a
+    // chosen pile's face-up card straight to the top of the reserve deck (see GameState.capturedPilesActive).
+    //
+    // UNSOURCED BALANCE JUDGMENT CALL (see deck.ts's buildCapturedPiles): the pile split itself scales down for a
+    // smaller table now (engine.ts's startLegacyMission picks the actual pile size) instead of always carving out
+    // a fixed 30 regardless of player count — real playtesting found a solo game left with almost nothing in the
+    // tavern deck for this whole fight. No source specifies scaling by player count; the split size still lands
+    // on the sourced 30-card figure exactly once there are enough players (3-4) for that to plausibly be the
+    // tested case.
     capturedPilesActive: true,
-    // A fresh pool of temple acolytes, shuffled directly into the ordinary reserve deck alongside whatever's
-    // left of the party after the 30-card split — unlike Mission 7's Pilgrims, these carry no zone mechanic of
-    // their own, just extra reserve-deck bodies (see GameState.START_LEGACY_MISSION action's extraReserveCards).
+    // SOURCED CORRECTION (fan-reimplementation rules doc setup step: "Shuffle the pilgrim deck + remaining party
+    // cards + holding pile together to form the tavern deck"; post-mission step: "The pilgrim deck is dissolved —
+    // pilgrims are no longer used"): the shipped 6 "Acolyte" cards were an invented pool with no basis anywhere;
+    // the source instead folds Mission 7's OWN pilgrim survivors back in here, one final time, before they
+    // dissolve for good. Mission 7's pilgrim identities aren't exported as a reusable list (they're inline in
+    // that mission's own extraReserveCards above), so rather than refactor Mission 7's already-merged, already-
+    // tested entry (out of scope for this pass) these are freshly-built cards using the exact same 8 names/
+    // suits/ranks as Mission 7's own pilgrim() calls — "the same people," recognizably, without sharing object
+    // references across two missions' games (this codebase never clones a mission's static card objects per
+    // game — see RoomManager's startLegacyMission — so two missions sharing literal array/object references would
+    // risk one game's in-place card mutation (e.g. a suit-changing combo) leaking into the other's template).
+    // Unlike Mission 7, none of these carry any zone mechanic here (no pilgrimMechanic flag on this mission) —
+    // ordinary reserve-deck bodies only, same as the Acolytes they replace.
     extraReserveCards: [
-      pilgrim('Acolyte Wren', 'H', '3'),
-      pilgrim('Brother Ossian', 'D', '4'),
-      pilgrim('Ember-Keeper Tam', 'C', '5'),
-      pilgrim('Sister Ilva', 'S', '6'),
-      pilgrim('Young Petra', 'H', '7'),
-      pilgrim('Elder Rasha', 'D', '8'),
+      pilgrim('Old Fenwick', 'H', '2'),
+      pilgrim('Little Sae', 'D', '3'),
+      pilgrim('Bettina the Ferrywoman', 'C', '4'),
+      pilgrim('Corq Mudfoot', 'S', '5'),
+      pilgrim('Sister Yvaine', 'H', '6'),
+      pilgrim('Harlan Reedy', 'D', '7'),
+      pilgrim('Widow Corrin', 'C', '8'),
+      pilgrim('Young Thistle', 'S', '9'),
     ],
     // Reward: the Evergreen Mother relic (a corrupted card's cost becomes another player banishing from their
-    // own hand instead of the reserve deck's top card, or your own hand solo), Gøran joins the party carrying
-    // Evergreen (all four base class powers at once, always ignoring enemy immunity — exactly what breaks
-    // Myla's dual immunity open), and a second Mage sticker for one more lucky party member.
+    // own hand instead of the reserve deck's top card, or your own hand solo) and a second Mage sticker for one
+    // more lucky party member — both unchanged, not part of this pass's confirmed mismatches.
+    //
+    // SOURCED CORRECTION (fan-reimplementation rules doc: "Goran now ignores all immunities... but NOT considered
+    // restored" — i.e. gains the same all-four-suits, immunity-ignoring behavior this codebase already models as
+    // SuitedCard.evergreen): the shipped version granted "Gøran" as a brand-new rank-10 recruit here. The source
+    // treats Goran as an ALREADY-recruited party member simply gaining this upgrade, not a fresh join — matching
+    // an earlier research pass's separate finding that Goran should have been recruited back at Mission 4 (rank
+    // 8, no suit — see legacy-missions-transcript-mismatches's Mission 4 entry) and upgraded here, not created
+    // here. Mission 4 itself was already merged without him (out of scope for this pass), so this campaign's
+    // actual first Goran recruit now happens one mission later than sourced material expects — see Mission 8's
+    // own reward comment above, which introduces him there (Spades, rank 8) as the earliest point in this file's
+    // real code he can exist at all. This reward now upgrades THAT card in place via the new upgradeEvergreenCard
+    // field (party.ts's applyEvergreenUpgradeByName) — matched by NAME rather than suit+rank like Mission 11's
+    // upgradeSidelinedCard: Goran is a freshly-appended recruit, not a rename of one of the original 40 starting
+    // cards, so his suit+rank (Spades/8) is already claimed by a pre-existing party member — a suit+rank lookup
+    // would silently upgrade THAT unrelated card instead (see party.ts's own doc comment for the full reasoning,
+    // caught by this pass's own regression test).
     reward: {
-      recruits: [specialRecruit('Gøran', 'EVERGREEN', '10', 'H')],
+      recruits: [],
       relics: ['EVERGREEN_MOTHER'],
       mageSticker: true,
+      upgradeEvergreenCard: 'Goran',
     },
   },
   {

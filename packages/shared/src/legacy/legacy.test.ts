@@ -2403,20 +2403,32 @@ describe('legacy: mission 9 mechanics (captured piles)', () => {
     return res.state;
   }
 
-  it('splits 30 cards into 3 piles of 10 (face-down + 1 revealed each), leaving the rest for the reserve deck', () => {
+  it('UNSOURCED BALANCE FIX: scales the pile split down for a solo game (6/pile, 18 total) instead of the fixed 30, leaving much more of the party in the reserve deck', () => {
     const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 20, attack: 10 };
     const state = startTempleMission(1, [boss]);
 
     expect(state.capturedPiles.length).toBe(3);
     for (const pile of state.capturedPiles) {
       expect(pile.faceUp).not.toBeNull();
+      expect(pile.faceDown.length).toBe(5);
+    }
+    const totalCaptured = state.capturedPiles.reduce((sum, p) => sum + p.faceDown.length + (p.faceUp ? 1 : 0), 0);
+    expect(totalCaptured).toBe(18); // Math.min(10, 4 + 2*1) = 6 per pile, not the sourced fixed 10/pile
+    // 40-card starting party minus 18 captured = 22 leftover, dealt to the hand and/or left in the reserve deck —
+    // versus only 10 under the old fixed-30 split (see legacy-mission-playtest-findings' Mission 9 note).
+    const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
+    expect(handCount + state.tavernDeck.length).toBe(22);
+  });
+
+  it('reaches the sourced fixed 30-card split (10/pile) once there are enough players (4) for that to be the tested case', () => {
+    const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 20, attack: 10 };
+    const state = startTempleMission(4, [boss]);
+
+    for (const pile of state.capturedPiles) {
       expect(pile.faceDown.length).toBe(9);
     }
     const totalCaptured = state.capturedPiles.reduce((sum, p) => sum + p.faceDown.length + (p.faceUp ? 1 : 0), 0);
     expect(totalCaptured).toBe(30);
-    // 40-card starting party minus 30 captured = 10 leftover, dealt to the hand and/or left in the reserve deck.
-    const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
-    expect(handCount + state.tavernDeck.length).toBe(10);
   });
 
   it('shuffles extraReserveCards into the ordinary reserve deck, not the captured piles', () => {
@@ -2608,20 +2620,44 @@ describe('legacy: Evergreen Mother relic (Mission 9 reward — corrupted-card co
   });
 });
 
-describe('legacy: mission 9 reward (Evergreen Mother relic, Gøran, Mage sticker)', () => {
-  it('grants the Evergreen Mother relic, Gøran with the Evergreen special ability, and a bonus Mage sticker', () => {
+describe('legacy: mission 9 reward (Evergreen Mother relic, Goran upgraded to Evergreen in place, Mage sticker)', () => {
+  it('SOURCED FIX: grants no new recruit here — instead upgrades the existing Goran (introduced by Mission 8\'s own reward) to Evergreen, plus the Evergreen Mother relic and a bonus Mage sticker', () => {
+    const mission8 = getMission(8)!;
     const mission9 = getMission(9)!;
     expect(mission9.reward.relics).toEqual(['EVERGREEN_MOTHER']);
     expect(mission9.reward.mageSticker).toBe(true);
-    const goran = mission9.reward.recruits.find((r) => r.name === 'Gøran');
-    expect(goran?.class).toBe('EVERGREEN');
-    expect(goran?.special).toBe(true);
+    expect(mission9.reward.recruits.length).toBe(0); // no brand-new recruit — sourced correction
+    expect(mission9.reward.upgradeEvergreenCard).toBe('Goran');
 
-    const party = applyReward(buildInitialParty(), mission9.reward);
-    const goranCard = party.find((c) => c.kind === 'suited' && c.evergreen);
+    // Goran doesn't exist in this campaign's party until Mission 8's own reward introduces him — apply both
+    // rewards in their actual campaign order to exercise the full arc.
+    let party = applyReward(buildInitialParty(), mission8.reward);
+    party = applyReward(party, mission9.reward);
+
+    const goranCard = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
     expect(goranCard).toBeDefined();
-    if (goranCard?.kind === 'suited') expect(goranCard.special).toBe('EVERGREEN');
+    if (goranCard?.kind === 'suited') {
+      expect(goranCard.suit).toBe('S');
+      expect(goranCard.rank).toBe('8');
+      expect(goranCard.evergreen).toBe(true);
+    }
+    expect(party.filter((c) => c.kind === 'suited' && c.evergreen).length).toBe(1);
     expect(party.filter((c) => c.kind === 'suited' && c.secondClassArcane).length).toBe(1);
+  });
+
+  it('matching by name (not suit+rank) matters: Goran\'s suit+rank identity (Spades, 8) is already claimed by a pre-existing starting party member, who must NOT be the one upgraded', () => {
+    const mission8 = getMission(8)!;
+    const mission9 = getMission(9)!;
+    let party = applyReward(buildInitialParty(), mission8.reward);
+    const preexistingS8 = party.find((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '8' && c.name !== 'Goran');
+    expect(preexistingS8).toBeDefined(); // sanity check: the collision this test guards against is real
+
+    party = applyReward(party, mission9.reward);
+
+    const stillUnupgraded = party.find((c) => c.id === preexistingS8!.id);
+    expect(stillUnupgraded?.kind === 'suited' && stillUnupgraded.evergreen).toBeFalsy();
+    const goranCard = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
+    expect(goranCard?.kind === 'suited' && goranCard.evergreen).toBe(true);
   });
 });
 
