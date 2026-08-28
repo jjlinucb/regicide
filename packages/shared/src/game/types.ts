@@ -727,6 +727,8 @@ export type GameAction =
       pileTopEnemyBonus?: boolean;
       /** See GameState.restoredCardMechanic. */
       restoredCardMechanic?: boolean;
+      /** See missions.ts's Mission.randomizeEnemyOrder — Mission 2 only. Shuffles `enemies` before building the fight queue. */
+      randomizeEnemyOrder?: boolean;
     }
   /**
    * `chosenSuits` resolves any Mercenary any-suit Ace among `cardIds` (see SuitedCard.wildSuit) — cardId -> one
