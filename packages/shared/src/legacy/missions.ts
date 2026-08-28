@@ -72,6 +72,13 @@ export interface Mission {
   pileTopEnemyBonus?: boolean;
   /** See GameState.restoredCardMechanic. */
   restoredCardMechanic?: boolean;
+  /**
+   * See GameAction's START_LEGACY_MISSION.randomizeEnemyOrder. UNSOURCED JUDGMENT CALL (per the user's own
+   * knowledge of the physical game): every other mission's `enemies` order is fixed/sourced and must stay a fixed
+   * fight order — this flag exists only for Mission 2's six hydra-kin heads, which should instead come out in a
+   * fresh random order on every attempt, including retries after a loss.
+   */
+  randomizeEnemyOrder?: boolean;
 }
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
@@ -288,6 +295,10 @@ export const MISSIONS: Mission[] = [
     // Modified Jester rule for this mission only: the oppressive dual immunities mean only the very next
     // player in turn order may claim a played Jester and ignore them — not any player at the table.
     jesterClaimNextPlayerOnly: true,
+    // UNSOURCED JUDGMENT CALL (per the user's own knowledge of the physical game): unlike every other mission's
+    // fixed/sourced enemy order, this brood's six heads should come out shuffled, and reshuffled again on every
+    // retry after a loss — not the same fixed sequence every attempt (see engine.ts's startLegacyMission).
+    randomizeEnemyOrder: true,
     // Reward: Dual-class Stickers — 4 random existing party members each gain a second class icon, so that
     // single card triggers both class powers whenever it's played.
     reward: { recruits: [], dualClassStickers: 4 },

@@ -163,6 +163,60 @@ describe('legacy: mission setup', () => {
   });
 });
 
+describe('legacy: mission 2 enemy order is randomized per attempt (unsourced judgment call)', () => {
+  function enemyOrder(state: GameState): (string | undefined)[] {
+    return [state.currentEnemy?.name, ...state.castleDeck.map((e) => e.name)];
+  }
+
+  function startWithSeed(enemies: MissionEnemySpec[], seed: string, randomizeEnemyOrder?: boolean): GameState {
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed,
+      party: buildInitialParty(),
+      enemies: missionEnemiesToSpecs(enemies),
+      jesterCount: 0,
+      randomizeEnemyOrder,
+    });
+    return ensureOk(res).state;
+  }
+
+  it('mission 2 fights its 6 hydra heads in a shuffled order that changes across seeds, including retries', () => {
+    const mission2 = getMission(2)!;
+    expect(mission2.randomizeEnemyOrder).toBe(true);
+    const originalOrder = mission2.enemies.map((e) => e.name);
+    const seeds = ['retry-a', 'retry-b', 'retry-c', 'retry-d', 'retry-e'];
+    const orders = seeds.map((seed) => enemyOrder(startWithSeed(mission2.enemies, seed, mission2.randomizeEnemyOrder)));
+    // Every produced order is still a permutation of the same 6 heads — nothing is dropped, duplicated, or renamed.
+    for (const order of orders) {
+      expect([...order].sort()).toEqual([...originalOrder].sort());
+    }
+    // At least one seed must diverge from the mission's own fixed source order (guards against a no-op shuffle).
+    // Checked across several seeds so this isn't flaky on the rare chance one shuffle lands back on the original.
+    expect(orders.some((order) => order.join('|') !== originalOrder.join('|'))).toBe(true);
+    // And at least two seeds must diverge from EACH OTHER — proves each retry gets its own fresh shuffle rather
+    // than one fixed "randomized" order applied every time.
+    expect(new Set(orders.map((o) => o.join('|'))).size).toBeGreaterThan(1);
+  });
+
+  it('mission 3, a mission with a fixed/sourced enemy order, still fights the identical sequence across seeds', () => {
+    const mission3 = getMission(3)!;
+    expect(mission3.randomizeEnemyOrder).toBeUndefined();
+    const originalOrder = mission3.enemies.map((e) => e.name);
+    for (const seed of ['retry-a', 'retry-b', 'retry-c']) {
+      const order = enemyOrder(startWithSeed(mission3.enemies, seed, mission3.randomizeEnemyOrder));
+      expect(order).toEqual(originalOrder);
+    }
+  });
+
+  it("mission 1's standardCastle path ignores randomizeEnemyOrder entirely (no `enemies` list to shuffle)", () => {
+    const mission1 = getMission(1)!;
+    expect(mission1.standardCastle).toBe(true);
+    expect(mission1.randomizeEnemyOrder).toBeUndefined();
+  });
+});
+
 describe('legacy: exact-kill-only recycling (hydra mission)', () => {
   const hydra: LegacyEnemySpec = { name: 'Test Hydra', suit: 'H', secondSuit: 'D', health: 20, attack: 10 };
 

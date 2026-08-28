@@ -1354,11 +1354,16 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   // the reserve deck below instead of the raw action.party (the 8 chosen cards aren't available to draw/play —
   // they're standing on the other side of the table).
   const corruptedEnemyBuild = corruptedPartyEnemies ? buildCorruptedPartyEnemies(action.party, buildRng) : null;
+  // Mission 2 only (UNSOURCED JUDGMENT CALL — see missions.ts's Mission.randomizeEnemyOrder): every other
+  // mission's `enemies` order is fixed/sourced and must reach makeLegacyEnemy untouched, but this brood's six
+  // heads should come out shuffled, and reshuffled again on every retry — a fresh order per attempt, not the
+  // same fixed sequence every time.
+  const orderedEnemies = action.randomizeEnemyOrder ? shuffle(action.enemies, buildRng) : action.enemies;
   const enemyDeck = action.standardCastle
     ? buildCastleDeck(buildRng)
     : corruptedEnemyBuild
       ? corruptedEnemyBuild.enemies
-      : action.enemies.map(makeLegacyEnemy);
+      : orderedEnemies.map(makeLegacyEnemy);
   let partyForReserve = corruptedEnemyBuild ? corruptedEnemyBuild.leftoverParty : action.party;
   // Mission 11: every Beast Companion card (Mission 4's reward pool) is pulled out of the party and shuffled
   // into its own face-down deck sitting in the mission zone for this fight only — none of them are available to
