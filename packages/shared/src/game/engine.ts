@@ -26,6 +26,7 @@ import {
   isCompanionCard,
   isSuitBlockedByImmunity,
   MAX_SOLO_JESTERS,
+  matchesAscendingZoneSlot,
   missionZoneValueSum,
   pileTopImmuneSuits,
   validatePlayShape,
@@ -174,6 +175,12 @@ function finishAdvanceToNextPlayer(state: GameState, idleYield = false): void {
   // Mission 8's placement window only ever covers the turn a kill happened on (or the continued turn right
   // after it) — once play moves on to a fresh turn with no kill behind it, close the window back up.
   state.zoneOpenForPlacement = false;
+  if (state.zoneCommittedPlay.length > 0) {
+    // Whatever's left unclaimed from the window's kill(s), once the window closes for good, falls to the
+    // discard pile the same way an ordinary kill's played cards always do (see finishEnemyDefeatTail).
+    pushToDiscardPile(state, state.zoneCommittedPlay);
+    state.zoneCommittedPlay = [];
+  }
   checkForStuckLoss(state, idleYield);
 }
 
@@ -1078,6 +1085,13 @@ function finishEnemyDefeatTail(state: GameState, enemy: EnemyState, remaining: n
     // resolvedEnemyAttack / resolveSuitPowers's blocked check). Mission 12 reuses the same rule as step two of its
     // own three-step cleanup (see the restoredCardMechanic block above for step one, and just below for step three).
     banishCards(state, enemy.tableCards);
+  } else if (state.ruleset === 'legacy' && state.ascendingZone && !state.zoneClosed) {
+    // Mission 8, sourced fix (see GameAction's PLACE_IN_ZONE / GameState.zoneCommittedPlay): the ascending zone's
+    // placement no longer costs a fresh hand card — it instead reuses a card already committed to THIS kill's
+    // own winning attack, at no extra cost. Hold this kill's played cards here instead of discarding them
+    // immediately; whatever isn't claimed by a placement gets swept to the discard pile once the placement
+    // window closes (finishAdvanceToNextPlayer) or the zone purges at 10 (placeInZone).
+    state.zoneCommittedPlay.push(...enemy.tableCards);
   } else {
     pushToDiscardPile(state, enemy.tableCards);
   }
@@ -1230,6 +1244,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.pilgrimZone = [];
   state.ascendingZone = false;
   state.zoneOpenForPlacement = false;
+  state.zoneCommittedPlay = [];
   state.zoneClosed = false;
   state.zonePurge = null;
   state.chanterWindow = null;
@@ -1362,6 +1377,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.pilgrimZone = [];
   state.ascendingZone = action.ascendingZone ?? false;
   state.zoneOpenForPlacement = false;
+  state.zoneCommittedPlay = [];
   state.zoneClosed = false;
   state.zonePurge = null;
   state.chanterWindow = null;
@@ -2079,7 +2095,13 @@ function beginZonePurge(state: GameState, player: PlayerState): EngineResult {
   return ok(state);
 }
 
-/** Legacy-only (Mission 8): places a card from hand into the ascending mission zone (see GameState.ascendingZone). */
+/**
+ * Legacy-only (Mission 8): places a card into the ascending mission zone (see GameState.ascendingZone).
+ * SOURCED CORRECTION (fan-reimplementation rules doc, see GameAction's PLACE_IN_ZONE): the card comes from
+ * `state.zoneCommittedPlay` — cards already committed to the kill's own winning attack — not from hand, and
+ * placing one doesn't cost anything extra or end the turn; the player simply continues from wherever the kill
+ * left them (usually still AWAIT_PLAY against a freshly revealed enemy).
+ */
 function placeInZone(state: GameState, action: Extract<GameAction, { type: 'PLACE_IN_ZONE' }>): EngineResult {
   if (!state.ascendingZone) return fail('There is no ascending mission zone in this mission.');
   if (state.zoneClosed) return fail('The mission zone has closed — no more cards can be placed there.');
@@ -2089,35 +2111,42 @@ function placeInZone(state: GameState, action: Extract<GameAction, { type: 'PLAC
   if (err) return fail(err);
 
   const player = currentPlayer(state);
-  const card = player.hand.find((c) => c.id === action.cardId);
-  if (!card) return fail('That card is not in your hand.');
+  const card = state.zoneCommittedPlay.find((c) => c.id === action.cardId);
+  if (!card) {
+    return fail('That card is not available to place — only a card from the attack that just landed the kill can be used, at no extra cost.');
+  }
   if (card.kind !== 'suited') return fail('Only a suited card can be placed in the mission zone.');
 
-  const top = state.missionZone[state.missionZone.length - 1];
-  const required = top ? cardValue(top) + 1 : 1;
-  const value = cardValue(card);
-  if (value !== required) {
-    return fail(`The mission zone needs a card worth exactly ${required} next — that card is worth ${value}.`);
+  // The chain's required next slot is tracked by POSITION (how many cards are already in the zone), not by the
+  // top card's own printed value — the mission's one "2/5" wildcard can fill an out-of-order slot (placed as a 2
+  // when the chain still needs a 5 later, or vice versa), which would desync a value-derived "top + 1" the
+  // moment one lands (see rules.ts's matchesAscendingZoneSlot / GameState.ascendingZone's doc).
+  const required = state.missionZone.length + 1;
+  if (!matchesAscendingZoneSlot(card, required)) {
+    return fail(`The mission zone needs a card worth exactly ${required} next — that card can't fill that slot.`);
   }
 
-  player.hand = player.hand.filter((c) => c.id !== card.id);
+  state.zoneCommittedPlay = state.zoneCommittedPlay.filter((c) => c.id !== card.id);
   state.missionZone.push(card);
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
   if (card.pilgrim) {
-    log(state, `${player.name} guides ${card.name ?? 'a survivor'} into place — the chain now stands at ${required}.`);
+    log(state, `${player.name} guides ${card.name ?? 'a survivor'} into place, straight from the attack just finished — the chain now stands at ${required}.`);
+  } else if (card.flexibleComboRank) {
+    log(state, `${player.name} slots the 2/5 wildcard into the gap at ${required}, straight from the attack just finished — it always counts for just 2 while it sits there.`);
   } else {
-    log(state, `${player.name} presses ${card.name ?? `a ${card.rank}`} into the gap at ${required} — the enemy grows bolder while it sits there.`);
+    log(state, `${player.name} presses ${card.name ?? `a ${card.rank}`} into the gap at ${required}, straight from the attack just finished — the enemy grows bolder while it sits there.`);
   }
 
   if (required === 10) {
-    state.discardPile.push(...state.missionZone);
+    state.discardPile.push(...state.missionZone, ...state.zoneCommittedPlay);
     state.missionZone = [];
+    state.zoneCommittedPlay = [];
     state.zoneImmuneSuits = [];
     return beginZonePurge(state, player);
   }
 
-  return finishNonAttackTurn(state);
+  return ok(state);
 }
 
 /** Legacy-only (Mission 8): resolves the open Ultimate Banishment window after the zone's 10-card purge (see GameState.zonePurge). */
@@ -2351,6 +2380,7 @@ export function createLobbyState(): GameState {
     pilgrimZone: [],
     ascendingZone: false,
     zoneOpenForPlacement: false,
+    zoneCommittedPlay: [],
     zoneClosed: false,
     zonePurge: null,
     chanterWindow: null,

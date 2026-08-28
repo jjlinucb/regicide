@@ -42,9 +42,10 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
     if (state.zoneClosed) {
       caption = 'Purged and closed for good.';
     } else {
-      const top = state.missionZone[state.missionZone.length - 1];
-      const needs = top ? cardValue(top) + 1 : 1;
-      caption = `Ascending run — needs a ${needs} next. Non-Pilgrim cards here buff the enemy's attack.`;
+      // Required value is tracked by POSITION (length + 1), not the top card's own printed value — the
+      // mission's "2/5" wildcard can fill an out-of-order slot (see rules.ts's matchesAscendingZoneSlot).
+      const needs = state.missionZone.length + 1;
+      caption = `Ascending run — needs a ${needs} next, free from the attack that just landed a kill. Non-Pilgrim cards here buff the enemy's attack.`;
     }
   } else if (state.missionZone.length > 0) {
     caption = `Feeds the enemy +${zoneTotal} attack and matching immunity.`;
@@ -59,6 +60,14 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
             {caption && <span className="mission-zone-caption">{caption}</span>}
           </div>
           <ZoneCardRow cards={state.missionZone} />
+          {state.ascendingZone && state.zoneCommittedPlay.length > 0 && (
+            <div className="mission-zone-header">
+              <span className="mission-zone-caption">
+                Free from the kill just landed — place one below instead of attacking, at no extra cost:
+              </span>
+            </div>
+          )}
+          {state.ascendingZone && state.zoneCommittedPlay.length > 0 && <ZoneCardRow cards={state.zoneCommittedPlay} />}
         </div>
       )}
       {state.pilgrimMechanic && (state.pilgrimZone.length > 0 || state.pilgrimDeckCount > 0) && (

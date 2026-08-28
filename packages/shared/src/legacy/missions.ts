@@ -126,6 +126,31 @@ function pilgrim(name: string, suit: Suit, rank: Rank): Card {
 }
 
 /**
+ * Mission 8's own fight SETUP (not a reward — see this mission's own comment below): 4 Chanter cards, ranks
+ * 3/5/7/9, added straight to the fight's reserve deck via extraReserveCards, same non-persistent "mission-only"
+ * shape every other extraReserveCards helper here already has. Sourced fan-reimplementation rules doc ("Setup:
+ * Add Drum 3/5/7/9 to the party") — "Drum" is that source's own name for this repo's Chanter class. Only rank 9
+ * (Bram) is ever granted permanently, via reward.recruits below — these 4 aren't touched by applyReward at all,
+ * so no separate "grant then retire 3" bookkeeping is needed (same simplification Mission 5's Haror reward
+ * already relies on).
+ */
+function chanterCompanion(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `chanter-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, chanter: true };
+}
+
+/**
+ * Mission 8's one sourced wildcard for its ascending mission zone: reuses the existing "2/5" Mercenary-shop card
+ * shape (see legacy/mercenaries.ts's TWO_FIVE_* / SuitedCard.flexibleComboRank) rather than inventing a new card
+ * flag — printed rank 5 (its ordinary value everywhere outside the zone: hand, discard, defend), flexibleComboRank
+ * '2' is the flagged alternate placeInZone also accepts (see rules.ts's matchesAscendingZoneSlot). Sourced
+ * fan-reimplementation rules doc: "2/5 cards can be placed as a 2 during 2-selection or as a 5 during
+ * 5-selection. Once placed, they count as 2 for enemy attack calculation" (see ascendingZoneAttackBuff).
+ */
+function zoneWildcard(name: string, suit: Suit): Card {
+  return { id: `zone-wildcard-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank: '5', flexibleComboRank: '2', name };
+}
+
+/**
  * Mission 12's own flavor pair, seeded into its extraReserveCards: heroes the antagonist's corruption reached
  * along the campaign's road. `restoredHero` carries SuitedCard.restored — the relic upgrade's beneficiaries,
  * healing the banish pile back into the game whenever they're played (see engine.ts's applyRestoredHeal).
@@ -522,34 +547,63 @@ export const MISSIONS: Mission[] = [
       "of trolls, and beyond them — riding the thin air over the falls — something with wings wide enough to " +
       "blot out the sun. Villagers scattered by the storm are stranded across the cliffside path below, too " +
       'panicked to move except in a very particular order.',
-    // Wave 1: 6 uniform Trolls (buffer phase). Wave 2: 6 uniform Wyverns, a full tier above anything the
-    // campaign has fought yet — community consensus is they "hit like a truck," so the party had better have
-    // finished the chain (and its purge) before this wave drops.
+    // Wave 1: 6 Trolls. Wave 2: 6 Wyverns (50/25 — a full tier above anything the campaign has fought yet;
+    // community consensus is they "hit like a truck," so the party had better have finished the chain, and its
+    // purge, before this wave drops).
+    //
+    // SOURCED CORRECTION (fan-reimplementation rules doc: "6 Trolls (10 atk / 20 hp, dual-suited, each with a
+    // distinct pair of basic suits), then 6 Wyverns (25 atk / 50 hp, dual-suited, distinct pairs)"): both tiers
+    // are shipped single-class immune; the source has EVERY enemy in EVERY tier dual-suited, one of the 6 distinct
+    // pairs of the 4 base classes per enemy — the exact same "one hydra-kin head per pair" shape Mission 2's
+    // Coilfang brood already uses (see this file's Mission 2 entry), reused stat-for-stat here since the enemies'
+    // own health/attack numbers were already correct and only the immunity was missing.
+    //
+    // DIFFICULTY NOTE (see legacy-mission-playtest-findings's Mission 8 section): the earlier playtest sweep never
+    // got past Wave 1 even with single immunity, so this pass can't claim a fresh before/after simulated number —
+    // adding it here is the sourced correction regardless. Unlike Missions 3/10/12, this mission's dual immunity
+    // is a FIXED per-enemy trait baked into MissionEnemySpec, not a runtime-growing zone effect — Mission 8's own
+    // zone (ascendingZone) only ever buffs attack (see ascendingZoneAttackBuff), it never grants immunity
+    // (zoneImmuneSuits is forced empty for this mission — see engine.ts's startLegacyMission). There is no
+    // escalating-immunity mechanism here for Mission 3's zone-immunity cap to bound in the first place, so that
+    // pattern doesn't apply and wasn't added — the caution about not copy-pasting it blind (Mission 12 tried and
+    // reverted exactly that) is moot here because the two missions' immunity sources aren't the same shape at all.
     enemies: [
-      enemy('Grael Stonejaw', 'WARRIOR', 20, 10),
-      enemy('Mossen Foghide', 'BARD', 20, 10),
-      enemy('Rimtusk the Wet', 'CLERIC', 20, 10),
-      enemy('Cragfoot', 'PALADIN', 20, 10),
-      enemy('Windbroken Skarn', 'WARRIOR', 20, 10),
-      enemy('The Last Bridgekeeper', 'BARD', 20, 10),
-      enemy('Wyvern of the First Veil', 'CLERIC', 50, 25),
-      enemy('Wyvern of the Second Veil', 'PALADIN', 50, 25),
-      enemy('Wyvern of the Third Veil', 'WARRIOR', 50, 25),
-      enemy('Wyvern of the Fourth Veil', 'BARD', 50, 25),
-      enemy('Stormrend, Elder Wyvern', 'CLERIC', 50, 25),
-      enemy("Skytallon, Warden of Heaven's Edge", 'PALADIN', 50, 25),
+      enemy('Grael Stonejaw', 'CLERIC', 20, 10, 'BARD'),
+      enemy('Mossen Foghide', 'CLERIC', 20, 10, 'WARRIOR'),
+      enemy('Rimtusk the Wet', 'CLERIC', 20, 10, 'PALADIN'),
+      enemy('Cragfoot', 'BARD', 20, 10, 'WARRIOR'),
+      enemy('Windbroken Skarn', 'BARD', 20, 10, 'PALADIN'),
+      enemy('The Last Bridgekeeper', 'WARRIOR', 20, 10, 'PALADIN'),
+      enemy('Wyvern of the First Veil', 'CLERIC', 50, 25, 'BARD'),
+      enemy('Wyvern of the Second Veil', 'CLERIC', 50, 25, 'WARRIOR'),
+      enemy('Wyvern of the Third Veil', 'CLERIC', 50, 25, 'PALADIN'),
+      enemy('Wyvern of the Fourth Veil', 'BARD', 50, 25, 'WARRIOR'),
+      enemy('Stormrend, Elder Wyvern', 'BARD', 50, 25, 'PALADIN'),
+      enemy("Skytallon, Warden of Heaven's Edge", 'WARRIOR', 50, 25, 'PALADIN'),
     ],
-    // The mission zone builds an ascending A-through-10 chain instead of any prior mission's zone mode. Pilgrim
+    // The mission zone builds an ascending 1-through-10 chain instead of any prior mission's zone mode. Pilgrim
     // cards are ordinary cards here — no hand-trap restriction, playable or discardable like any other — but
     // placing one into the next open slot of the chain (via PLACE_IN_ZONE) costs nothing extra; pressing an
     // ordinary party card into the same gap works too, but buffs the current enemy's attack for as long as it
     // sits there (see GameState.ascendingZone / rules.ts's ascendingZoneAttackBuff). Completing the chain at 10
     // purges the whole zone to the discard pile, opens the Ultimate Banishment (see GameState.zonePurge), and
     // closes the zone forever.
+    //
+    // SOURCED CORRECTION (fan-reimplementation rules doc): the shipped placeInZone had the player pay for a
+    // placement with an extra card pulled fresh from hand — not sourced anywhere. The real rule ("during cleanup,
+    // the player may optionally move cards from the play area to the mission zone... at no extra cost") reuses a
+    // card already committed to the kill's own winning attack instead — see GameState.zoneCommittedPlay /
+    // engine.ts's placeInZone/finishEnemyDefeatTail. The same source also documents the missing wildcard: "2/5
+    // cards can be placed as a 2 during 2-selection or as a 5 during 5-selection. Once placed, they count as 2
+    // for enemy attack calculation" — implemented by reusing the existing "2/5" Mercenary card shape (see
+    // zoneWildcard / rules.ts's matchesAscendingZoneSlot/ascendingZoneAttackBuff) rather than inventing a new
+    // flag.
     ascendingZone: true,
     // "Scrap," the Pilgrim Puppy, is the chain's permanent anchor — seeded straight into the zone at value 1 (an
     // Ace), never re-placed. The other 9 Pilgrims (values 2-10, the last being Goran himself) are shuffled into
-    // the reserve deck alongside the party, ordinary cards in every other respect.
+    // the reserve deck alongside the party, ordinary cards in every other respect, plus the one "2/5" wildcard
+    // the source names above (see zoneWildcard) and the 4 Chanter cards this mission's reward now enters the
+    // fight WITH instead of granting after it (see the reward comment below).
     presetMissionZone: [pilgrim('Scrap', 'H', 'A')],
     extraReserveCards: [
       pilgrim('Old Yarrow', 'S', '2'),
@@ -561,18 +615,41 @@ export const MISSIONS: Mission[] = [
       pilgrim('Uncle Thom', 'C', '8'),
       pilgrim('Widow Aeliss', 'H', '9'),
       pilgrim('Goran', 'S', '10'),
+      zoneWildcard('The Wandering Coin', 'C'),
+      chanterCompanion('Sela Windchant', 'D', '3'),
+      chanterCompanion('Orin Deepvoice', 'H', '5'),
+      chanterCompanion('Ketta Skysong', 'C', '7'),
+      chanterCompanion('Bram the Refrainkeeper', 'S', '9'),
     ],
-    // Reward: the Chanter faction — 4 permanent new recruits, survivors of the climb who picked up the mountain's
-    // own rhythm. Playing one has the whole table draw its value in cards at once, even past hand limit, then
-    // trim back down — a shared surge the party can use to hunt for whatever rank the chain still wants. Bram's
-    // Encore doubles how many cards everyone draws.
+    // SOURCED CORRECTION (fan-reimplementation rules doc): the shipped reward was pure upside — 4 free permanent
+    // Chanter recruits, no downside. The source instead adds those same 4 cards as fight SETUP (see
+    // extraReserveCards above — "Setup: Add Drum 3/5/7/9 to the party"), and the real reward is a mixed bag:
+    //  - Keep only rank 9 (Bram, who already carries the special Encore ability) permanently — the other 3
+    //    (Sela/Orin/Ketta) existed only for this one fight and are never added to the persisted roster at all
+    //    (same "no separate grant-then-retire step needed" simplification Mission 5's Haror reward already uses).
+    //  - "Permanently remove the Pilgrim Ace from the pilgrim deck" — a no-op by construction in this codebase:
+    //    every mission's Pilgrim cards (including "Scrap," this mission's own Ace) are mission-local
+    //    extraReserveCards/presetMissionZone entries that never persist into the campaign party or any later
+    //    mission's data to begin with (missions.ts has no cross-mission "pilgrim deck" state at all) — there's
+    //    nothing left to remove that wasn't already gone by construction, so no code change was needed here.
+    //  - "Add the Diamonds suit to Goran" — sourced material treats Goran as an ALREADY-recruited party member
+    //    gaining a second suit here (its own earlier "Add the Hearts suit to Goran" step lands at Mission 7 in
+    //    that source). This repo's own Mission 7 rework (already merged, out of scope for this pass) never
+    //    recruited Goran at all, so Mission 8 is the earliest point in this campaign's actual code he can be
+    //    introduced — treated here as his real FIRST recruitment (a plain recruit, not "add a second suit to an
+    //    existing one") rather than touching the already-merged Mission 7. Rank 8 and the Spades/Paladin class are
+    //    both unsourced judgment calls (no source pins an exact rank/suit for his first recruitment specifically,
+    //    since no source expected this gap to exist) — Spades matches this same mission's own flavor Pilgrim card
+    //    above (also named "Goran"), and rank 8 matches an earlier research pass's separate note on what Mission
+    //    4's version of this same recruit would have been (see legacy-missions-transcript-mismatches's Mission 4
+    //    entry: "Goran (8, no suit)") — Mission 4 itself was already merged without him, so that rank is repurposed
+    //    here instead of left stranded. Mission 9's reward later upgrades this exact card to Evergreen, matched
+    //    by name rather than this suit+rank identity — see party.ts's applyEvergreenUpgradeByName's doc comment
+    //    for why (his suit+rank collides with a pre-existing starting party member's).
+    //  - "Corrupt another card" — reuses the existing corruptAnotherCard reward step (see party.ts).
     reward: {
-      recruits: [
-        recruit('Sela Windchant', 'CHANTER', '3', 'D'),
-        recruit('Orin Deepvoice', 'CHANTER', '5', 'H'),
-        recruit('Ketta Skysong', 'CHANTER', '7', 'C'),
-        specialRecruit('Bram the Refrainkeeper', 'CHANTER', '9', 'S'),
-      ],
+      recruits: [specialRecruit('Bram the Refrainkeeper', 'CHANTER', '9', 'S'), recruit('Goran', 'PALADIN', '8')],
+      corruptAnotherCard: true,
     },
   },
   {

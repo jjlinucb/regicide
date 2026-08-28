@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   cardValue,
   MAX_SOLO_JESTERS,
+  matchesAscendingZoneSlot,
   SOLO_JESTER_ABILITY_TEXT,
   validatePlayShape,
   type ClientGameState,
@@ -108,8 +109,14 @@ export function GamePage({
   const isAwaitRescueChoice = state.turnPhase === 'AWAIT_RESCUE_CHOICE';
 
   // Mission 8: the ascending mission zone chain, the chant's hand-trim queue, and the post-purge banishment window.
-  const zoneTop = state.missionZone[state.missionZone.length - 1];
-  const zoneRequiredValue = zoneTop ? cardValue(zoneTop) + 1 : 1;
+  // Required value is tracked by POSITION (missionZone.length + 1), not the top card's own printed value — the
+  // mission's "2/5" wildcard can fill an out-of-order slot (see rules.ts's matchesAscendingZoneSlot), which would
+  // desync a value-derived "top + 1" the moment one lands.
+  const zoneRequiredValue = state.missionZone.length + 1;
+  // SOURCED FIX: placement no longer costs a fresh hand card — it reuses a card already committed to the kill's
+  // own winning attack (see GameState.zoneCommittedPlay), at no extra cost. Pick whichever committed card (if
+  // any) actually fills the current required slot.
+  const placeableZoneCard = state.zoneCommittedPlay.find((c) => matchesAscendingZoneSlot(c, zoneRequiredValue));
   const isChantWindow = state.turnPhase === 'AWAIT_CHANT_TRIM' && Boolean(state.chanterWindow);
   const chantTrimmerId = state.chanterWindow?.pendingPlayerIds[0];
   const isMyChantTrim = isChantWindow && chantTrimmerId === myPlayerId;
@@ -131,11 +138,10 @@ export function GamePage({
     isLegacy &&
     state.ascendingZone &&
     !state.zoneClosed &&
+    state.zoneOpenForPlacement &&
     isMyTurn &&
     state.turnPhase === 'AWAIT_PLAY' &&
-    selectedCards.length === 1 &&
-    selectedCards[0].kind === 'suited' &&
-    cardValue(selectedCards[0]) === zoneRequiredValue;
+    Boolean(placeableZoneCard);
 
   if (state.phase === 'WON' || state.phase === 'LOST') {
     return (
@@ -554,8 +560,8 @@ export function GamePage({
                     canPlace: canPlaceInZone,
                     requiredValue: zoneRequiredValue,
                     onPlace: () => {
-                      sendAction({ type: 'PLACE_IN_ZONE', playerId: myPlayerId, cardId: selectedCards[0].id });
-                      setSelectedIds(new Set());
+                      if (!placeableZoneCard) return;
+                      sendAction({ type: 'PLACE_IN_ZONE', playerId: myPlayerId, cardId: placeableZoneCard.id });
                     },
                   }
                 : undefined

@@ -3,7 +3,7 @@ import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engi
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
-import { getMission, MISSIONS, missionEnemiesToSpecs } from './missions.js';
+import { getMission, MISSIONS, missionEnemiesToSpecs, type MissionEnemySpec } from './missions.js';
 import {
   applyCorruptAnotherCard,
   applyDualClassStickers,
@@ -1956,17 +1956,24 @@ describe('legacy: Druid class power (Regrowth — salvage from the banish pile)'
 });
 
 describe('legacy: mission 8 setup (Winds of Chaos)', () => {
-  it('is a 12-enemy 2-wave gauntlet (6 Trolls, 6 Wyverns), ascendingZone enabled, with 9 extra Pilgrim reserve cards and a preset Puppy anchor', () => {
+  it('is a 12-enemy 2-wave gauntlet (6 dual-immune Trolls, 6 dual-immune Wyverns), ascendingZone enabled, with 9 Pilgrims + 1 wildcard + 4 fight-setup Chanters as extra reserve cards, and a preset Puppy anchor', () => {
     const mission8 = getMission(8)!;
     expect(mission8.enemies.length).toBe(12);
+    expect(mission8.enemies.every((e) => e.secondClass !== undefined)).toBe(true); // every enemy, both waves, is dual-immune
+    // All 6 distinct pairs of the 4 base classes appear exactly once per wave (Trolls: enemies 0-5; Wyverns: 6-11).
+    const pairKey = (e: MissionEnemySpec) => [e.class, e.secondClass].sort().join('+');
+    expect(new Set(mission8.enemies.slice(0, 6).map(pairKey)).size).toBe(6);
+    expect(new Set(mission8.enemies.slice(6, 12).map(pairKey)).size).toBe(6);
     expect(mission8.ascendingZone).toBe(true);
-    expect(mission8.extraReserveCards?.length).toBe(9);
-    expect(mission8.extraReserveCards?.every((c) => c.kind === 'suited' && c.pilgrim)).toBe(true);
+    expect(mission8.extraReserveCards?.length).toBe(14);
+    expect(mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.pilgrim).length).toBe(9);
+    expect(mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.chanter).length).toBe(4);
+    expect(mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.flexibleComboRank).length).toBe(1);
     expect(mission8.presetMissionZone?.length).toBe(1);
     expect(mission8.presetMissionZone?.[0]).toMatchObject({ rank: 'A', pilgrim: true });
   });
 
-  it('shuffles the extra Pilgrim cards into the reserve deck alongside the party at mission start', () => {
+  it('shuffles the extra reserve cards into the reserve deck alongside the party at mission start', () => {
     const mission8 = getMission(8)!;
     const res = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',
@@ -1984,8 +1991,8 @@ describe('legacy: mission 8 setup (Winds of Chaos)', () => {
     expect(state.ascendingZone).toBe(true);
     expect(state.missionZone.length).toBe(1);
     const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
-    // 40 party + 9 Pilgrims = 49 total in circulation (hands + reserve deck).
-    expect(handCount + state.tavernDeck.length).toBe(49);
+    // 40 party + 14 extras (9 Pilgrims + 1 wildcard + 4 fight-setup Chanters) = 54 total in circulation.
+    expect(handCount + state.tavernDeck.length).toBe(54);
   });
 });
 
@@ -2019,6 +2026,18 @@ describe('legacy: mission 8 mechanics (ascending mission zone chain)', () => {
 
   const puppy: Card = { id: 'puppy', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true };
 
+  /** 9 cards already in the zone (puppy + 8 fillers) — required next is 10, one placement away from the purge. */
+  function nineCardZone(): Card[] {
+    const fillers: Card[] = Array.from({ length: 8 }, (_, i) => ({
+      id: `filler-${i}`,
+      kind: 'suited' as const,
+      suit: 'H' as const,
+      rank: '2' as const,
+      pilgrim: true,
+    }));
+    return [puppy, ...fillers];
+  }
+
   it('grants no suit immunity from the preset Pilgrim Puppy (unlike Missions 3/5/6 zone modes)', () => {
     const boss: LegacyEnemySpec = { name: 'Troll', suit: 'H', health: 20, attack: 10 };
     const state = startEdgeMission(1, [boss], { presetMissionZone: [puppy] });
@@ -2026,25 +2045,36 @@ describe('legacy: mission 8 mechanics (ascending mission zone chain)', () => {
     expect(state.zoneImmuneSuits).toEqual([]);
   });
 
-  it('places a card worth exactly one more than the zone top; a Pilgrim card never buffs the enemy', () => {
+  it('places a card worth exactly one more than the zone top, sourced ONLY from zoneCommittedPlay (the attack just finished) at no extra cost; a Pilgrim card never buffs the enemy and placing never ends the turn', () => {
     const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 20, attack: 10 };
     let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy] });
     const two: Card = { id: 'p2', kind: 'suited', suit: 'D', rank: '2', name: 'Old Yarrow', pilgrim: true };
-    state = rig(state, [two]);
+    state.zoneCommittedPlay = [two];
 
     const res = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: two.id }));
     state = res.state;
 
     expect(state.missionZone.map((c) => c.id)).toEqual(['puppy', 'p2']);
-    // No attack buff from a Pilgrim card: base 10 attack unmodified.
-    expect(state.pendingDamage).toBe(10);
-    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    expect(state.zoneCommittedPlay).toEqual([]); // claimed out of the pool
+    expect(resolvedEnemyAttack(state)).toBe(10); // no attack buff from a Pilgrim card
+    // Sourced fix: placing no longer costs anything extra or ends the turn — the window stays open.
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+    expect(state.zoneOpenForPlacement).toBe(true);
   });
 
-  it("rejects a card that doesn't match the zone's required next value", () => {
+  it("rejects a card that doesn't match the zone's required next value, even from the committed pool", () => {
     const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 20, attack: 10 };
     let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy] });
-    state = rig(state, [suited('D', '5')]);
+    const five: Card = { id: 'wrong', kind: 'suited', suit: 'D', rank: '5' };
+    state.zoneCommittedPlay = [five];
+    const res = applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: five.id });
+    expect(res.ok).toBe(false);
+  });
+
+  it('rejects a hand card even when its value would fit — only a card from zoneCommittedPlay qualifies, never hand (the sourced "no extra cost" fix)', () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 20, attack: 10 };
+    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy] });
+    state = rig(state, [suited('D', '2')]); // matching value, but sitting in hand — not the attack just finished
     const res = applyAction(state, {
       type: 'PLACE_IN_ZONE',
       playerId: state.players[0].id,
@@ -2056,22 +2086,47 @@ describe('legacy: mission 8 mechanics (ascending mission zone chain)', () => {
   it("a non-Pilgrim card bridging a gap buffs the current enemy's attack for as long as it sits there", () => {
     const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 20, attack: 10 };
     let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy] });
-    const bridge = suited('D', '2'); // an ordinary party card, not a Pilgrim
-    state = rig(state, [bridge]);
+    const bridge: Card = { id: 'bridge', kind: 'suited', suit: 'D', rank: '2' }; // an ordinary card, not a Pilgrim
+    state.zoneCommittedPlay = [bridge];
 
     const res = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: bridge.id }));
     state = res.state;
 
     // 10 base attack + 2 (the bridging card's own value, still sitting in the zone) = 12.
-    expect(state.pendingDamage).toBe(12);
+    expect(resolvedEnemyAttack(state)).toBe(12);
+  });
+
+  it('the sourced "2/5" wildcard can fill the 2 slot via its flagged alternate, and always counts as 2 for the attack buff regardless', () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 20, attack: 10 };
+    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy] }); // required next = 2
+    const wildcard: Card = { id: 'wild', kind: 'suited', suit: 'C', rank: '5', flexibleComboRank: '2', name: 'The Wandering Coin' };
+    state.zoneCommittedPlay = [wildcard];
+
+    const res = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: wildcard.id }));
+    state = res.state;
+
+    expect(state.missionZone.map((c) => c.id)).toEqual(['puppy', 'wild']);
+    // 10 base + 2 (the wildcard's alternate, NOT its printed value of 5).
+    expect(resolvedEnemyAttack(state)).toBe(12);
+  });
+
+  it('rejects the wildcard when the required slot is neither 2 nor 5', () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 20, attack: 10 };
+    const two: Card = { id: 'two', kind: 'suited', suit: 'H', rank: '2', pilgrim: true };
+    // Zone already at [puppy, two] (length 2) — required next is 3, which the wildcard can't satisfy.
+    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy, two] });
+    const wildcard: Card = { id: 'wild', kind: 'suited', suit: 'C', rank: '5', flexibleComboRank: '2', name: 'The Wandering Coin' };
+    state.zoneCommittedPlay = [wildcard];
+
+    const res = applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: wildcard.id });
+    expect(res.ok).toBe(false);
   });
 
   it('completing the chain at 10 purges the zone to the discard pile, opens the Ultimate Banishment, and closes the zone', () => {
     const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 100, attack: 1 };
-    const nine: Card = { id: 'nine', kind: 'suited', suit: 'H', rank: '9', pilgrim: true };
     const ten: Card = { id: 'ten', kind: 'suited', suit: 'H', rank: '10', name: 'Goran', pilgrim: true };
-    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy, nine] });
-    state = rig(state, [ten]);
+    let state = startEdgeMission(1, [boss], { presetMissionZone: nineCardZone() });
+    state.zoneCommittedPlay = [ten];
 
     const res = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: ten.id }));
     state = res.state;
@@ -2080,39 +2135,41 @@ describe('legacy: mission 8 mechanics (ascending mission zone chain)', () => {
     expect(state.zoneClosed).toBe(true);
     expect(state.turnPhase).toBe('AWAIT_ZONE_PURGE');
     expect(state.zonePurge?.playerId).toBe(state.players[0].id);
-    expect(state.discardPile.map((c) => c.id).sort()).toEqual(['nine', 'puppy', 'ten']);
+    expect(state.discardPile.map((c) => c.id).sort()).toEqual(
+      ['puppy', 'ten', 'filler-0', 'filler-1', 'filler-2', 'filler-3', 'filler-4', 'filler-5', 'filler-6', 'filler-7'].sort(),
+    );
   });
 
   it('rejects further placements once the zone has closed', () => {
     const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 100, attack: 1 };
-    const nine: Card = { id: 'nine', kind: 'suited', suit: 'H', rank: '9', pilgrim: true };
     const ten: Card = { id: 'ten', kind: 'suited', suit: 'H', rank: '10', pilgrim: true };
-    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy, nine] });
-    state = rig(state, [ten]);
+    let state = startEdgeMission(1, [boss], { presetMissionZone: nineCardZone() });
+    state.zoneCommittedPlay = [ten];
     state = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: ten.id })).state;
 
-    state = rig(state, [suited('D', '2')]);
-    const res = applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: state.players[0].hand[0].id });
+    const two: Card = { id: 'two-again', kind: 'suited', suit: 'D', rank: '2' };
+    state.zoneCommittedPlay = [two];
+    const res = applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: two.id });
     expect(res.ok).toBe(false);
   });
 
   it('RESOLVE_ZONE_PURGE banishes the chosen cards forever and shuffles the rest into the bottom of the reserve deck', () => {
     const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 100, attack: 1 };
-    const nine: Card = { id: 'nine', kind: 'suited', suit: 'H', rank: '9', pilgrim: true };
     const ten: Card = { id: 'ten', kind: 'suited', suit: 'H', rank: '10', pilgrim: true };
-    let state = startEdgeMission(1, [boss], { presetMissionZone: [puppy, nine] });
-    state = rig(state, [ten]);
+    let state = startEdgeMission(1, [boss], { presetMissionZone: nineCardZone() });
+    state.zoneCommittedPlay = [ten];
     state = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: ten.id })).state;
     const reserveBefore = state.tavernDeck.length;
+    const discardCountBefore = state.discardPile.length;
 
     const res = ensureOk(
-      applyAction(state, { type: 'RESOLVE_ZONE_PURGE', playerId: state.players[0].id, banishCardIds: ['nine'] }),
+      applyAction(state, { type: 'RESOLVE_ZONE_PURGE', playerId: state.players[0].id, banishCardIds: ['puppy'] }),
     );
     state = res.state;
 
-    expect(state.banishPile.map((c) => c.id)).toEqual(['nine']);
+    expect(state.banishPile.map((c) => c.id)).toEqual(['puppy']);
     expect(state.discardPile.length).toBe(0);
-    expect(state.tavernDeck.length).toBe(reserveBefore + 2); // puppy + ten shuffled to the bottom
+    expect(state.tavernDeck.length).toBe(reserveBefore + discardCountBefore - 1); // everything but 'puppy' shuffled to the bottom
     expect(state.zonePurge).toBeNull();
     expect(state.zoneClosed).toBe(true); // still closed — the purge only fires once
   });
@@ -2143,7 +2200,7 @@ describe('legacy: mission 8 placement gating (zoneOpenForPlacement)', () => {
     expect(placeRes.ok).toBe(false);
   });
 
-  it('opens the window on the turn immediately after a kill, and closes it again once that turn ends', () => {
+  it('opens the window on the turn immediately after a kill, populates zoneCommittedPlay with the kill\'s own card, and closes the window (flushing anything unclaimed) once that turn actually ends', () => {
     const weak: LegacyEnemySpec = { name: 'Weakling', suit: 'S', health: 1, attack: 1 };
     const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 100, attack: 0 };
     const puppy: Card = { id: 'puppy', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true };
@@ -2159,29 +2216,37 @@ describe('legacy: mission 8 placement gating (zoneOpenForPlacement)', () => {
       presetMissionZone: [puppy],
     });
     let state = ensureOk(res).state;
-    const strike = suited('S', '2'); // a Spades card, no immunity here — kills the 1-health Weakling outright
-    state = rig(state, [strike]);
+    // A Spades card, no immunity here, kills the 1-health Weakling outright. Flagged `pilgrim` so that once it's
+    // placed into the zone it doesn't ALSO buff the Troll's attack (see ascendingZoneAttackBuff) — keeping this
+    // test's "0 attack -> yield ends the turn outright" assumption clean; the separate "a non-Pilgrim card
+    // bridging a gap buffs the attack" test above already covers that other case.
+    const strike = { ...suited('S', '2'), pilgrim: true };
+    state = rig(state, [strike, suited('D', '3')]); // an extra card so the hand isn't empty after the kill
 
     const killRes = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [strike.id] }));
     state = killRes.state;
 
-    // The kill let the same player continue their turn against the Troll — the placement window is now open.
+    // The kill let the same player continue their turn against the Troll — the placement window is now open, and
+    // the killing card itself (value 2 — exactly the zone's required next slot) is available at no extra cost.
     expect(state.currentEnemy?.name).toBe('Troll');
     expect(state.turnPhase).toBe('AWAIT_PLAY');
     expect(state.zoneOpenForPlacement).toBe(true);
+    expect(state.zoneCommittedPlay.map((c) => c.id)).toEqual([strike.id]);
 
-    const two: Card = { id: 'p2', kind: 'suited', suit: 'D', rank: '2', name: 'Old Yarrow', pilgrim: true };
-    state = rig(state, [two]);
-    const placeRes = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: two.id }));
+    const placeRes = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: strike.id }));
     state = placeRes.state;
-    expect(state.missionZone.map((c) => c.id)).toEqual(['puppy', 'p2']);
+    expect(state.missionZone.map((c) => c.id)).toEqual(['puppy', strike.id]);
 
-    // Placing in the zone ends the turn — the Troll's 0 attack means it advances straight to the next player,
-    // closing the placement window behind it.
+    // Sourced fix: placing doesn't end the turn — same open window, same turn.
     expect(state.turnPhase).toBe('AWAIT_PLAY');
+    expect(state.zoneOpenForPlacement).toBe(true);
+    expect(state.zoneCommittedPlay).toEqual([]);
+
+    // Only once the player actually ends their turn (yielding against the harmless 0-attack Troll) does the
+    // window close — and a later turn with no fresh kill can't place again.
+    state = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id })).state;
     expect(state.zoneOpenForPlacement).toBe(false);
 
-    // A later turn with no fresh kill can't place again.
     const three: Card = { id: 'p3', kind: 'suited', suit: 'D', rank: '3', pilgrim: true };
     state = rig(state, [three]);
     const secondPlaceRes = applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: three.id });
@@ -2282,13 +2347,31 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
   });
 });
 
-describe('legacy: mission 8 reward (Chanter faction)', () => {
-  it('rewards 4 Chanter recruits, one carrying the Encore special ability', () => {
+describe('legacy: mission 8 reward (only Bram kept, plus Goran and corrupt-another-card)', () => {
+  it('SOURCED FIX: the other 3 Chanters (fight setup, not a reward) are never granted — only Bram (rank 9, Encore) is kept permanently', () => {
     const mission8 = getMission(8)!;
+    // The 4 Chanters are fight SETUP now (extraReserveCards), not part of the reward.
+    const setupChanters = mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.chanter) ?? [];
+    expect(setupChanters.length).toBe(4);
+
     const party = applyReward(buildInitialParty(), mission8.reward);
     const chanters = party.filter((c) => c.kind === 'suited' && c.chanter);
-    expect(chanters.length).toBe(4);
-    expect(chanters.filter((c) => c.kind === 'suited' && c.special === 'ENCORE').length).toBe(1);
+    expect(chanters.length).toBe(1);
+    expect(chanters[0]?.kind === 'suited' && chanters[0]?.name).toBe('Bram the Refrainkeeper');
+    expect(chanters[0]?.kind === 'suited' && chanters[0]?.special).toBe('ENCORE');
+  });
+
+  it('SOURCED FIX: also recruits Goran (Spades, rank 8, no earlier mission in this codebase had recruited him) and corrupts another card', () => {
+    const mission8 = getMission(8)!;
+    expect(mission8.reward.corruptAnotherCard).toBe(true);
+    const goran = mission8.reward.recruits.find((r) => r.name === 'Goran');
+    expect(goran?.class).toBe('PALADIN');
+    expect(goran?.rank).toBe('8');
+
+    const party = applyReward(buildInitialParty(), mission8.reward);
+    const goranCard = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
+    expect(goranCard).toBeDefined();
+    if (goranCard?.kind === 'suited') expect(goranCard.suit).toBe('S');
   });
 
   it('a Chanter recruit takes its explicit suit (Chanter has none of its own) and is flagged chanter', () => {

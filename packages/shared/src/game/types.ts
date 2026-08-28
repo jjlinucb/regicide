@@ -464,25 +464,46 @@ export interface GameState {
   /** Vestigial (see GameState.pilgrimMechanic) — no mission populates this anymore; always empty. Kept only so ClientGameState's pilgrimZone stays type-compatible for any future mission. */
   pilgrimZone: Card[];
   /**
-   * Legacy-only (Mission 8): when true, the mission zone builds an ascending A-through-10 chain instead of any
-   * of the other missionZone modes above. A player may place a card from hand into the zone via PLACE_IN_ZONE
-   * only if its value is exactly one higher than the zone's current top card — starting from the "Pilgrim
-   * Puppy" (value 1) seeded via presetMissionZone. Non-Pilgrim cards used to bridge a gap buff the current
-   * enemy's attack for as long as they sit there (see rules.ts's ascendingZoneAttackBuff); Pilgrim cards never
-   * do. Completing the chain at 10 triggers the purge (see zonePurge) and permanently closes the zone
+   * Legacy-only (Mission 8): when true, the mission zone builds an ascending 1-through-10 chain instead of any
+   * of the other missionZone modes above. A player may place a card into the zone via PLACE_IN_ZONE only if its
+   * value is exactly one higher than the zone's required next slot (tracked as `missionZone.length + 1`, NOT the
+   * top card's own printed value — the mission's one "2/5" wildcard can fill an out-of-order slot, see
+   * matchesAscendingZoneSlot, so the chain's position can't be derived from the top card alone) — starting from
+   * the "Pilgrim Puppy" (value 1) seeded via presetMissionZone. Non-Pilgrim cards used to bridge a gap buff the
+   * current enemy's attack for as long as they sit there (see rules.ts's ascendingZoneAttackBuff); Pilgrim cards
+   * never do. Completing the chain at 10 triggers the purge (see zonePurge) and permanently closes the zone
    * (zoneClosed). Unrelated to Mission 7's pilgrimZone above — see SuitedCard.pilgrim.
    *
    * PLACE_IN_ZONE is further gated by `zoneOpenForPlacement` below — building the run only opens up right after
    * an enemy kill, per the transcript ("Defeating an enemy lets the party build an ascending 'run' of cards").
+   * SOURCED CORRECTION (fan-reimplementation rules doc, see GameAction's PLACE_IN_ZONE): the shipped version had
+   * the player pay for a placement with an extra card pulled fresh from hand; the real rule reuses a card already
+   * committed to the kill's own winning attack instead, at no extra cost (see zoneCommittedPlay below) — and
+   * doesn't force the turn to end the way the shipped "ends the turn like a Yield" framing did. The sourced text
+   * ("during cleanup, the player may...") reads as available on ANY turn's cleanup, not gated to right after a
+   * kill specifically — narrower than that broader reading is a deliberate, flagged scope limit for this pass
+   * (only the placement's COST was a confirmed mismatch on this session's punch list; widening WHEN it's offered
+   * is left for a future pass), not a claim the kill-only gate itself is sourced-correct.
    */
   ascendingZone: boolean;
   /**
    * Legacy-only (Mission 8): true only in the placement window right after an enemy kill — set whenever a kill
    * lets the same player continue their turn (see engine.ts's dealDamageAndCheckDefeat), cleared at the end of
-   * that turn (see engine.ts's advanceToNextPlayer). PLACE_IN_ZONE checks this before allowing a placement, so a
-   * later turn with no fresh kill can't build the run further.
+   * that turn (see engine.ts's finishAdvanceToNextPlayer, which also flushes any unclaimed zoneCommittedPlay to
+   * the discard pile at that point). PLACE_IN_ZONE checks this before allowing a placement, so a later turn with
+   * no fresh kill can't build the run further.
    */
   zoneOpenForPlacement: boolean;
+  /**
+   * Legacy-only (Mission 8): the pool PLACE_IN_ZONE draws from while zoneOpenForPlacement is open — the cards
+   * that were just played to land the kill(s) that opened this window (see engine.ts's finishEnemyDefeatTail),
+   * held here instead of falling straight to the discard pile the way a kill's table cards ordinarily do. A
+   * placement removes its card from this pool, not from any hand — this is the "at no extra cost" half of the
+   * sourced fix (see GameAction's PLACE_IN_ZONE). Multiple kills in the same open window all add to this same
+   * pool rather than replacing it. Whatever's left unclaimed once the window closes (finishAdvanceToNextPlayer)
+   * or the zone purges at 10 (placeInZone) falls to the discard pile like an ordinary kill's cards always do.
+   */
+  zoneCommittedPlay: Card[];
   /** Legacy-only (Mission 8): true once the ascending zone has purged at 10 — PLACE_IN_ZONE is rejected for the rest of the mission. */
   zoneClosed: boolean;
   /**
@@ -688,7 +709,14 @@ export type GameAction =
    */
   | { type: 'BANK_KINFOLK_CARD'; playerId: string; cardId: string }
   | { type: 'YIELD'; playerId: string }
-  /** Legacy-only (Mission 8): places a card from hand into the ascending mission zone instead of attacking — ends the turn like a Yield, but progresses the chain (see GameState.ascendingZone). */
+  /**
+   * Legacy-only (Mission 8): places a card into the ascending mission zone, progressing the chain (see
+   * GameState.ascendingZone). SOURCED CORRECTION (fan-reimplementation rules doc): `cardId` no longer refers to a
+   * hand card — the shipped version's "pull a fresh card from hand" cost isn't sourced anywhere, and the real
+   * rule instead reuses a card already committed to the kill's own winning attack, at no extra cost (see
+   * GameState.zoneCommittedPlay). Consequently this no longer ends the turn either — the player is still mid-turn
+   * after the kill that opened the window and simply continues normally afterward.
+   */
   | { type: 'PLACE_IN_ZONE'; playerId: string; cardId: string }
   /** Legacy-only (Mission 8): resolves an open Ultimate Banishment window after the zone's 10-card purge (see GameState.zonePurge). Any subset of the discard pile (by id) is banished forever; the rest shuffles into the reserve deck. */
   | { type: 'RESOLVE_ZONE_PURGE'; playerId: string; banishCardIds: string[] }
@@ -821,6 +849,8 @@ export interface ClientGameState {
   ascendingZone: boolean;
   /** See GameState.zoneOpenForPlacement. */
   zoneOpenForPlacement: boolean;
+  /** See GameState.zoneCommittedPlay. Public information — it's the cards that were just played, on the table. */
+  zoneCommittedPlay: Card[];
   /** See GameState.zoneClosed. */
   zoneClosed: boolean;
   /** See GameState.zonePurge. Public information — it's on the table. */

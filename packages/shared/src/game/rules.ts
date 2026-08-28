@@ -154,10 +154,30 @@ export function currentEnemyHealthRemaining(enemy: EnemyState): number {
 /**
  * Legacy-only (Mission 8): the current attack buff from non-Pilgrim cards sitting in the ascending mission zone
  * (see GameState.ascendingZone). Cards flagged `pilgrim` — the chain's intended fillers — contribute nothing;
- * only ordinary cards pressed into service to bridge a gap do, at their own card value.
+ * an ordinary card pressed into service to bridge a gap contributes its own card value; the mission's one "2/5"
+ * wildcard (see SuitedCard.flexibleComboRank, matchesAscendingZoneSlot below) always contributes its LOWER
+ * flagged alternate instead of its printed value, no matter which required slot (2 or 5) it filled — sourced
+ * fan-reimplementation rules doc: "Once placed, they count as 2 for enemy attack calculation."
  */
 export function ascendingZoneAttackBuff(missionZone: Card[]): number {
-  return missionZone.reduce((sum, c) => (c.kind === 'suited' && !c.pilgrim ? sum + cardValue(c) : sum), 0);
+  return missionZone.reduce((sum, c) => {
+    if (c.kind !== 'suited' || c.pilgrim) return sum;
+    if (c.flexibleComboRank) return sum + Number(c.flexibleComboRank);
+    return sum + cardValue(c);
+  }, 0);
+}
+
+/**
+ * Legacy-only (Mission 8): true if `card` can fill the ascending zone's `required` next slot — either directly
+ * (its own printed value, the ordinary case) or, for the mission's one "2/5" wildcard, via its flagged alternate
+ * (see SuitedCard.flexibleComboRank — the same card shape legacy/mercenaries.ts's TWO_FIVE_* shop cards already
+ * use for combo-matching, reused here for the sourced fan-reimplementation rule: "2/5 cards can be placed as a 2
+ * during 2-selection or as a 5 during 5-selection"). See engine.ts's placeInZone.
+ */
+export function matchesAscendingZoneSlot(card: Card, required: number): boolean {
+  if (card.kind !== 'suited') return false;
+  if (cardValue(card) === required) return true;
+  return card.flexibleComboRank !== undefined && Number(card.flexibleComboRank) === required;
 }
 
 /** Legacy-only (Mission 11): the value of the card currently on top of the banish pile (the most recently banished card), or 0 if the pile is empty. Mirrors discardPileTopValue. */
