@@ -723,8 +723,9 @@ function resolveSuitPowers(
   const enemy = state.currentEnemy!;
   // Mission 11: the current enemy is also immune to whatever class(es) sit on top of the discard pile and the
   // banish pile right now — recomputed live rather than stored, since both piles keep changing across the fight
-  // (see GameState.pileTopEnemyBonus / rules.ts's pileTopImmuneSuits).
-  const pileImmuneSuits = state.pileTopEnemyBonus ? pileTopImmuneSuits(state.discardPile, state.banishPile) : [];
+  // (see GameState.pileTopEnemyBonus / rules.ts's pileTopImmuneSuits, which bounds this against the enemy's own
+  // inherent immunity so the two piles can never combine into an all-4-classes lockout).
+  const pileImmuneSuits = state.pileTopEnemyBonus ? pileTopImmuneSuits(state.discardPile, state.banishPile, enemy) : [];
   const blocked = (s: 'H' | 'D' | 'C' | 'S') =>
     !ignoreImmunity &&
     !enemy.immunityBroken &&

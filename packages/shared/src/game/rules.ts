@@ -191,15 +191,51 @@ export function banishPileTopValue(banishPile: Card[]): number {
  * of the discard pile AND the banish pile — recomputed live on every check (see GameState.pileTopEnemyBonus),
  * never stored/frozen the way missionZone's other suit-immunity modes are. A Jester on top of either pile
  * contributes nothing.
+ *
+ * BALANCE FIX (2026-08-28, unsourced — the same failure class Mission 3's endOfTurnZoneFlip needed to fix, see
+ * engine.ts's flipMissionZoneCard for the full writeup and the simulated before/after numbers that justified it
+ * there, and grep `inherentImmunityCount` for the pattern this mirrors): uncapped, a single Dual-class Stickers
+ * card (see SuitedCard.secondSuit) sitting on top of just ONE pile could by itself grant 2 classes of immunity at
+ * once, and — paired with whatever the OTHER pile's top contributes — could between them cover all 4 classes,
+ * regardless of the enemy's own suit. Since Mission 11's enemies are all deliberately single-class (see
+ * missions.ts's Mission 11 entry), that's a full lockout of every class at once, including BOTH hand-refill suits
+ * (Hearts/Diamonds) simultaneously — the exact shape that made Mission 3 nearly unwinnable.
+ *
+ * Unlike Mission 3's cumulative zoneImmuneSuits (which only ever grows, and never clears except on a kill — so
+ * ANY addition compounds turn after turn into the same eventual lockout, hence that mission's final +0 cap), this
+ * mechanic recomputes fresh every check from whatever happens to sit on top of two piles that churn constantly
+ * (every DEFEND, every kill, every beast-deck flip changes one or both tops) — and this file's own existing,
+ * sourced test coverage (legacy.test.ts's "mission 11 pile-top bonus strength & immunity" tests) already exercises
+ * EACH pile independently granting its own single class as intended behavior ("immune to whatever class sits on
+ * top of the discard pile, even if unrelated to its own suit" / same for the banish pile). A flat total cap would
+ * silently break that sourced two-independent-sources design (whichever pile's suit happened to get processed
+ * second would lose its slot to the first). So the bound is scoped to the actual defect instead: each pile's top
+ * card grants AT MOST ONE new class of immunity — its first suit not already accounted for — never both of a
+ * dual-suited card's suits from a single pile at once. That leaves each pile free to keep contributing its own
+ * class independently (up to 3 total: the enemy's own class plus one from each pile), while making a full 4-class
+ * lockout structurally impossible, since reaching it would require a single pile-top card to grant 2 classes by
+ * itself.
+ *
+ * Deliberately NOT extended to Mission 12's flipBanishPileZoneCard/zoneImmuneSuits — that's a different,
+ * already-tested mechanic (see that function's own doc comment for why a prior attempt to reuse Mission 3's cap
+ * there had to be reverted).
  */
-export function pileTopImmuneSuits(discardPile: Card[], banishPile: Card[]): Suit[] {
+export function pileTopImmuneSuits(discardPile: Card[], banishPile: Card[], enemy: EnemyState): Suit[] {
+  const totalImmuneSuits = new Set<Suit>([enemy.suit, ...(enemy.secondSuit ? [enemy.secondSuit] : [])]);
   const suits = new Set<Suit>();
-  const discardTop = discardPile[discardPile.length - 1];
-  const banishTop = banishPile[banishPile.length - 1];
-  // A Mercenary "19" (see SuitedCard.noSuitPower) carries an inert placeholder suit and must never contribute
-  // immunity here, same as it's excluded from the combined suit-power resolution when actually played.
-  if (discardTop?.kind === 'suited' && !discardTop.noSuitPower) for (const s of cardSuits(discardTop)) suits.add(s);
-  if (banishTop?.kind === 'suited' && !banishTop.noSuitPower) for (const s of cardSuits(banishTop)) suits.add(s);
+  for (const pile of [discardPile, banishPile]) {
+    const top = pile[pile.length - 1];
+    // A Mercenary "19" (see SuitedCard.noSuitPower) carries an inert placeholder suit and must never contribute
+    // immunity here, same as it's excluded from the combined suit-power resolution when actually played.
+    if (top?.kind !== 'suited' || top.noSuitPower) continue;
+    for (const s of cardSuits(top)) {
+      if (!totalImmuneSuits.has(s)) {
+        totalImmuneSuits.add(s);
+        suits.add(s);
+        break; // this pile's top card has granted its one new class — its other suit (if dual-suited) grants no more
+      }
+    }
+  }
   return Array.from(suits);
 }
 

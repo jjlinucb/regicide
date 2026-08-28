@@ -3485,6 +3485,36 @@ describe('legacy: mission 11 pile-top bonus strength & immunity, and banish-on-d
   });
 });
 
+describe('legacy: mission 11 pile-top immunity ceiling (regression — no more all-4-class lockout)', () => {
+  it('a Dual-class Stickers card on top of one pile no longer combines with the other pile to immunize the enemy to every class at once', () => {
+    // Regression test for a reported bug: rules.ts's pileTopImmuneSuits had no ceiling on how many classes it
+    // could add beyond the enemy's own inherent immunity. A single Dual-class Stickers card (see
+    // SuitedCard.secondSuit) on top of the discard pile carries 2 classes by itself — combined with an ordinary
+    // single-suited card on top of the banish pile, that's 3 classes from the piles plus the enemy's own class,
+    // covering all 4 at once, including BOTH hand-refill suits (Hearts AND Diamonds) simultaneously. See rules.ts's
+    // pileTopImmuneSuits doc comment for the fix and its reasoning (each pile-top card now grants at most ONE new
+    // class, never both suits of a dual-suited card from a single pile).
+    const diamondsCard: SuitedCard = suited('D', '5');
+    // No beast cards in the party — an empty beast deck is a guaranteed no-op (see the discard-cleanup describe
+    // block's own note below), isolating this from Mission 11's OTHER start-of-turn mechanic.
+    let state = startMission11(1, { party: buildInitialParty() });
+    state = rig(state, [diamondsCard], { suit: 'C', baseAttack: 0, spadesShield: 0, maxHealth: 100, damageTaken: 0 }); // Warrior suit
+    // Discard-pile top carries BOTH hand-refill suits (Hearts and Diamonds) on one card. Banish-pile top adds a
+    // 3rd class (Spades), unrelated to the enemy's own Clubs — uncapped, all 4 classes would be immune together.
+    state.discardPile = [{ ...suited('H', '9'), secondSuit: 'D' }];
+    state.banishPile = [suited('S', '9')];
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [diamondsCard.id] }),
+    );
+
+    // Diamonds must still work: at most one of the dual-suited discard-top's two classes can ever be granted, so
+    // the other hand-refill suit is never simultaneously locked out by the same card.
+    expect(res.state.log.some((e) => e.message.includes('blocked'))).toBe(false);
+    expect(res.state.log.some((e) => e.message.includes('card(s) drawn'))).toBe(true);
+  });
+});
+
 describe('legacy: mission 11 discard cleanup ordering fix (discardCleanupLowToHigh)', () => {
   it('the mission enables discardCleanupLowToHigh — the only multi-card discard-pile push this mission has (pileTopEnemyBonus routes every enemy-defeat table-card batch to the BANISH pile instead)', () => {
     const mission11 = getMission(11)!;
