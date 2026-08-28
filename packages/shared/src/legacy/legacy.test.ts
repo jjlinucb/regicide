@@ -3511,15 +3511,37 @@ describe('legacy: mission 10 mission-zone defeat handling + deck-rehabilitation 
 });
 
 describe('legacy: mission 10 reward (applyRestoredPartyCards — "deck rehabilitation")', () => {
-  it('adds every restored card back into the campaign party, skipping any id already present', () => {
+  it(
+    'REPLACES (not skips) a party card whose id matches a restored card, cleansing its `corrupted` flag — this is ' +
+      "the realistic case: RoomManager never removes the chosen card from the party when it becomes a Mission " +
+      '10 enemy, so the restored card IS the same still-corrupted party card, still present at the same id. ' +
+      'Regression test for a silent no-op: the old skip-if-present dedup treated this normal case as the rare ' +
+      "\"came back another way\" edge case and threw the restoration away entirely.",
+    () => {
+      const party = buildInitialParty();
+      const stillCorrupted = { ...party[0], corrupted: true };
+      const partyWithCorruption = party.map((c) => (c.id === stillCorrupted.id ? stillCorrupted : c));
+
+      const next = applyRestoredPartyCards(partyWithCorruption, [stillCorrupted]);
+
+      expect(next.length).toBe(party.length); // replaced in place, not appended as a duplicate
+      expect(next.filter((c) => c.id === stillCorrupted.id).length).toBe(1);
+      const restored = next.find((c) => c.id === stillCorrupted.id)!;
+      expect(restored.kind).toBe('suited');
+      expect(restored.kind === 'suited' && restored.corrupted).toBeFalsy();
+    },
+  );
+
+  it('appends a restored card whose id is genuinely absent from the party (defensive fallback)', () => {
     const party = buildInitialParty();
-    const alreadyThere = party[0];
-    const brandNew: Card = { id: 'restored-hero-1', kind: 'suited', suit: 'H', rank: '5', name: 'Cleansed Hero' };
+    const brandNew: Card = { id: 'restored-hero-1', kind: 'suited', suit: 'H', rank: '5', name: 'Cleansed Hero', corrupted: true };
 
-    const next = applyRestoredPartyCards(party, [alreadyThere, brandNew]);
+    const next = applyRestoredPartyCards(party, [brandNew]);
 
-    expect(next.length).toBe(party.length + 1); // the duplicate was skipped, only the new card was added
-    expect(next.some((c) => c.id === 'restored-hero-1')).toBe(true);
+    expect(next.length).toBe(party.length + 1);
+    const added = next.find((c) => c.id === 'restored-hero-1');
+    expect(added).toBeDefined();
+    expect(added!.kind === 'suited' && added!.corrupted).toBeFalsy(); // appended cards are cleansed too
   });
 
   it('is a no-op (same reference) for an empty restored list', () => {
