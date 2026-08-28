@@ -1308,33 +1308,69 @@ function finishEnemyDefeatTail(
   }
 
   if (state.ruleset === 'legacy' && state.zoneVengeanceOnKill && state.missionZone.length > 0) {
-    if (attackIncludesGuardian) {
-      // Mission 6, sourced fix (official rules card, per legacy-missions-transcript-mismatches.md): a winning
-      // attack that includes a Guardian cancels Myla's team-damage step entirely — the shield the Guardian
-      // raises against the enemy also holds against the garden's own retaliation this kill. Not implemented at
-      // all in the shipped version.
-      log(state, "A Guardian's shield holds against the garden itself — Myla's strike is cancelled this time.");
-    } else {
-      // Mission 6: Myla, permanently seated in the mission zone, strikes right after it grows — team damage equal
-      // to the live sum of every card resting there (her own base value of 7 included). An exact-damage kill
-      // excludes the single highest-value zone card from this one strike's total. Routed through the existing
-      // AWAIT_DEFEND/defend() flow, so an uncovered hit ends the mission exactly like any other undefended attack.
-      const exact = remaining === 0;
-      const values = state.missionZone.map(cardValue);
-      let total = values.reduce((a, b) => a + b, 0);
-      if (exact) {
-        total -= Math.max(...values);
-        log(state, `An exact hit spares the mission zone's strongest card from Myla's wrath this time.`);
-      }
-      if (total > 0) {
-        log(state, `Myla lashes out for ${total} damage from the ${state.missionZone.length} card(s) haunting the mission zone!`);
-        state.pendingDamage = total;
-        state.turnPhase = 'AWAIT_DEFEND';
+    // Sourced fix (see GameState.zoneVengeanceOnKill's own doc comment): an exact-damage kill lets the player
+    // permanently discard one non-Myla zone card BEFORE Myla's strike total below is computed — even under a
+    // Guardian, whose shield only cancels the strike itself, not this discard. Skipped when the zone has nothing
+    // eligible yet (e.g. the very first kill, if this same kill's own tableCards were empty and nothing was just
+    // sacrificed into the zone above).
+    if (remaining === 0) {
+      const eligible = state.missionZone.some((c) => !(c.kind === 'suited' && c.name === 'Myla'));
+      if (eligible) {
+        state.zoneReliefChoice = { attackIncludesGuardian, remaining };
+        state.turnPhase = 'AWAIT_ZONE_RELIEF_CHOICE';
+        log(state, 'An exact hit! Choose one card from the mission zone (other than Myla) to discard for good.');
         return true;
       }
     }
+    if (resolveMylaTeamStrike(state, attackIncludesGuardian)) return true;
   }
 
+  return resumeAfterZoneVengeance(state, remaining);
+}
+
+/**
+ * Mission 6: deals Myla's team-damage strike (or logs why it's cancelled) — shared by finishEnemyDefeatTail's own
+ * fallthrough and chooseZoneReliefCard's resume, so the computation only lives in one place. Returns true if a
+ * strike was dealt (pendingDamage/turnPhase now await a defend, and the caller should stop and return true too);
+ * false if there was nothing to deal (a cancelling Guardian, or the zone's total came out at 0 or below), in which
+ * case the caller should fall through to resumeAfterZoneVengeance.
+ */
+function resolveMylaTeamStrike(state: GameState, attackIncludesGuardian: boolean): boolean {
+  if (attackIncludesGuardian) {
+    // Mission 6, sourced fix (official rules card, per legacy-missions-transcript-mismatches.md): a winning
+    // attack that includes a Guardian cancels Myla's team-damage step entirely — the shield the Guardian
+    // raises against the enemy also holds against the garden's own retaliation this kill. Not implemented at
+    // all in the shipped version.
+    log(state, "A Guardian's shield holds against the garden itself — Myla's strike is cancelled this time.");
+    return false;
+  }
+  // Myla, permanently seated in the mission zone, strikes right after it grows (and any exact-kill relief has
+  // already shrunk it) — team damage equal to the live sum of every card resting there (her own base value of 7
+  // included). Routed through the existing AWAIT_DEFEND/defend() flow, so an uncovered hit ends the mission
+  // exactly like any other undefended attack.
+  //
+  // FLAGGED GAP, not fixed here (see tutorial_vids/summaries/mission-6.md): the 2nd-edition errata says this team
+  // damage is covered by "any player, in any order, without communication" discarding from their OWN hand — this
+  // engine's defend() instead always restricts covering any attack, this one included, to the single current
+  // player's own hand. That's a much deeper architectural pattern shared by every mission's attacks, not
+  // something specific to fix here; a true team-wide defend could occasionally cover a Myla strike that the
+  // current player alone cannot.
+  const total = missionZoneValueSum(state.missionZone);
+  if (total > 0) {
+    log(state, `Myla lashes out for ${total} damage from the ${state.missionZone.length} card(s) haunting the mission zone!`);
+    state.pendingDamage = total;
+    state.turnPhase = 'AWAIT_DEFEND';
+    return true;
+  }
+  return false;
+}
+
+/**
+ * The shared remainder of finishEnemyDefeatTail once Mission 6's zoneVengeanceOnKill step (if any) is fully
+ * resolved — Mission 9's own exact-kill rescue choice, or the default "continue turn against the new enemy"
+ * resume. Split out so chooseZoneReliefCard can reach it too, after resolving mid-function.
+ */
+function resumeAfterZoneVengeance(state: GameState, remaining: number): boolean {
   if (state.ruleset === 'legacy' && state.capturedPilesActive && remaining === 0 && state.capturedPiles.some((p) => p.faceUp)) {
     // Mission 9: an exact-damage kill's bonus — choose a captured pile's face-up card to send straight to the
     // top of the reserve deck (see chooseExactKillRescue). Blocks further play until resolved.
@@ -1589,6 +1625,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.rollingZoneCards = [];
   state.zoneVengeanceOnKill = action.zoneVengeanceOnKill ?? false;
   state.zoneVengeanceChoice = null;
+  state.zoneReliefChoice = null;
   state.pilgrimMechanic = action.pilgrimMechanic ?? false;
   // Vestigial (see GameState.pilgrimMechanic) — no mission sets action.pilgrimCards anymore, so this is always
   // empty; Mission 7's actual Pilgrim cards ride in through extraReserveCards below, shuffled into the reserve
@@ -2801,6 +2838,42 @@ function chooseZoneVengeanceSacrifice(
   return ok(state);
 }
 
+/**
+ * Mission 6 only, sourced fix (2nd-edition rules update — see GameState.zoneVengeanceOnKill's own doc comment):
+ * resolves the AWAIT_ZONE_RELIEF_CHOICE window opened by an exact-damage kill. The player who landed the kill
+ * chooses one card already in the mission zone, other than Myla, to discard permanently — before Myla's own
+ * strike total is computed, so the discarded card's value never counts toward it. Resuming the rest of the
+ * defeat resolution (Myla's strike, then whatever comes after it) is delegated to resolveMylaTeamStrike /
+ * resumeAfterZoneVengeance, the same helpers finishEnemyDefeatTail itself falls through to.
+ */
+function chooseZoneReliefCard(state: GameState, action: Extract<GameAction, { type: 'CHOOSE_ZONE_RELIEF_CARD' }>): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_ZONE_RELIEF_CHOICE');
+  if (err) return fail(err);
+  const pending = state.zoneReliefChoice;
+  if (!pending) return fail('There is no open zone-relief choice to resolve.');
+
+  const idx = state.missionZone.findIndex((c) => c.id === action.cardId && !(c.kind === 'suited' && c.name === 'Myla'));
+  if (idx === -1) return fail('That card is not available to discard from the mission zone.');
+
+  const [discarded] = state.missionZone.splice(idx, 1);
+  state.discardPile.push(discarded);
+  // Same suit-immunity bookkeeping as chooseZoneVengeanceSacrifice above, recomputed now that the zone shrank.
+  state.zoneImmuneSuits = Array.from(
+    new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' && !c.noSuitPower ? cardSuits(c) : []))),
+  );
+  log(
+    state,
+    `${discarded.kind === 'suited' ? discarded.name ?? `the ${discarded.rank}` : 'the Jester'} is discarded out of the mission zone for good, sparing it from Myla's wrath.`,
+  );
+
+  const { attackIncludesGuardian, remaining } = pending;
+  state.zoneReliefChoice = null;
+  if (!resolveMylaTeamStrike(state, attackIncludesGuardian)) {
+    resumeAfterZoneVengeance(state, remaining);
+  }
+  return ok(state);
+}
+
 export function createLobbyState(): GameState {
   return {
     phase: 'LOBBY',
@@ -2843,6 +2916,7 @@ export function createLobbyState(): GameState {
     rollingZoneCards: [],
     zoneVengeanceOnKill: false,
     zoneVengeanceChoice: null,
+    zoneReliefChoice: null,
     pilgrimMechanic: false,
     pilgrimDeck: [],
     pilgrimZone: [],
@@ -2912,6 +2986,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return chooseExactKillRescue(draft, action);
     case 'CHOOSE_ZONE_VENGEANCE_SACRIFICE':
       return chooseZoneVengeanceSacrifice(draft, action);
+    case 'CHOOSE_ZONE_RELIEF_CARD':
+      return chooseZoneReliefCard(draft, action);
     case 'CHOOSE_MAGE_REVEAL_CARD':
       return resolveMageRevealChoice(draft, action);
     case 'SURRENDER_CARD_TO_ZONE':

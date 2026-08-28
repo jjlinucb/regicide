@@ -41,6 +41,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     rollingZoneCards: state.rollingZoneCards,
     zoneVengeanceOnKill: state.zoneVengeanceOnKill,
     zoneVengeanceChoice: state.zoneVengeanceChoice,
+    zoneReliefChoice: state.zoneReliefChoice,
     pilgrimMechanic: state.pilgrimMechanic,
     pilgrimZone: state.pilgrimZone,
     pilgrimDeckCount: state.pilgrimDeck.length,
