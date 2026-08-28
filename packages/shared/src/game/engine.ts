@@ -471,6 +471,11 @@ function flipBeastDeckCard(state: GameState): void {
  * the mission zone actually removing the card from the banish pile is exactly why this needs its own function
  * rather than reusing pileTopImmuneSuits/banishPileTopValue directly. Called both once at mission start (the first
  * player's first turn) and from advanceToNextPlayer, same as every other start-of-turn flip in this file.
+ *
+ * Deliberately NOT capped the way Mission 3's flipMissionZoneCard is: that cap was only added after playtest data
+ * showed it was needed there, and applying it here on top of Mission 12's own boss-immunity fix (see missions.ts's
+ * Mission 12 comment) would silently gut this mission's own documented immunity-granting mechanic, breaking its
+ * existing test coverage below. Revisit with real playtest data if this mission turns out to need it too.
  */
 function flipBanishPileZoneCard(state: GameState): void {
   if (!state.restoredCardMechanic || !state.currentEnemy) return;
