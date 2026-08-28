@@ -1156,11 +1156,13 @@ function dealDamageAndCheckDefeat(
       state.skipNextBeastDeckFlip = true;
       log(state, 'The exact hit rattles the machine — the beast deck skips its next flip.');
     }
-    if (state.corruptedReturnQueue && !enemy.corrupted) {
+    if (state.corruptedReturnQueue && !enemy.corrupted && remaining !== 0) {
       // Mission 4: this defeat wasn't the last of it — the enemy rejoins the back of the fight queue, wounds
       // healed and immunity intact, but corrupted (see EnemyState.corrupted / resolveCommittedPlay's
       // enemyCorrupted handling). Guarded on `!enemy.corrupted` so a corrupted return, once defeated again,
-      // stays gone for good instead of looping forever.
+      // stays gone for good instead of looping forever, and on `remaining !== 0` so an exact hit — which already
+      // seals the specimen to the reserve deck above — banishes it for good instead of also requeuing a corrupted
+      // clone right back onto the castle deck.
       const requeued = {
         ...enemy,
         damageTaken: 0,
