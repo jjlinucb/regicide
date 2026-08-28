@@ -1915,7 +1915,7 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     expect(state.pendingDamage).toBe(16);
   });
 
-  it('an exact-damage kill spares the mission zone\'s single highest-value card from that strike', () => {
+  it("sourced fix: an exact-damage kill opens a choice to permanently discard one non-Myla zone card before Myla's strike", () => {
     const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 9, attack: 1 };
     const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'D', health: 20, attack: 1 };
     let state = startGardenMission(1, [boss, next], [myla]);
@@ -1924,13 +1924,25 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
     state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
 
-    // Exact kill: zone becomes [Myla(7), 9], but the 9 (highest) is spared from this strike — only 7 lands.
+    // Exact kill: zone becomes [Myla(7), 9] — the 1st-edition reading just excluded the 9 from this one strike
+    // and left it in the zone forever; the 2nd-edition errata instead makes the player permanently discard one
+    // non-Myla card first.
     expect(state.missionZone.length).toBe(2);
+    expect(state.turnPhase).toBe('AWAIT_ZONE_RELIEF_CHOICE');
+    expect(state.zoneReliefChoice).toEqual({ attackIncludesGuardian: false, remaining: 0 });
+
+    const nine = state.missionZone.find((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')!;
+    // Myla herself is never an eligible pick.
+    expect(applyAction(state, { type: 'CHOOSE_ZONE_RELIEF_CARD', playerId: state.players[0].id, cardId: state.missionZone[0].id }).ok).toBe(false);
+    state = ensureOk(applyAction(state, { type: 'CHOOSE_ZONE_RELIEF_CARD', playerId: state.players[0].id, cardId: nine.id })).state;
+
+    expect(state.missionZone.length).toBe(1); // Myla only — the 9 is gone for good, not just excluded this once
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')).toBe(true);
     expect(state.turnPhase).toBe('AWAIT_DEFEND');
-    expect(state.pendingDamage).toBe(7);
+    expect(state.pendingDamage).toBe(7); // just Myla's own 7 — the 9 no longer counts toward the total at all
   });
 
-  it('sourced fix: a winning attack that includes a Guardian cancels the strike entirely (zone still grows)', () => {
+  it('sourced fix: a winning attack that includes a Guardian cancels the strike entirely, but an exact kill still opens zone relief', () => {
     const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 5, attack: 1 };
     const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'D', health: 20, attack: 1 };
     let state = startGardenMission(1, [boss, next], [myla]);
@@ -1941,7 +1953,17 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     expect(state.zoneVengeanceChoice).toEqual({ remaining: 0, attackIncludesGuardian: true, attackIncludesMage: false });
     state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id);
 
-    expect(state.missionZone.length).toBe(2); // the zone still grows — only the team-damage step is cancelled
+    expect(state.missionZone.length).toBe(2); // the zone still grows — sacrifice isn't affected by the Guardian
+    // 5 damage on 5 health is ALSO an exact kill — the errata is explicit a Guardian only cancels the team-damage
+    // step below, not this discard, so the relief choice still opens even though a Guardian is in this attack.
+    expect(state.turnPhase).toBe('AWAIT_ZONE_RELIEF_CHOICE');
+    expect(state.zoneReliefChoice).toEqual({ attackIncludesGuardian: true, remaining: 0 });
+
+    const zoneCard = state.missionZone.find((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '5')!;
+    state = ensureOk(applyAction(state, { type: 'CHOOSE_ZONE_RELIEF_CARD', playerId: state.players[0].id, cardId: zoneCard.id })).state;
+
+    expect(state.missionZone.length).toBe(1); // Myla only — the sacrificed 5 was discarded via zone relief
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '5')).toBe(true);
     expect(state.turnPhase).toBe('AWAIT_PLAY'); // no Myla strike — same player continues, no AWAIT_DEFEND
     expect(state.pendingDamage).toBe(0);
   });
@@ -2047,7 +2069,17 @@ describe('legacy: mission 6 setup, bug fix — Guardian cards seeded as fight se
       }),
     ).state;
 
-    expect(state.missionZone.length).toBe(2); // the zone still grows — only the team-damage step is cancelled
+    // Exact kill (Ferro's value 3 on a 3-health boss) — the relief choice opens even under this same attack's
+    // own Guardian, since the errata only has the Guardian cancel the team-damage step, not this discard.
+    expect(state.missionZone.length).toBe(2);
+    expect(state.turnPhase).toBe('AWAIT_ZONE_RELIEF_CHOICE');
+
+    const zoneFerro = state.missionZone.find((c) => c.id === ferro.id)!;
+    state = ensureOk(
+      applyAction(state, { type: 'CHOOSE_ZONE_RELIEF_CARD', playerId: state.players[0].id, cardId: zoneFerro.id }),
+    ).state;
+
+    expect(state.missionZone.length).toBe(1); // Myla only — Ferro was discarded via zone relief
     expect(state.turnPhase).toBe('AWAIT_PLAY'); // no Myla strike, no AWAIT_DEFEND
     expect(state.pendingDamage).toBe(0);
   });

@@ -139,6 +139,12 @@ export function GamePage({
   const isZoneVengeanceWindow = state.turnPhase === 'AWAIT_ZONE_VENGEANCE_CHOICE' && Boolean(state.zoneVengeanceChoice);
   const isMyZoneVengeanceWindow = isZoneVengeanceWindow && isMyTurn;
 
+  // Mission 6, sourced fix (2nd-edition rules update): an exact-damage kill's zone-relief window — choose one
+  // non-Myla card from the mission zone to discard for good, before Myla's own strike total is computed.
+  const isZoneReliefWindow = state.turnPhase === 'AWAIT_ZONE_RELIEF_CHOICE' && Boolean(state.zoneReliefChoice);
+  const isMyZoneReliefWindow = isZoneReliefWindow && isMyTurn;
+  const zoneReliefEligibleCards = state.missionZone.filter((c) => !(c.kind === 'suited' && c.name === 'Myla'));
+
   // Mission 3+, sourced from a full solo playthrough (see tutorial_vids/summaries/mission-3.md): the Mage reveal
   // window, opened whenever a Mage card joins an attack — only the player whose Mage it is resolves it.
   const isMageRevealWindow = state.turnPhase === 'AWAIT_MAGE_REVEAL' && Boolean(state.mageReveal);
@@ -509,6 +515,16 @@ export function GamePage({
           <EnemyCardPicker
             cards={state.currentEnemy?.tableCards ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE', playerId: myPlayerId, cardId })}
+          />
+        </div>
+      )}
+
+      {isMyZoneReliefWindow && (
+        <div className="jester-picker">
+          <span>🥀 An exact hit! Choose one card from the mission zone (other than Myla) to discard for good.</span>
+          <EnemyCardPicker
+            cards={zoneReliefEligibleCards}
+            onChoose={(cardId) => sendAction({ type: 'CHOOSE_ZONE_RELIEF_CARD', playerId: myPlayerId, cardId })}
           />
         </div>
       )}

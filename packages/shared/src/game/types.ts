@@ -265,9 +265,10 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * AWAIT_END_OF_TURN and AWAIT_RESCUE_CHOICE are Mission 9's captured-piles mechanic only (see
  * GameState.capturedPilesActive). AWAIT_ZONE_VENGEANCE_CHOICE is Mission 6 only (see
  * GameState.zoneVengeanceChoice) — opened by a kill under zoneVengeanceOnKill, resolved via
- * CHOOSE_ZONE_VENGEANCE_SACRIFICE. AWAIT_BARD_SURRENDER is Mission 10 only (see
- * GameState.corruptedPartyEnemies) — opened by an enemy Bard's end-of-turn power when the ending player's hand is
- * non-empty, resolved via SURRENDER_CARD_TO_ZONE; engine.ts's advanceToNextPlayer pauses mid-advance right here
+ * CHOOSE_ZONE_VENGEANCE_SACRIFICE. AWAIT_ZONE_RELIEF_CHOICE is also Mission 6 only (see GameState.zoneReliefChoice)
+ * — opened by an exact-damage kill, resolved via CHOOSE_ZONE_RELIEF_CARD. AWAIT_BARD_SURRENDER is Mission 10 only
+ * (see GameState.corruptedPartyEnemies) — opened by an enemy Bard's end-of-turn power when the ending player's hand
+ * is non-empty, resolved via SURRENDER_CARD_TO_ZONE; engine.ts's advanceToNextPlayer pauses mid-advance right here
  * until it resolves, same shape as AWAIT_END_OF_TURN pausing there for Mission 9. AWAIT_MAGE_REVEAL is Mission 3+
  * only (see GameState.mageReveal) — opened by a Mage card in a play, resolved via CHOOSE_MAGE_REVEAL_CARD.
  */
@@ -278,6 +279,7 @@ export type TurnPhase =
   | 'AWAIT_COMBO_ASSIST'
   | 'AWAIT_AZURE_EMBLEM'
   | 'AWAIT_ZONE_VENGEANCE_CHOICE'
+  | 'AWAIT_ZONE_RELIEF_CHOICE'
   | 'AWAIT_ZONE_PURGE'
   | 'AWAIT_CHANT_TRIM'
   | 'AWAIT_END_OF_TURN'
@@ -490,13 +492,22 @@ export interface GameState {
    * enemy's own table, see GameState.zoneVengeanceChoice / engine.ts's chooseZoneVengeanceSacrifice) to move into
    * the zone instead of the discard pile. The shipped version instead auto-picked the lowest-value card for the
    * player, routinely dragging a second or third suit into Myla's permanent immunity on the very first kill.
-   * Once the zone grows, Myla (its permanent occupant, see presetMissionZone) strikes: pendingDamage is set to
-   * the live sum of every card's value in missionZone and turnPhase becomes AWAIT_DEFEND, reusing the normal
-   * defend/loss flow so an uncovered hit ends the mission exactly like any other undefended attack (see
-   * engine.ts's finishEnemyDefeatTail) — UNLESS the winning attack included a Guardian, which cancels this
-   * strike entirely (also sourced, previously unimplemented — see dealDamageAndCheckDefeat's
-   * attackIncludesGuardian). An exact-damage kill excludes the single highest-value zone card from that one
-   * strike's total. The zone itself is never cleared for the rest of the mission.
+   * SOURCED CORRECTION (2nd-edition rules update, tutorial_vids/"Regicide Legacy - Mission 6 - QA.png" — an
+   * official publisher errata page): an exact-damage kill additionally lets the player choose ANY one non-Myla
+   * card already in the zone to discard permanently, BEFORE Myla's strike total is computed (see
+   * GameState.zoneReliefChoice / engine.ts's chooseZoneReliefCard) — this happens even under a Guardian, since
+   * the errata is explicit that a Guardian only cancels the strike below, not this discard. The 1st-edition
+   * reading this replaced instead just excluded that strike's single highest-value card from the total for ONE
+   * hit, with the card staying in the zone forever after — a temporary reprieve, not the permanent shrink the
+   * errata actually describes.
+   *
+   * Once the zone grows (and any exact-kill relief resolves), Myla (its permanent occupant, see
+   * presetMissionZone) strikes: pendingDamage is set to the live sum of every remaining card's value in
+   * missionZone and turnPhase becomes AWAIT_DEFEND, reusing the normal defend/loss flow so an uncovered hit ends
+   * the mission exactly like any other undefended attack (see engine.ts's finishEnemyDefeatTail) — UNLESS the
+   * winning attack included a Guardian, which cancels this strike entirely (also sourced, previously
+   * unimplemented — see dealDamageAndCheckDefeat's attackIncludesGuardian). The zone itself is never cleared for
+   * the rest of the mission (aside from the errata's own permanent relief discard above).
    */
   zoneVengeanceOnKill: boolean;
   /**
@@ -506,6 +517,14 @@ export interface GameState {
    * resume the rest of the defeat resolution exactly as if zoneVengeanceOnKill's sacrifice had resolved inline.
    */
   zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean; attackIncludesMage: boolean } | null;
+  /**
+   * Legacy-only (Mission 6), sourced fix (see zoneVengeanceOnKill's own doc comment): the open
+   * AWAIT_ZONE_RELIEF_CHOICE window opened by an exact-damage kill, once the zone has at least one non-Myla
+   * card — non-null until CHOOSE_ZONE_RELIEF_CARD resolves it. `attackIncludesGuardian` and `remaining` are
+   * carried through so finishEnemyDefeatTail's Myla-strike step (and whatever comes after it) can resume exactly
+   * as if the relief discard had resolved inline.
+   */
+  zoneReliefChoice: { attackIncludesGuardian: boolean; remaining: number } | null;
   /**
    * Legacy-only (Mission 7): when true, gates the whole Pilgrim hand-trap rule — Pilgrim cards (see
    * SuitedCard.pilgrim), shuffled into the reserve deck via Mission.extraReserveCards like any other card, can
@@ -841,6 +860,12 @@ export type GameAction =
    */
   | { type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE'; playerId: string; cardId: string }
   /**
+   * Legacy-only (Mission 6), sourced fix (see zoneVengeanceOnKill's own doc comment), from
+   * AWAIT_ZONE_RELIEF_CHOICE: the player who just landed an exact-damage kill chooses `cardId`, any card in the
+   * mission zone other than Myla, to discard permanently before Myla's strike total is computed.
+   */
+  | { type: 'CHOOSE_ZONE_RELIEF_CARD'; playerId: string; cardId: string }
+  /**
    * Legacy-only (Mission 3+), sourced fix, from AWAIT_MAGE_REVEAL: the player whose Mage card opened the reveal
    * (see GameState.mageReveal) chooses `cardId`, from the cards just revealed off the reserve deck, to tuck under
    * the attack. Every candidate not chosen falls to the discard pile.
@@ -946,6 +971,8 @@ export interface ClientGameState {
   zoneVengeanceOnKill: boolean;
   /** See GameState.zoneVengeanceChoice. Public information — the eligible cards are the enemy's own (public) table. */
   zoneVengeanceChoice: { remaining: number; attackIncludesGuardian: boolean; attackIncludesMage: boolean } | null;
+  /** See GameState.zoneReliefChoice. Public information — the eligible cards are the mission zone's own (public) contents. */
+  zoneReliefChoice: { attackIncludesGuardian: boolean; remaining: number } | null;
   /** See GameState.pilgrimMechanic. */
   pilgrimMechanic: boolean;
   /** Vestigial (see GameState.pilgrimMechanic) — always empty now; a Pilgrim card sits in the owning player's own (redacted) hand instead of any shared zone. */
