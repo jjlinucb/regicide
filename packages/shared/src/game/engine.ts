@@ -1243,12 +1243,14 @@ function finishEnemyDefeatTail(
     // immediately; whatever isn't claimed by a placement gets swept to the discard pile once the placement
     // window closes (finishAdvanceToNextPlayer) or the zone purges at 10 (placeInZone).
     state.zoneCommittedPlay.push(...enemy.tableCards);
-  } else if (state.ruleset === 'legacy' && attackIncludesMage) {
-    // Mission 3+, sourced (see tutorial_vids/summaries/mission-3.md): an attack that included a Mage banishes its
-    // cards on a kill instead of sending them to the discard pile. Lower precedence than the two mission-specific
-    // branches above — a Mage recruit, once granted, stays in the party for every later mission too, so this can
-    // in principle coincide with Mission 8/11/12's own more specific table-cards handling; no source addresses
-    // that overlap, so the more specific mission mechanic wins and this only applies in the plain default case.
+  } else if (state.ruleset === 'legacy' && attackIncludesMage && remaining !== 0) {
+    // Mission 3+, HOUSE RULE (John's call, overriding the sourced default — see tutorial_vids/summaries/mission-3.md,
+    // which says every kill banishes regardless of exact/overkill): an attack that included a Mage only banishes
+    // its cards on an OVERKILL; an exact hit sends them to the discard pile as normal instead, same as any other
+    // kill. Lower precedence than the two mission-specific branches above — a Mage recruit, once granted, stays in
+    // the party for every later mission too, so this can in principle coincide with Mission 8/11/12's own more
+    // specific table-cards handling; no source addresses that overlap, so the more specific mission mechanic wins
+    // and this only applies in the plain default case.
     banishCards(state, enemy.tableCards);
   } else {
     pushToDiscardPile(state, enemy.tableCards);
