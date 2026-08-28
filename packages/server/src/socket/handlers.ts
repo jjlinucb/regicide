@@ -26,6 +26,8 @@ function legacyStatePayload(room: Room): LegacyStatePayload | null {
     currentMission: room.legacy.currentMission,
     permanentRules: room.legacy.permanentRules,
     mercenaryProgress: room.legacy.mercenaryProgress,
+    beastCompanionPool: room.legacy.beastCompanionPool,
+    selectedBeastCompanionId: room.legacy.selectedBeastCompanionId,
   };
 }
 
@@ -163,6 +165,15 @@ export function registerSocketHandlers(io: IOServer, socket: IOSocket, rooms: Ro
     const found = rooms.findPlayerBySocket(socket.id);
     if (!found) return cb({ ok: false, error: 'Not in a room.' });
     const result = await rooms.setMercenaryLoadout(code, found.player.id, loadout);
+    if ('error' in result) return cb({ ok: false, error: result.error });
+    cb({ ok: true });
+    broadcastRoom(io, result.room);
+  });
+
+  socket.on('legacy:setBeastCompanionSelection', async ({ code, cardId }, cb) => {
+    const found = rooms.findPlayerBySocket(socket.id);
+    if (!found) return cb({ ok: false, error: 'Not in a room.' });
+    const result = await rooms.setBeastCompanionSelection(code, found.player.id, cardId);
     if ('error' in result) return cb({ ok: false, error: result.error });
     cb({ ok: true });
     broadcastRoom(io, result.room);

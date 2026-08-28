@@ -9,6 +9,10 @@ export interface CampaignRecord {
   currentMission: number;
   permanentRules: string[];
   mercenaryProgress: MercenaryProgress | null;
+  /** Mission 4's Beast Companion reward (see RoomManager.grantMissionReward): kept separate from `party` — the sourced reward is a rotating pool, not permanent recruits. */
+  beastCompanionPool: Card[];
+  /** Which one card (by id) from `beastCompanionPool`, if any, is brought into the next mission attempt's reserve deck (see RoomManager.startLegacyMission/setBeastCompanionSelection). */
+  selectedBeastCompanionId: string | null;
   updatedAt: number;
 }
 
@@ -61,6 +65,7 @@ export class PostgresCampaignStore implements CampaignStore {
   async get(code: string): Promise<CampaignRecord | null> {
     const res = await this.pool.query(
       `SELECT code, party, missions_completed, current_mission, permanent_rules, mercenary_progress,
+              beast_companion_pool, selected_beast_companion_id,
               extract(epoch from updated_at) * 1000 AS updated_at_ms
        FROM campaigns WHERE code = $1`,
       [code.toUpperCase()],
@@ -74,14 +79,16 @@ export class PostgresCampaignStore implements CampaignStore {
       currentMission: row.current_mission,
       permanentRules: row.permanent_rules,
       mercenaryProgress: row.mercenary_progress,
+      beastCompanionPool: row.beast_companion_pool ?? [],
+      selectedBeastCompanionId: row.selected_beast_companion_id,
       updatedAt: Number(row.updated_at_ms),
     };
   }
 
   async create(record: CampaignRecord): Promise<void> {
     await this.pool.query(
-      `INSERT INTO campaigns (code, party, missions_completed, current_mission, permanent_rules, mercenary_progress)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+      `INSERT INTO campaigns (code, party, missions_completed, current_mission, permanent_rules, mercenary_progress, beast_companion_pool, selected_beast_companion_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         record.code.toUpperCase(),
         JSON.stringify(record.party),
@@ -89,13 +96,16 @@ export class PostgresCampaignStore implements CampaignStore {
         record.currentMission,
         JSON.stringify(record.permanentRules),
         JSON.stringify(record.mercenaryProgress),
+        JSON.stringify(record.beastCompanionPool),
+        record.selectedBeastCompanionId,
       ],
     );
   }
 
   async save(record: CampaignRecord): Promise<void> {
     await this.pool.query(
-      `UPDATE campaigns SET party = $2, missions_completed = $3, current_mission = $4, permanent_rules = $5, mercenary_progress = $6, updated_at = now()
+      `UPDATE campaigns SET party = $2, missions_completed = $3, current_mission = $4, permanent_rules = $5, mercenary_progress = $6,
+              beast_companion_pool = $7, selected_beast_companion_id = $8, updated_at = now()
        WHERE code = $1`,
       [
         record.code.toUpperCase(),
@@ -104,6 +114,8 @@ export class PostgresCampaignStore implements CampaignStore {
         record.currentMission,
         JSON.stringify(record.permanentRules),
         JSON.stringify(record.mercenaryProgress),
+        JSON.stringify(record.beastCompanionPool),
+        record.selectedBeastCompanionId,
       ],
     );
   }
