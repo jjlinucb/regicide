@@ -142,10 +142,22 @@ export function currentEnemyAttackWithDiscardBuff(enemy: EnemyState, discardBuff
   return Math.max(0, enemy.baseAttack - enemy.spadesShield + discardBuff);
 }
 
-/** Legacy-only (Mission 4): the value of the card currently on top of the discard pile (the most recently discarded card), or 0 if the pile is empty. */
+/**
+ * Legacy-only (Mission 4): the value of the card currently on top of the discard pile (the most recently
+ * discarded card), or 0 if the pile is empty. A flexible-rank Mercenary (see SuitedCard.flexibleComboRank, e.g. a
+ * "2/5" card) always reads as its LOWER value here — house rule, John's call: this value only ever feeds a boss
+ * attack buff (this mission's discardTopBuffsAttack, Mission 11's pileTopEnemyBonus), so the lower reading is
+ * strictly better for the party and there's no reason a player would ever want the higher one to apply instead.
+ */
 export function discardPileTopValue(discardPile: Card[]): number {
   if (discardPile.length === 0) return 0;
-  return cardValue(discardPile[discardPile.length - 1]);
+  return pileTopValue(discardPile[discardPile.length - 1]);
+}
+
+/** Shared by discardPileTopValue/banishPileTopValue — see discardPileTopValue's doc comment for the flexible-rank rule. */
+function pileTopValue(top: Card): number {
+  if (top.kind === 'suited' && top.flexibleComboRank != null) return Math.min(cardValue(top), Number(top.flexibleComboRank));
+  return cardValue(top);
 }
 
 export function currentEnemyHealthRemaining(enemy: EnemyState): number {
@@ -181,10 +193,10 @@ export function matchesAscendingZoneSlot(card: Card, required: number): boolean 
   return card.flexibleComboRank !== undefined && Number(card.flexibleComboRank) === required;
 }
 
-/** Legacy-only (Mission 11): the value of the card currently on top of the banish pile (the most recently banished card), or 0 if the pile is empty. Mirrors discardPileTopValue. */
+/** Legacy-only (Mission 11): the value of the card currently on top of the banish pile (the most recently banished card), or 0 if the pile is empty. Mirrors discardPileTopValue, including its flexible-rank-reads-low rule. */
 export function banishPileTopValue(banishPile: Card[]): number {
   if (banishPile.length === 0) return 0;
-  return cardValue(banishPile[banishPile.length - 1]);
+  return pileTopValue(banishPile[banishPile.length - 1]);
 }
 
 /**
