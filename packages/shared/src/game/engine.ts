@@ -2081,11 +2081,28 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
     return ok(state);
   }
 
+  // Solo variant of the Scarlet Whistle, sourced from a fuller solo playthrough (see
+  // tutorial_vids/summaries/mission-4.md): with nobody else at the table to slip in a card, the lone attacker
+  // instead pulls the top card of the discard pile into the attack immediately, pairing it with the Companion the
+  // same way a second player's assisted card would. A no-op (resolves the Companion alone, as before) if the
+  // discard pile is empty, or if its top happens to be a Jester (a claimed Jester can end up there — a Jester can
+  // never join a normal combo, per validatePlayShape).
+  const discardTop = state.discardPile[state.discardPile.length - 1];
+  const soloAssistCard =
+    state.ruleset === 'legacy' && state.players.length === 1 && scarletAssist && discardTop?.kind === 'suited'
+      ? (state.discardPile.pop() as Extract<Card, { kind: 'suited' }>)
+      : null;
+  const soloAssistCards = soloAssistCard ? [...shapeCards, soloAssistCard] : shapeCards;
+  if (soloAssistCard) {
+    state.currentEnemy!.tableCards.push(soloAssistCard);
+    log(state, `${player.name} attacks alone with a Companion card — the Scarlet Whistle pulls ${soloAssistCard.name ?? `the ${soloAssistCard.rank}`} from the discard pile to help.`);
+  }
+
   // See dealDamageAndCheckDefeat's own doc comment: true here means every other player had already yielded, so
   // this player's own YIELD would have been rejected by allOtherPlayersYieldedLastTurn — this play was compulsory,
   // not a voluntary choice to attack (let alone to overkill).
   const forcedPlay = allOtherPlayersYieldedLastTurn(state);
-  return resolveCommittedPlay(state, player, shapeCards, null, forcedPlay);
+  return resolveCommittedPlay(state, player, soloAssistCards, null, forcedPlay);
 }
 
 /**

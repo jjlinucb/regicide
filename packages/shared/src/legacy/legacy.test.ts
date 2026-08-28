@@ -1507,6 +1507,64 @@ describe('legacy: mission 4 Beast Companions (strength-copying pair) + Scarlet W
     // Beast copies the assisted-in Spades-6's value: Spades reduces attack by 6 (copied) + 6 (the real card) = 12.
     expect(state.currentEnemy?.spadesShield).toBe(12);
   });
+
+  function startBeastMissionSolo(): GameState {
+    const boss: LegacyEnemySpec = { name: 'Specimen A', suit: 'H', health: 100, attack: 1 };
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'beast-test-solo',
+      party: buildInitialParty(),
+      enemies: [boss],
+      jesterCount: 0,
+      relics: ['SCARLET_WHISTLE'],
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  it("solo variant, sourced fix: pulls the top of the discard pile into the attack immediately instead of opening a pointless assist window", () => {
+    let state = startBeastMissionSolo();
+    const beast: SuitedCard = { ...suited('S', 'A'), beast: true };
+    state = rig(state, [beast]);
+    state.discardPile = [suited('C', '2'), suited('S', '6')]; // top is the Spades 6
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [beast.id] }));
+    state = res.state;
+
+    expect(state.turnPhase).not.toBe('AWAIT_COMBO_ASSIST'); // no one else to wait on solo — resolves immediately
+    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '6')).toBe(false); // pulled out
+    // Beast copies the pulled Spades-6's value: Spades reduces the enemy's attack by 6 (copied) + 6 (the real card) = 12.
+    expect(state.currentEnemy?.spadesShield).toBe(12);
+  });
+
+  it('solo variant: resolves the lone Companion alone, same as before, when the discard pile is empty', () => {
+    let state = startBeastMissionSolo();
+    const beast: SuitedCard = { ...suited('S', 'A'), beast: true };
+    state = rig(state, [beast]);
+    state.discardPile = [];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [beast.id] }));
+    state = res.state;
+
+    expect(state.turnPhase).not.toBe('AWAIT_COMBO_ASSIST');
+    // No partner to copy — falls back to a Beast Companion's own printed value (an Ace's flat 1).
+    expect(state.currentEnemy?.spadesShield).toBe(1);
+  });
+
+  it('solo variant: skips the pull if the discard pile\'s top card is a Jester (never joins a normal combo)', () => {
+    let state = startBeastMissionSolo();
+    const beast: SuitedCard = { ...suited('S', 'A'), beast: true };
+    state = rig(state, [beast]);
+    state.discardPile = [suited('C', '2'), jester()];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [beast.id] }));
+    state = res.state;
+
+    expect(state.discardPile.length).toBe(2); // left untouched
+    expect(state.currentEnemy?.spadesShield).toBe(1); // resolves the Companion alone instead
+  });
 });
 
 describe('legacy: mission 5 mechanics (Reaver reserve-tear, rolling banish-pile zone, exact-kill splash)', () => {
