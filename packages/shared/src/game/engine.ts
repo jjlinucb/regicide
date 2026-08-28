@@ -1410,7 +1410,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.missionZone = [];
   state.zoneImmuneSuits = [];
   state.banishPile = [];
-  state.jesterClaimNextPlayerOnly = false;
+  state.standingJesters = [];
   state.discardTopBuffsAttack = false;
   state.exactKillToReserveDeck = false;
   state.corruptedReturnQueue = false;
@@ -1482,6 +1482,10 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   const beastDeckMechanic = action.beastDeckMechanic ?? false;
   const beastBuild = beastDeckMechanic ? buildBeastDeck(partyForReserve, buildRng) : null;
   if (beastBuild) partyForReserve = beastBuild.leftoverParty;
+  // Mission 2 (unsourced house rule — see GameState.standingJesters): Jesters aren't shuffled into the reserve
+  // deck at all here, so none of this mission's economy math (hand deal, captured-pile sizing, etc.) should count
+  // them as part of it — they're carved out into their own standing pool right after the deck is built instead.
+  const deckJesterCount = action.standingJesters ? 0 : action.jesterCount;
   const capturedPilesActive = action.capturedPilesActive ?? false;
   // Mission 9: 30 cards are split out of the party into 3 captured piles before anything is dealt — the reserve
   // deck for the mission is built from whatever's left of the party, plus any mission-only extras (e.g. a fresh
@@ -1512,16 +1516,16 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
     // `Math.min(10, 4 + 2*n)` cap, so a solo/2-player fight (already comfortably above the buffer) is unaffected.
     const MIN_STARTING_RESERVE = 10;
     const initialHandDeal = n * (MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5);
-    const extrasAndJesters = (action.extraReserveCards?.length ?? 0) + action.jesterCount;
+    const extrasAndJesters = (action.extraReserveCards?.length ?? 0) + deckJesterCount;
     const maxPileSizeForReserve = Math.floor(
       (partyForReserve.length + extrasAndJesters - initialHandDeal - MIN_STARTING_RESERVE) / 3,
     );
     const pileSize = Math.max(1, Math.min(10, 4 + 2 * n, maxPileSizeForReserve));
     const split = buildCapturedPiles(partyForReserve, buildRng, pileSize);
     capturedPiles = split.piles;
-    reserveDeck = buildLegacyReserveDeck([...split.leftoverParty, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);
+    reserveDeck = buildLegacyReserveDeck([...split.leftoverParty, ...(action.extraReserveCards ?? [])], deckJesterCount, buildRng);
   } else {
-    reserveDeck = buildLegacyReserveDeck([...partyForReserve, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);
+    reserveDeck = buildLegacyReserveDeck([...partyForReserve, ...(action.extraReserveCards ?? [])], deckJesterCount, buildRng);
   }
   const maxHandSize = MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5;
 
@@ -1573,7 +1577,9 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
     ? []
     : Array.from(new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))));
   state.banishPile = [];
-  state.jesterClaimNextPlayerOnly = action.jesterClaimNextPlayerOnly ?? false;
+  // See deckJesterCount above — when standingJesters is set, the mission's Jesters never enter the shuffled
+  // reserve deck at all; they're built directly into this standing pool instead (see GameState.standingJesters).
+  state.standingJesters = action.standingJesters ? makeJesters(action.jesterCount) : [];
   state.discardTopBuffsAttack = action.discardTopBuffsAttack ?? false;
   state.exactKillToReserveDeck = action.exactKillToReserveDeck ?? false;
   state.corruptedReturnQueue = action.corruptedReturnQueue ?? false;
@@ -2286,14 +2292,6 @@ function claimJester(state: GameState, action: Extract<GameAction, { type: 'CLAI
     return fail('Choose a class to attack with — Hearts, Diamonds, Clubs, or Spades.');
   }
 
-  // Modified Jester rule (Mission 2's hydras only): the oppressive dual immunities restrict the claim to
-  // whoever's turn comes next, instead of being open to the whole table.
-  if (state.jesterClaimNextPlayerOnly) {
-    const nextPlayer = state.players[(state.currentPlayerIndex + 1) % state.players.length];
-    if (player.id !== nextPlayer.id) {
-      return fail('Only the next player in turn order may claim this Jester.');
-    }
-  }
 
   const jesterCard = state.jesterClaim.card;
   state.jesterClaim = null;
@@ -2301,29 +2299,71 @@ function claimJester(state: GameState, action: Extract<GameAction, { type: 'CLAI
   state.turnPhase = 'AWAIT_PLAY';
   state.kinfolkBankedThisTurn = false;
   log(state, `${player.name} claims the Jester — a free 8-strength attack, ignoring immunity.`);
+  return resolveJesterAttack(state, player, jesterCard, action.attackSuit, 'discard');
+}
 
-  // The claimed Jester itself is the only "real" card here — it goes to the enemy's table (and eventually the
-  // discard pile) same as any played card. The 8-strength attack it grants is computed via a throwaway synthetic
-  // card, never entered into tableCards/discardPile itself, so it can't leak an extra card into the deck economy.
+/**
+ * Legacy-only (Mission 2, unsourced house rule — see GameState.standingJesters): uses one of the mission's 2
+ * standing Jesters directly as the current player's own turn action — no PLAY_JESTER/CLAIM_JESTER handshake
+ * first, since a standing Jester was never drawn into anyone's hand to begin with. Unlike CLAIM_JESTER, the
+ * refill afterward only tops the hand up to max rather than discarding it first (see resolveJesterAttack).
+ */
+function useStandingJester(state: GameState, action: Extract<GameAction, { type: 'USE_STANDING_JESTER' }>): EngineResult {
+  if (state.ruleset !== 'legacy') return fail('USE_STANDING_JESTER is only available in Regicide Legacy.');
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_PLAY');
+  if (err) return fail(err);
+  if (state.standingJesters.length === 0) return fail('There are no standing Jesters left to use.');
+  if (!BASE_SUITS.includes(action.attackSuit)) {
+    return fail('Choose a class to attack with — Hearts, Diamonds, Clubs, or Spades.');
+  }
+
+  const player = currentPlayer(state);
+  const jesterCard = state.standingJesters[0];
+  state.standingJesters = state.standingJesters.slice(1);
+  state.lastActionWasYield[state.currentPlayerIndex] = false;
+  log(state, `${player.name} calls on a standing Jester — a free 8-strength attack, ignoring immunity.`);
+  return resolveJesterAttack(state, player, jesterCard, action.attackSuit, 'topUp');
+}
+
+/**
+ * Shared resolution for both CLAIM_JESTER and USE_STANDING_JESTER: the claimed/used Jester itself is the only
+ * "real" card here — it goes to the enemy's table (and eventually the discard pile) same as any played card. The
+ * 8-strength attack it grants is computed via a throwaway synthetic card, never entered into tableCards/
+ * discardPile itself, so it can't leak an extra card into the deck economy.
+ *
+ * `refillMode` picks which hand-refill power applies afterward — 'discard' is the base game's own printed Jester
+ * power (discard the whole hand, redraw to max — CLAIM_JESTER); 'topUp' is Mission 2's own unsourced house rule
+ * for its standing Jesters (just draw up to max, without discarding what's already held).
+ *
+ * Bug-fix (see GameState.pendingJesterRefill): if the synthetic attack didn't kill the enemy, the claimant now
+ * owes a defend against its dealt damage (turnPhase is AWAIT_DEFEND). Refilling right here, before that defend
+ * is resolved, would swap the claimant's hand out from under them while they're still deciding how to cover
+ * that damage — turning what might have been a coverable hit into a lethal one. Defer the refill to defend()
+ * instead; every other outcome (the enemy died, or dealt no damage back) has nothing left to resolve, so it
+ * still refills immediately, exactly as before.
+ * (Routed through currentTurnPhase() rather than reading state.turnPhase inline: TS's control-flow narrowing
+ * otherwise carries the 'AWAIT_PLAY' literal the caller assigned a few lines above straight through the
+ * resolveCommittedPlay() call — which does reassign it internally, TS just has no way to see that — and flags
+ * the comparison below as comparing non-overlapping literals. A function-call boundary resets that narrowing.)
+ */
+function resolveJesterAttack(
+  state: GameState,
+  player: PlayerState,
+  jesterCard: Card,
+  attackSuit: Suit,
+  refillMode: 'discard' | 'topUp',
+): EngineResult {
   state.currentEnemy!.tableCards.push(jesterCard);
-  const syntheticAttack: SuitedCard = { id: `${jesterCard.id}-attack`, kind: 'suited', suit: action.attackSuit, rank: '8' };
+  const syntheticAttack: SuitedCard = { id: `${jesterCard.id}-attack`, kind: 'suited', suit: attackSuit, rank: '8' };
   const result = resolveCommittedPlay(state, player, [syntheticAttack], jesterCard);
   if (!result.ok || state.phase !== 'IN_PROGRESS') return result;
 
-  // Bug-fix (see GameState.pendingJesterRefill): if the synthetic attack didn't kill the enemy, the claimant now
-  // owes a defend against its dealt damage (turnPhase is AWAIT_DEFEND). Refilling right here, before that defend
-  // is resolved, would swap the claimant's hand out from under them while they're still deciding how to cover
-  // that damage — turning what might have been a coverable hit into a lethal one. Defer the refill to defend()
-  // instead; every other outcome (the enemy died, or dealt no damage back) has nothing left to resolve, so it
-  // still refills immediately, exactly as before.
-  // (Routed through currentTurnPhase() rather than reading state.turnPhase inline: TS's control-flow narrowing
-  // otherwise carries the 'AWAIT_PLAY' literal this same function assigned a few lines above straight through the
-  // resolveCommittedPlay() call — which does reassign it internally, TS just has no way to see that — and flags
-  // the comparison below as comparing non-overlapping literals. A function-call boundary resets that narrowing.)
   if (currentTurnPhase(state) === 'AWAIT_DEFEND') {
-    state.pendingJesterRefill = { playerId: player.id };
-  } else {
+    state.pendingJesterRefill = { playerId: player.id, mode: refillMode };
+  } else if (refillMode === 'discard') {
     refillHandFromDeck(state, player, 'the Jester');
+  } else {
+    topUpHandFromDeck(state, player, 'the Jester');
   }
   return ok(state);
 }
@@ -2349,6 +2389,18 @@ function refillHandFromDeck(state: GameState, player: PlayerState, sourceLabel: 
     // keep drawing until the hand limit or the deck runs dry
   }
   log(state, `${player.name}'s hand is discarded and refilled to ${player.hand.length} (${sourceLabel}).`);
+}
+
+/**
+ * Draws cards from the reserve deck up to `state.maxHandSize`, without discarding anything already in hand —
+ * Mission 2's standing-Jester house rule (see GameState.standingJesters), distinct from the base game's own
+ * discard-and-redraw Jester power (refillHandFromDeck above) that CLAIM_JESTER still uses everywhere else.
+ */
+function topUpHandFromDeck(state: GameState, player: PlayerState, sourceLabel: string): void {
+  while (player.hand.length < state.maxHandSize && drawOneCard(state, player)) {
+    // keep drawing until the hand limit or the deck runs dry
+  }
+  log(state, `${player.name} draws up to ${player.hand.length} cards (${sourceLabel}).`);
 }
 
 function useSoloJester(state: GameState, action: Extract<GameAction, { type: 'USE_SOLO_JESTER' }>): EngineResult {
@@ -2445,12 +2497,17 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
     log(state, `${player.name} discards ${cards.length} card(s) to cover ${state.pendingDamage} damage.`);
   }
 
-  // Bug-fix (see GameState.pendingJesterRefill / claimJester): this specific attack's damage is now fully
-  // resolved — a claimed Jester's own hand-refill deferred past the defend above happens right here, using
+  // Bug-fix (see GameState.pendingJesterRefill / resolveJesterAttack): this specific attack's damage is now fully
+  // resolved — a claimed/used Jester's own hand-refill deferred past the defend above happens right here, using
   // whatever's left of the claimant's hand AFTER they chose how to cover the damage, never before.
   if (state.pendingJesterRefill && state.pendingJesterRefill.playerId === player.id) {
+    const { mode } = state.pendingJesterRefill;
     state.pendingJesterRefill = null;
-    refillHandFromDeck(state, player, 'the Jester');
+    if (mode === 'discard') {
+      refillHandFromDeck(state, player, 'the Jester');
+    } else {
+      topUpHandFromDeck(state, player, 'the Jester');
+    }
   }
 
   endTurnOrAwaitRescue(state);
@@ -2776,7 +2833,7 @@ export function createLobbyState(): GameState {
     missionZone: [],
     zoneImmuneSuits: [],
     banishPile: [],
-    jesterClaimNextPlayerOnly: false,
+    standingJesters: [],
     discardTopBuffsAttack: false,
     exactKillToReserveDeck: false,
     corruptedReturnQueue: false,
@@ -2827,6 +2884,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return playJester(draft, action);
     case 'CLAIM_JESTER':
       return claimJester(draft, action);
+    case 'USE_STANDING_JESTER':
+      return useStandingJester(draft, action);
     case 'ASSIST_COMBO':
       return assistCombo(draft, action);
     case 'RESOLVE_COMBO':

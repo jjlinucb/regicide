@@ -414,8 +414,15 @@ export interface GameState {
   zoneImmuneSuits: Suit[];
   /** Legacy-only: cards permanently removed from the game (mission-zone cleanup, etc.) — never reshuffled back in. */
   banishPile: Card[];
-  /** Legacy-only (Mission 2's hydras): when true, an open Jester claim window may only be claimed by the next player in turn order, not any player. */
-  jesterClaimNextPlayerOnly: boolean;
+  /**
+   * Legacy-only (Mission 2, unsourced house rule — John's own call from the physical game, not the tutorial
+   * videos): when this mission's own `standingJesters` flag is set, its 2 Jesters are never shuffled into the
+   * reserve deck at all — they sit here instead, usable by any player as their own turn's action via
+   * USE_STANDING_JESTER (see engine.ts's useStandingJester), without ever needing to be drawn into a hand first.
+   * Superseded the older jesterClaimNextPlayerOnly restriction, which only made sense for the old hand-played-then-
+   * claimed-by-someone-else flow — a standing Jester is used by whoever invokes it, for themselves.
+   */
+  standingJesters: Card[];
   /**
    * Legacy-only (Mission 4): when true, the current enemy's attack is buffed by the value of whatever card
    * currently sits on top of the discard pile, recomputed live at the moment attack is dealt (see
@@ -669,15 +676,17 @@ export interface GameState {
    */
   skipNextBanishZoneFlip: boolean;
   /**
-   * Legacy-only: set by claimJester when its synthetic 8-strength attack didn't kill the enemy and left the
-   * claimant owing a defend (turnPhase AWAIT_DEFEND) — non-null until that specific attack's damage is fully
-   * resolved. Defers the Jester's "discard hand, refill to max" power past that defend, so the claimant sees and
-   * chooses from their PRE-refill hand when deciding how to cover the jester's own dealt damage, rather than a
-   * hand that's already been silently replaced out from under them (see engine.ts's claimJester/defend). Never
-   * set (and thus a no-op) when the attack killed outright or dealt no damage back — those cases still refill
-   * immediately, same as before.
+   * Legacy-only: set by claimJester/useStandingJester when its synthetic 8-strength attack didn't kill the enemy
+   * and left the claimant owing a defend (turnPhase AWAIT_DEFEND) — non-null until that specific attack's damage
+   * is fully resolved. Defers the Jester's hand-refill past that defend, so the claimant sees and chooses from
+   * their PRE-refill hand when deciding how to cover the jester's own dealt damage, rather than a hand that's
+   * already been silently replaced out from under them (see engine.ts's resolveJesterAttack/defend). Never set
+   * (and thus a no-op) when the attack killed outright or dealt no damage back — those cases still refill
+   * immediately, same as before. `mode` distinguishes the base game's own printed "discard hand, redraw to max"
+   * power (CLAIM_JESTER) from Mission 2's standing Jesters, an unsourced house rule that only tops the hand up to
+   * max without discarding what's already held (see GameState.standingJesters).
    */
-  pendingJesterRefill: { playerId: string } | null;
+  pendingJesterRefill: { playerId: string; mode: 'discard' | 'topUp' } | null;
 }
 
 export interface GameEvent {
@@ -705,8 +714,8 @@ export type GameAction =
       relics?: string[];
       /** See GameState.endOfTurnZoneFlip. */
       endOfTurnZoneFlip?: boolean;
-      /** See GameState.jesterClaimNextPlayerOnly. */
-      jesterClaimNextPlayerOnly?: boolean;
+      /** See GameState.standingJesters. */
+      standingJesters?: boolean;
       /** See GameState.discardTopBuffsAttack. */
       discardTopBuffsAttack?: boolean;
       /** See GameState.exactKillToReserveDeck. */
@@ -796,14 +805,20 @@ export type GameAction =
   | { type: 'PLAY_JESTER'; playerId: string; cardId: string }
   /**
    * Legacy-only: claim an open Jester window. Validated against the window being open, not turn ownership — any
-   * player may claim (or Mission 2's jesterClaimNextPlayerOnly restricts it to whoever's turn is next). Resolves
-   * immediately and atomically as its own attack: an 8-strength play in `attackSuit`, ignoring the enemy's
-   * immunity, followed by the claimant discarding their whole hand and drawing a fresh one — the base game's own
-   * printed Jester power, which Legacy never overrides (deliberate house rule; see engine.ts's claimJester —
-   * unsourced beyond the base game's own printed card text, since Mission 2's compendium page isn't published
-   * yet, but confirmed against footage of actual play).
+   * player may claim. Resolves immediately and atomically as its own attack: an 8-strength play in `attackSuit`,
+   * ignoring the enemy's immunity, followed by the claimant discarding their whole hand and drawing a fresh one —
+   * the base game's own printed Jester power, which Legacy never overrides (deliberate house rule; see engine.ts's
+   * claimJester — unsourced beyond the base game's own printed card text, since Mission 2's compendium page isn't
+   * published yet, but confirmed against footage of actual play).
    */
   | { type: 'CLAIM_JESTER'; playerId: string; attackSuit: Suit }
+  /**
+   * Legacy-only (Mission 2, unsourced house rule — see GameState.standingJesters): use one of the mission's 2
+   * standing Jesters directly, as the current player's own turn action. Same resolution as CLAIM_JESTER (an
+   * 8-strength attack in `attackSuit` ignoring immunity, then discard-hand-and-redraw) but requires no PLAY_JESTER/
+   * CLAIM_JESTER handshake first, since a standing Jester was never drawn into anyone's hand to begin with.
+   */
+  | { type: 'USE_STANDING_JESTER'; playerId: string; attackSuit: Suit }
   /**
    * Legacy-only, gated by the 'SCARLET_WHISTLE' relic: silently add a card from hand to the open combo-assist
    * window. Any player except the attacker. `chosenSuit` resolves `cardId` if it's a Mercenary any-suit Ace (see
@@ -897,6 +912,8 @@ export interface ClientGameState {
   victoryMedal: VictoryMedal | null;
   /** Legacy-only: the Jester sitting in the open claim window, if any (public information — it's on the table). */
   jesterClaim: { card: Card; claimedBy: string | null } | null;
+  /** See GameState.standingJesters. Public information — every player needs to know how many are left to use. */
+  standingJesters: Card[];
   endlessLoop: number;
   /** See GameState.comboAssist. */
   comboAssist: { attackerId: string; cardIds: string[] } | null;

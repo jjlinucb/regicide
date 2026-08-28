@@ -28,6 +28,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     soloJestersUsed: state.soloJestersUsed,
     victoryMedal: state.victoryMedal,
     jesterClaim: state.jesterClaim,
+    standingJesters: state.standingJesters,
     endlessLoop: state.endlessLoop,
     comboAssist: state.comboAssist,
     relics: state.relics,

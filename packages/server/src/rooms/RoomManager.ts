@@ -503,7 +503,7 @@ export class RoomManager {
       standardCastle: mission.standardCastle,
       exactKillOnly: mission.exactKillOnly,
       endOfTurnZoneFlip: mission.endOfTurnZoneFlip,
-      jesterClaimNextPlayerOnly: mission.jesterClaimNextPlayerOnly,
+      standingJesters: mission.standingJesters,
       discardTopBuffsAttack: mission.discardTopBuffsAttack,
       exactKillToReserveDeck: mission.exactKillToReserveDeck,
       corruptedReturnQueue: mission.corruptedReturnQueue,

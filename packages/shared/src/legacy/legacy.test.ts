@@ -122,9 +122,9 @@ describe('legacy: mission setup', () => {
     expect(specs.every((s) => s.health === 20 && s.attack === 10)).toBe(true);
   });
 
-  it('mission 2 uses the modified Jester rule (next player only)', () => {
+  it('mission 2 uses standing Jesters (not shuffled into the deck, usable anytime)', () => {
     const mission2 = getMission(2)!;
-    expect(mission2.jesterClaimNextPlayerOnly).toBe(true);
+    expect(mission2.standingJesters).toBe(true);
   });
 
   it('mission 3 sidelines a party member, flips the mission zone every turn, and rewards 10 Mage recruits', () => {
@@ -1048,33 +1048,64 @@ describe('legacy: mission 1 mechanics (exact-kill to reserve deck, killer skips 
   });
 });
 
-describe('legacy: mission 2 modified Jester rule (next player only)', () => {
-  it('rejects a claim from anyone but the next player in turn order, and allows the next player', () => {
-    const enemy: LegacyEnemySpec = { name: 'Hydra Head', suit: 'H', secondSuit: 'D', health: 100, attack: 1 };
-    const ids = ['p0', 'p1', 'p2'];
+describe('legacy: mission 2 standing Jesters (unsourced house rule)', () => {
+  function startStandingJesterMission(n: number, attack = 0): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
+    const enemy: LegacyEnemySpec = { name: 'Hydra Head', suit: 'H', secondSuit: 'D', health: 100, attack };
     const res = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',
       playerIds: ids,
-      playerNames: ['P0', 'P1', 'P2'],
-      seed: 'jester-next-test',
+      playerNames: names,
+      seed: 'standing-jester-test',
       party: buildInitialParty(),
       enemies: [enemy],
-      jesterCount: 3,
-      jesterClaimNextPlayerOnly: true,
+      jesterCount: 2,
+      standingJesters: true,
     });
-    let state = ensureOk(res).state;
-    const j = jester();
-    state = rig(state, [j]);
+    return ensureOk(res).state;
+  }
 
-    const playRes = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId: state.players[0].id, cardId: j.id }));
-    state = playRes.state;
+  it('keeps both Jesters out of the reserve deck and every hand, as a standing pool instead', () => {
+    const state = startStandingJesterMission(2);
+    expect(state.standingJesters.length).toBe(2);
+    expect(state.tavernDeck.some((c) => c.kind === 'jester')).toBe(false);
+    expect(state.players.flatMap((p) => p.hand).some((c) => c.kind === 'jester')).toBe(false);
+  });
 
-    const badClaim = applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[2].id, attackSuit: 'H' });
-    expect(badClaim.ok).toBe(false);
+  it('lets the current player use a standing Jester directly, ignoring immunity, with no draw needed first', () => {
+    const state = startStandingJesterMission(2);
+    const player = state.players[state.currentPlayerIndex];
+    const res = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id, attackSuit: 'H' }));
+    expect(res.state.standingJesters.length).toBe(1);
+    expect(res.state.currentEnemy?.damageTaken).toBe(8); // the dual immunity was ignored
+  });
 
-    const goodClaim = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: state.players[1].id, attackSuit: 'H' }));
-    expect(goodClaim.state.jesterClaim).toBeNull(); // consumed — resolves immediately now
-    expect(goodClaim.state.currentEnemy?.damageTaken).toBe(8); // the dual immunity was ignored
+  it('rejects a standing Jester use from anyone but the current player', () => {
+    const state = startStandingJesterMission(2);
+    const otherPlayer = state.players[(state.currentPlayerIndex + 1) % state.players.length];
+    const res = applyAction(state, { type: 'USE_STANDING_JESTER', playerId: otherPlayer.id, attackSuit: 'H' });
+    expect(res.ok).toBe(false);
+  });
+
+  it('tops the hand up to the limit without discarding what is already held', () => {
+    let state = startStandingJesterMission(1);
+    state = rig(state, [suited('C', '2')]); // a single held card, well under the hand limit
+    const player = state.players[state.currentPlayerIndex];
+    const res = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id, attackSuit: 'H' }));
+    const hand = res.state.players[0].hand;
+    expect(hand.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '2')).toBe(true); // original card kept
+    expect(hand.length).toBe(res.state.maxHandSize);
+  });
+
+  it('rejects using a standing Jester once none remain', () => {
+    let state = startStandingJesterMission(1);
+    const player = state.players[state.currentPlayerIndex];
+    state = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id, attackSuit: 'H' })).state;
+    state = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id, attackSuit: 'H' })).state;
+    expect(state.standingJesters.length).toBe(0);
+    const res = applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id, attackSuit: 'H' });
+    expect(res.ok).toBe(false);
   });
 });
 
