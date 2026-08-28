@@ -1050,7 +1050,9 @@ function dealDamageAndCheckDefeat(
     );
     if (state.exactKillToReserveDeck && remaining === 0) {
       // Mission 4: an exact hit seals a card representing the specimen onto the top of the reserve deck instead
-      // of letting it fall into the discard pile — its value mirrors the enemy's attack tier (10/15/20).
+      // of letting it fall into the discard pile — its value mirrors the enemy's attack tier (10/15/20). It's a
+      // corrupted card (see SuitedCard.corrupted): drawing and playing it later ignores whatever enemy is then
+      // immune to, at the cost of banishing the reserve deck's own top card the instant it's played.
       const specimenRank = enemy.baseAttack <= 10 ? 'J' : enemy.baseAttack <= 15 ? 'Q' : 'K';
       const specimenCard: Card = {
         id: `specimen-${enemy.suit}-${Date.now()}-${Math.floor(nextRandom(state) * 1e6)}`,
@@ -1058,6 +1060,7 @@ function dealDamageAndCheckDefeat(
         suit: enemy.suit,
         rank: specimenRank,
         name: enemy.name ? `${enemy.name}'s Remains` : undefined,
+        corrupted: true,
       };
       state.tavernDeck.unshift(specimenCard);
       log(state, `An exact hit seals a specimen card atop the reserve deck.`);

@@ -878,6 +878,21 @@ button {
   color: var(--accent);
 }
 
+/* A corrupted card (see SuitedCard.corrupted): playing it ignores enemy immunity but banishes the reserve
+   deck's top card as the cost — a cursed black-flame border marks it apart from an ordinary card. */
+.playing-card.corrupted {
+  border-color: #1a1a1a;
+  box-shadow: 0 0 0 1px #1a1a1a, 0 0 8px 1px rgba(140, 60, 220, 0.55);
+}
+
+.corrupted-badge {
+  position: absolute;
+  top: 4px;
+  left: 5px;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
 .confirm-bar {
   display: flex;
   align-items: center;
