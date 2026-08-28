@@ -2931,15 +2931,23 @@ describe('legacy: mission 9 mechanics (captured piles)', () => {
     expect(handCount + state.tavernDeck.length).toBe(22);
   });
 
-  it('reaches the sourced fixed 30-card split (10/pile) once there are enough players (4) for that to be the tested case', () => {
+  it('SECOND-PASS BALANCE FIX: caps the pile split for a 4-player game well below the sourced 30-card figure, since this engine\'s own hand-size table means the opening deal alone would otherwise drain the tavern deck to 0', () => {
     const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 20, attack: 10 };
+    // No extras/jesters here (see startTempleMission's own jesterCount: 0 and unset extraReserveCards) — the real
+    // Mission 9 has 8 Pilgrim extras + 2 jesters at 4p to help absorb the opening deal, so this synthetic
+    // no-extras scenario needs an even smaller pile than the real mission does to keep the same reserve buffer.
     const state = startTempleMission(4, [boss]);
 
-    for (const pile of state.capturedPiles) {
-      expect(pile.faceDown.length).toBe(9);
-    }
     const totalCaptured = state.capturedPiles.reduce((sum, p) => sum + p.faceDown.length + (p.faceUp ? 1 : 0), 0);
-    expect(totalCaptured).toBe(30);
+    // The first pass's Math.min(10, 4+2*4)=10/pile (30 total) left the tavern deck at exactly 0 cards after the
+    // opening 4-player deal (4 * 5-card hand limit = 20 cards, against a 40-card party with none of this
+    // scenario's extras/jesters to help) — see the mission-9-recheck sim (deleted after use). This mission's
+    // actual reserve-deck math now also caps the pile size so at least 10 cards remain in the tavern deck after
+    // the opening deal.
+    const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
+    expect(handCount + state.tavernDeck.length).toBe(40 - totalCaptured);
+    expect(state.tavernDeck.length).toBeGreaterThanOrEqual(10);
+    expect(totalCaptured).toBeLessThan(30);
   });
 
   it('shuffles extraReserveCards into the ordinary reserve deck, not the captured piles', () => {

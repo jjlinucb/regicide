@@ -157,9 +157,18 @@ export function buildLegacyReserveDeck(party: Card[], jesterCount: number, rng: 
  * legacy-mission-playtest-findings) found the fixed 30-card carve-out left a SOLO game with almost nothing in the
  * tavern deck for the whole fight (40-card fresh party minus 30 captured minus a full hand leaves ~2 cards) — no
  * source specifies scaling this by player count, so callers (see engine.ts's startLegacyMission) pass a smaller
- * `pileSize` for fewer players instead of always using the sourced default, capped so it never exceeds — and
- * exactly matches — that sourced 10/pile figure once there are enough players for it to have plausibly been
- * tested at (3-4p).
+ * `pileSize` for fewer players instead of always using the sourced default.
+ *
+ * SECOND-PASS BALANCE FIX (2026-08-28, unsourced — see engine.ts's startLegacyMission for the full reasoning and
+ * the mission-9-recheck sim, deleted after use): the first pass's fix capped `pileSize` so it grew back up to the
+ * sourced 10/pile "once there are enough players (3-4)" — but re-simulating found that this engine's own
+ * per-player-count hand-size table means MORE players deal MORE total cards into hands up front even though each
+ * hand is individually smaller, while the leftover-party pool the first pass computed actually shrinks as player
+ * count grows. The two effects compound: a 3-player mission-9 game was left with exactly 1 card in the tavern
+ * deck after the opening deal, and a 4-player game with exactly 0 — the entire reserve deck consumed before a
+ * single turn was played, at precisely the player counts the sourced 30-card split was supposedly tested at.
+ * Callers now cap `pileSize` further so the tavern deck keeps a real buffer after the opening deal, not just a
+ * positive "leftover party" count — see engine.ts's own pileSize computation for the actual formula.
  */
 export function buildCapturedPiles(party: Card[], rng: () => number, pileSize = 10): { piles: CapturedPile[]; leftoverParty: Card[] } {
   const shuffled = shuffle(party, rng);

@@ -1375,10 +1375,33 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   let reserveDeck: Card[];
   if (capturedPilesActive) {
     // UNSOURCED BALANCE JUDGMENT CALL (see buildCapturedPiles's own doc comment): scale each pile down for a
-    // smaller table instead of always carving out the sourced 30-card fixed split — reaches that sourced figure
-    // exactly once there are enough players (3-4) for it to plausibly be the tested case, and leaves more of the
-    // party in the actual tavern deck for a solo or 2-player fight.
-    const pileSize = Math.min(10, 4 + 2 * n);
+    // smaller table instead of always carving out the sourced 30-card fixed split — a solo or 2-player fight gets
+    // a smaller pile, leaving more of the party in the actual tavern deck.
+    //
+    // SECOND-PASS BALANCE FIX (2026-08-28, unsourced — see the mission-9-recheck sim, deleted after use, and the
+    // legacy-mission-playtest-findings memory doc): the first pass's `Math.min(10, 4 + 2*n)` grows the pile size
+    // monotonically with player count, reaching the sourced 10/pile (30 total) "once there are enough players
+    // (3-4)" — but this engine's OWN per-player-count hand limit (8/7/6/5) times player count means the initial
+    // hand deal alone claims MORE total cards as n grows (8, 14, 18, 20) even though each individual hand shrinks,
+    // while the leftover-party pool the first pass left behind actually SHRANK as n grew (22, 16, 10, 10 before
+    // extras/jesters). Measured against the actual numbers this produces: a solo game keeps 22 cards in the
+    // tavern deck after the opening deal (fine — this is what the first pass fixed) and a 2-player game keeps 10
+    // (tight but survivable), but a 3-player game is left with exactly 1 card and a 4-player game is left with
+    // exactly 0 — the entire reserve deck is consumed by dealing starting hands, before a single turn is played,
+    // at precisely the player counts (3-4) the sourced 30-card split was supposedly tested at. That's a
+    // reintroduction of the same bug the first pass fixed, just relocated to higher player counts instead of
+    // solo. This now additionally caps the pile size so the tavern deck always keeps a minimum buffer of cards
+    // after the opening deal, computed directly from this mission's own actual numbers (party size, extras,
+    // jesters, and the real per-count hand limit) rather than a flat player-count formula, so it holds regardless
+    // of how those inputs change — and only trims the pile size, never grows it past the first pass's own
+    // `Math.min(10, 4 + 2*n)` cap, so a solo/2-player fight (already comfortably above the buffer) is unaffected.
+    const MIN_STARTING_RESERVE = 10;
+    const initialHandDeal = n * (MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5);
+    const extrasAndJesters = (action.extraReserveCards?.length ?? 0) + action.jesterCount;
+    const maxPileSizeForReserve = Math.floor(
+      (partyForReserve.length + extrasAndJesters - initialHandDeal - MIN_STARTING_RESERVE) / 3,
+    );
+    const pileSize = Math.max(1, Math.min(10, 4 + 2 * n, maxPileSizeForReserve));
     const split = buildCapturedPiles(partyForReserve, buildRng, pileSize);
     capturedPiles = split.piles;
     reserveDeck = buildLegacyReserveDeck([...split.leftoverParty, ...(action.extraReserveCards ?? [])], action.jesterCount, buildRng);

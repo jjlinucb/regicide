@@ -780,12 +780,15 @@ export const MISSIONS: Mission[] = [
     // every pile cycles its face-up card to the bottom and reveals the next one instead. An exact kill sends a
     // chosen pile's face-up card straight to the top of the reserve deck (see GameState.capturedPilesActive).
     //
-    // UNSOURCED BALANCE JUDGMENT CALL (see deck.ts's buildCapturedPiles): the pile split itself scales down for a
-    // smaller table now (engine.ts's startLegacyMission picks the actual pile size) instead of always carving out
-    // a fixed 30 regardless of player count — real playtesting found a solo game left with almost nothing in the
-    // tavern deck for this whole fight. No source specifies scaling by player count; the split size still lands
-    // on the sourced 30-card figure exactly once there are enough players (3-4) for that to plausibly be the
-    // tested case.
+    // UNSOURCED BALANCE JUDGMENT CALL (see deck.ts's buildCapturedPiles and engine.ts's startLegacyMission for the
+    // full history): the pile split itself scales down for a smaller table now (engine.ts picks the actual pile
+    // size) instead of always carving out a fixed 30 regardless of player count — real playtesting found a solo
+    // game left with almost nothing in the tavern deck for this whole fight. A second playtesting pass later
+    // found the first fix's own scaling let the pile size climb back toward that sourced 30-card figure exactly
+    // at the player counts (3-4) where this engine's per-count hand-size table deals the most total cards up
+    // front — draining the tavern deck to 0-1 cards before a single turn was played. No source specifies scaling
+    // by player count at all, so the pile size is now capped to keep a real post-deal buffer in the tavern deck
+    // at every player count instead of ever reaching that sourced 30-card figure exactly.
     capturedPilesActive: true,
     // SOURCED CORRECTION (fan-reimplementation rules doc setup step: "Shuffle the pilgrim deck + remaining party
     // cards + holding pile together to form the tavern deck"; post-mission step: "The pilgrim deck is dissolved —
