@@ -16,10 +16,11 @@ function ZoneCardRow({ cards }: { cards: Card[] }) {
 
 /**
  * One visual home for every mission's "shared pile of cards sitting on the table doing something to the
- * fight" mechanic — missionZone (rolling buff, vengeance tally, ascending chain, banish-pile-fed zone, etc.),
- * the separate pilgrimZone, and the beast deck (Mission 11) — replacing what used to be six different
- * mission-specific prose banners with one real, always-in-the-same-place card display, per the physical game's
- * own dedicated "MISSION ZONE" area on the playmat.
+ * fight" mechanic — missionZone (rolling buff, vengeance tally, ascending chain, banish-pile-fed zone, etc.)
+ * and the beast deck (Mission 11) — replacing what used to be six different mission-specific prose banners with
+ * one real, always-in-the-same-place card display, per the physical game's own dedicated "MISSION ZONE" area on
+ * the playmat. Mission 7's Pilgrims no longer get their own panel here — they're a hand-trap now (see
+ * GameState.pilgrimMechanic), sitting in the owning player's own hand rather than any shared zone.
  */
 export function MissionZonePanel({ state }: { state: ClientGameState }) {
   const zoneTotal = state.missionZone.reduce((sum, c) => sum + cardValue(c), 0);
@@ -42,9 +43,10 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
     if (state.zoneClosed) {
       caption = 'Purged and closed for good.';
     } else {
-      const top = state.missionZone[state.missionZone.length - 1];
-      const needs = top ? cardValue(top) + 1 : 1;
-      caption = `Ascending run — needs a ${needs} next. Non-Pilgrim cards here buff the enemy's attack.`;
+      // Required value is tracked by POSITION (length + 1), not the top card's own printed value — the
+      // mission's "2/5" wildcard can fill an out-of-order slot (see rules.ts's matchesAscendingZoneSlot).
+      const needs = state.missionZone.length + 1;
+      caption = `Ascending run — needs a ${needs} next, free from the attack that just landed a kill. Non-Pilgrim cards here buff the enemy's attack.`;
     }
   } else if (state.missionZone.length > 0) {
     caption = `Feeds the enemy +${zoneTotal} attack and matching immunity.`;
@@ -59,19 +61,14 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
             {caption && <span className="mission-zone-caption">{caption}</span>}
           </div>
           <ZoneCardRow cards={state.missionZone} />
-        </div>
-      )}
-      {state.pilgrimMechanic && (state.pilgrimZone.length > 0 || state.pilgrimDeckCount > 0) && (
-        <div className="mission-zone-panel">
-          <div className="mission-zone-header">
-            <span className="mission-zone-title">🌊 Pilgrims</span>
-            <span className="mission-zone-caption">
-              {state.pilgrimZone.length > 0
-                ? `Combined strength ${state.pilgrimZone.reduce((sum, c) => sum + cardValue(c), 0)} — matching an exact play banishes one; every kill burns that much off the reserve deck.`
-                : `${state.pilgrimDeckCount} left in the pilgrim deck.`}
-            </span>
-          </div>
-          <ZoneCardRow cards={state.pilgrimZone} />
+          {state.ascendingZone && state.zoneCommittedPlay.length > 0 && (
+            <div className="mission-zone-header">
+              <span className="mission-zone-caption">
+                Free from the kill just landed — place one below instead of attacking, at no extra cost:
+              </span>
+            </div>
+          )}
+          {state.ascendingZone && state.zoneCommittedPlay.length > 0 && <ZoneCardRow cards={state.zoneCommittedPlay} />}
         </div>
       )}
       {state.beastDeckMechanic && (

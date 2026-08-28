@@ -44,6 +44,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     pilgrimDeckCount: state.pilgrimDeck.length,
     ascendingZone: state.ascendingZone,
     zoneOpenForPlacement: state.zoneOpenForPlacement,
+    zoneCommittedPlay: state.zoneCommittedPlay,
     zoneClosed: state.zoneClosed,
     zonePurge: state.zonePurge,
     chanterWindow: state.chanterWindow,

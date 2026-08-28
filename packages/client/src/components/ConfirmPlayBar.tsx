@@ -70,7 +70,7 @@ export function ConfirmPlayBar({
         <button
           className="btn btn-secondary"
           disabled={!placeInZone.canPlace}
-          title={`Place the selected card in the mission zone (needs a card worth exactly ${placeInZone.requiredValue})`}
+          title={`Place a card from the attack that just landed a kill into the mission zone, free — needs a card worth exactly ${placeInZone.requiredValue}`}
           onClick={placeInZone.onPlace}
         >
           Place in Zone
