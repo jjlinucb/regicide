@@ -2254,6 +2254,78 @@ describe('legacy: mission 8 placement gating (zoneOpenForPlacement)', () => {
   });
 });
 
+describe('legacy: mission 8 chain-vs-wave math (documents the corrected "before Wave 2" framing)', () => {
+  it('the real Mission 8 data needs 9 chain placements but Wave 1 alone only offers 6 kill-gated placement windows', () => {
+    // Locks in the arithmetic behind the missions.ts comment correction above: a prior version of that comment
+    // implied the chain (and its purge) must finish before Wave 2 arrives — mathematically impossible, since the
+    // chain needs one placement per value 2-10 (9 total, after the preseeded Ace) but a placement window only
+    // opens right after a kill, and Wave 1 only has 6 enemies.
+    const mission8 = getMission(8)!;
+    const chainPlacementsNeeded = 9; // values 2 through 10, on top of the preseeded Ace (presetMissionZone)
+    const wave1KillCount = mission8.enemies.slice(0, 6).length;
+    const totalKillCount = mission8.enemies.length;
+    expect(wave1KillCount).toBe(6);
+    expect(totalKillCount).toBe(12);
+    expect(wave1KillCount).toBeLessThan(chainPlacementsNeeded); // Wave 1 alone can never finish the chain
+    // The whole mission's kills (minus the very last, whose window never opens — see finishEnemyDefeatTail's
+    // castleDeck.length === 0 branch) comfortably cover the 9 needed — a whole-mission goal, not a Wave-1 cutoff.
+    expect(totalKillCount - 1).toBeGreaterThanOrEqual(chainPlacementsNeeded);
+  });
+
+  it('BEHAVIORAL: 6 kill-gated placements (Wave 1 alone) stall the chain at required=8, short of the purge; the next 3 (spilling into Wave 2) finish it', () => {
+    const puppy: Card = { id: 'puppy', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true };
+    // Enemies are immune to whatever suit their own `suit` field names (see LegacyEnemySpec) — 'H' here, so the
+    // Diamond-suited kill cards below are never blocked. Healths are set to exactly the matching kill card's
+    // value so each play is a clean exact kill. A harmless 10th "Trailer" enemy keeps the castle deck non-empty
+    // after the value-10 kill, so that kill's own placement window still opens (mirrors the real mission's own
+    // trailing margin — see the missions.ts comment above on the very-last-kill edge case).
+    const wave1: LegacyEnemySpec[] = [2, 3, 4, 5, 6, 7].map((h, i) => ({ name: `Wave1 Troll ${i}`, suit: 'H', health: h, attack: 0 }));
+    const wave2: LegacyEnemySpec[] = [8, 9, 10].map((h, i) => ({ name: `Wave2 Wyvern ${i}`, suit: 'H', health: h, attack: 0 }));
+    const trailer: LegacyEnemySpec = { name: 'Trailer', suit: 'H', health: 100, attack: 0 };
+
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'wave-math-test',
+      party: buildInitialParty(),
+      enemies: [...wave1, ...wave2, trailer],
+      jesterCount: 0,
+      ascendingZone: true,
+      presetMissionZone: [puppy],
+    });
+    let state = ensureOk(res).state;
+
+    const killCards: SuitedCard[] = (['2', '3', '4', '5', '6', '7', '8', '9', '10'] as const).map((rank) => ({
+      id: `kill-${rank}`,
+      kind: 'suited' as const,
+      suit: 'D' as const,
+      rank,
+      pilgrim: true,
+    }));
+    state = rig(state, killCards);
+
+    // Wave 1: kill all 6 Trolls, placing the matching card each time.
+    for (const card of killCards.slice(0, 6)) {
+      state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] })).state;
+      expect(state.zoneOpenForPlacement).toBe(true);
+      state = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: card.id })).state;
+    }
+    // puppy + 6 placements (values 2-7) — required next is 8, and Wave 1 has nothing left to offer.
+    expect(state.missionZone.length).toBe(7);
+    expect(state.zoneClosed).toBe(false);
+
+    // Wave 2: the remaining 3 kills (values 8, 9, 10) finish the chain and trigger the purge.
+    for (const card of killCards.slice(6, 9)) {
+      state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] })).state;
+      expect(state.zoneOpenForPlacement).toBe(true);
+      state = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: card.id })).state;
+    }
+    expect(state.zoneClosed).toBe(true);
+    expect(state.turnPhase).toBe('AWAIT_ZONE_PURGE');
+  });
+});
+
 describe('legacy: Chanter class power (chant — every player draws at once, then trims back down)', () => {
   function chanterCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
     return { ...suited(suit, rank), chanter: true, ...(special ? { special: 'ENCORE' as const } : {}) };
