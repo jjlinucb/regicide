@@ -34,6 +34,14 @@ export interface Mission {
    * the same identity at mission end.
    */
   sidelineIdentity?: { suit: Suit; rank: Rank };
+  /**
+   * UNSOURCED, per John directly: High Arcana (Mission 1's reward recruit, 25 of Diamonds) is actually Mission
+   * 12's final boss and is never meant to be a playable party card at all — he sits out every mission between
+   * his Mission 1 recruitment and Mission 12's own reveal (see this file's Mission 3 comment, which first flagged
+   * this as a gap; RoomManager's startLegacyMission applies the same suit+rank filter sidelineIdentity uses,
+   * just as its own separate flag since sidelineIdentity is already spoken for by Mission 11's Esme).
+   */
+  sidelineHighArcana?: boolean;
   /** See GameState.standingJesters. */
   standingJesters?: boolean;
   /** See GameState.discardTopBuffsAttack. */
@@ -261,6 +269,10 @@ export const MISSIONS: Mission[] = [
     // the corrupting-a-card and adding-a-recruit beats ARE this mission's actual reward, not just narration —
     // see reward.corruptAnotherCard and the "High Arcana" recruit below.
     exactKillToReserveDeck: true,
+    // Same standing-Jester house rule as Missions 2/3 (see GameState.standingJesters), now extended to every
+    // mission per John's own call — no reason the earliest, tutorial-baseline mission should be the one place a
+    // drawn-but-unused Jester can still go stale in the deck.
+    standingJesters: true,
     // Reward: the Kinfolk Flute relic only — each player gets a personal storage slot on the flute, and may bank
     // one hand card worth 2-5 onto it (once per turn, a free side-action alongside their normal play). It sits
     // there for as long as needed until a matching-rank hand card lets them play the two together as a combo
@@ -312,6 +324,8 @@ export const MISSIONS: Mission[] = [
     // fixed/sourced enemy order, this brood's six heads should come out shuffled, and reshuffled again on every
     // retry after a loss — not the same fixed sequence every attempt (see engine.ts's startLegacyMission).
     randomizeEnemyOrder: true,
+    // High Arcana (Mission 1's own reward recruit) sits out here too — see MissionDef.sidelineHighArcana.
+    sidelineHighArcana: true,
     // Reward: Dual-class Stickers — 4 random existing party members each gain a second class icon, so that
     // single card triggers both class powers whenever it's played.
     reward: { recruits: [], dualClassStickers: 4 },
@@ -443,6 +457,10 @@ export const MISSIONS: Mission[] = [
     // GameState.discardCleanupLowToHigh / engine.ts's pushToDiscardPile), instead of an arbitrary order that let
     // the highest card played land on top and hand discardTopBuffsAttack its own worst-case buff right back.
     discardCleanupLowToHigh: true,
+    // Same standing-Jester house rule as Missions 1-3 (see GameState.standingJesters), extended to every mission.
+    standingJesters: true,
+    // High Arcana sits out here too — see MissionDef.sidelineHighArcana.
+    sidelineHighArcana: true,
     // Reward: two relics, not the Mage/Cleric recruits the shipped version originally granted here. Beast
     // Companions (x4) play by the same Animal Companion pairing rule but copy the paired card's strength instead
     // of contributing their own flat value (see rules.ts's validatePlayShape); the Scarlet Whistle then opens the
@@ -543,6 +561,8 @@ export const MISSIONS: Mission[] = [
     // applyCorruptAnotherCard) and a second round of Dual-class Stickers. Myla (value 7) — who spent this fight
     // as an ordinary reserve-deck card, not a mission-zone fixture (see extraReserveCards above) — now joins the
     // party for real: a normal, drawable, playable Cleric card from Mission 6 onward.
+    standingJesters: true,
+    sidelineHighArcana: true,
     reward: {
       recruits: [recruit('Haror', 'REAVER', '5', 'C'), recruit('Myla', 'CLERIC', '7')],
       dualClassStickers: 4,
@@ -602,6 +622,8 @@ export const MISSIONS: Mission[] = [
     // rank-8 party card (see party.ts's applyGuardianSticker), and the Azure Emblem relic — sourced fix: whenever
     // a Mage joins an attack from here on, the Mage's OWN player gets one chance to bank one of that play's Mage
     // card(s) onto the reserve deck instead of losing it to the discard pile.
+    standingJesters: true,
+    sidelineHighArcana: true,
     reward: {
       recruits: [recruit('Ferro', 'GUARDIAN', '3', 'S')],
       relics: ['AZURE_EMBLEM'],
@@ -651,6 +673,8 @@ export const MISSIONS: Mission[] = [
     // Reward: the Druid faction — 4 permanent new recruits, survivors themselves once, who learned something
     // from the Well before the party pulled them out. Playing one activates Regrowth: salvage cards back out of
     // the banish pile and return them to the reserve deck — Zolgar's Wellspring salvages 2 instead of 1.
+    standingJesters: true,
+    sidelineHighArcana: true,
     reward: {
       recruits: [
         recruit('Tolman', 'DRUID', '3', 'H'),
@@ -785,6 +809,8 @@ export const MISSIONS: Mission[] = [
     //    not identity — see party.ts's applyEvergreenUpgradeByName's doc comment) to Evergreen regardless of which
     //    mission actually recruited him, so that step is unaffected by any of this.
     //  - "Corrupt another card" — reuses the existing corruptAnotherCard reward step (see party.ts).
+    standingJesters: true,
+    sidelineHighArcana: true,
     reward: {
       recruits: [specialRecruit('Bram the Refrainkeeper', 'CHANTER', '9', 'S')],
       corruptAnotherCard: true,
@@ -877,6 +903,8 @@ export const MISSIONS: Mission[] = [
     // cards, so his suit+rank (Spades/8) is already claimed by a pre-existing party member — a suit+rank lookup
     // would silently upgrade THAT unrelated card instead (see party.ts's own doc comment for the full reasoning,
     // caught by this pass's own regression test).
+    standingJesters: true,
+    sidelineHighArcana: true,
     reward: {
       recruits: [],
       relics: ['EVERGREEN_MOTHER'],
@@ -953,6 +981,8 @@ export const MISSIONS: Mission[] = [
     //    exact hit — but at a lower confidence than those two (this shipped implementation was already an
     //    explicit community-research guess, not a transcript detail, before that research pass). Left unchanged
     //    by this pass rather than folded in silently; a candidate for a future, separately-scoped correction.
+    standingJesters: true,
+    sidelineHighArcana: true,
     reward: {
       recruits: [],
     },
@@ -1032,6 +1062,8 @@ export const MISSIONS: Mission[] = [
     // party.ts's applyEvergreenUpgrade). The 4 Beast Companion cards were never removed from the persisted roster
     // to begin with (same as Esme, they only sat out this one mission's active fight), so they simply return
     // unchanged — the source describes no further pruning or pick for them at this mission.
+    standingJesters: true,
+    sidelineHighArcana: true,
     reward: {
       recruits: [],
       upgradeSidelinedCard: { suit: 'C', rank: '6' },
@@ -1100,6 +1132,10 @@ export const MISSIONS: Mission[] = [
       corruptedHero('Maren the Fallen', 'C', '9'),
       corruptedHero('Dask Emberwane', 'S', '6'),
     ],
+    // Same standing-Jester house rule as every other mission — see GameState.standingJesters. No
+    // sidelineHighArcana here: this is the mission where High Arcana himself is unmasked as The Hierarch, not a
+    // playable party card to exclude.
+    standingJesters: true,
     // No reward: the campaign's final mission — completing it ends the story, nothing further to grant. Some
     // pasted community research describes an un-banishable restored-card "immunity shield" and a Paladin power
     // that bypasses enemy immunity outright; neither appears anywhere in the transcript, so neither was used —

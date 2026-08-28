@@ -477,6 +477,12 @@ export class RoomManager {
       const { suit, rank } = mission.sidelineIdentity;
       missionParty = missionParty.filter((c) => !(c.kind === 'suited' && c.suit === suit && c.rank === rank));
     }
+    // High Arcana (Mission 1's own reward recruit) is Mission 12's final boss and never a playable party card in
+    // between — same filter shape as sidelineIdentity above, just its own flag since Mission 11 already uses
+    // sidelineIdentity for Esme (see missions.ts's MissionDef.sidelineHighArcana).
+    if (mission.sidelineHighArcana) {
+      missionParty = missionParty.filter((c) => !(c.kind === 'suited' && c.suit === 'D' && c.rank === '25'));
+    }
 
     // Beast Companion pool (Mission 4's reward, sourced — see tutorial_vids/summaries/mission-4.md): Mission 11's
     // own beastDeckMechanic needs all 4 at once for its finale mechanic (buildBeastDeck only ever scans `party` —
