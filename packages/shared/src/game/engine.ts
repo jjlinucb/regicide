@@ -876,16 +876,25 @@ function finishDeferredAttackTurn(state: GameState, blockNextAttack: boolean): E
  * GameState.zoneVengeanceOnKill / finishEnemyDefeatTail). Absent for the recursive splash-damage self-call
  * (Mission 5's exactKillSplashDamage — never combined with Mission 6's zoneVengeanceOnKill in practice, but
  * threaded through anyway so a chained kill from the same play stays covered by the same shield).
+ * `forcedPlay` — true when the play that landed this hit only happened because YIELD was rejected by
+ * allOtherPlayersYieldedLastTurn (every other player at the table had already yielded, leaving the current player
+ * no legal way to pass — see playCards/resolveComboAssist, which compute this fresh from state right before
+ * calling in). Exempts the exactKillOnly overkill-recycle branch just below: with no real choice but to play
+ * *something*, an overkill here isn't a decision the player made, so the enemy should go down for good like any
+ * other kill instead of shrugging it off and healing (see legacy-mission-playtest-findings for the bug this
+ * closes). Absent (false) for the recursive splash-damage self-call and for CLAIM_JESTER's call, neither of
+ * which is a response to a rejected yield.
  */
-function dealDamageAndCheckDefeat(state: GameState, damage: number, attackIncludesGuardian = false): boolean {
+function dealDamageAndCheckDefeat(state: GameState, damage: number, attackIncludesGuardian = false, forcedPlay = false): boolean {
   const enemy = state.currentEnemy!;
   enemy.damageTaken += damage;
   const remaining = enemy.maxHealth - enemy.damageTaken;
   if (remaining > 0) return false;
 
-  if (state.ruleset === 'legacy' && state.exactKillOnly && remaining < 0) {
+  if (state.ruleset === 'legacy' && state.exactKillOnly && remaining < 0 && !forcedPlay) {
     // Overkill on an exact-kill-only enemy doesn't defeat it — it recycles to the back of the enemy line,
-    // wounds healed, to be fought again later (see GameState.exactKillOnly).
+    // wounds healed, to be fought again later (see GameState.exactKillOnly). Exempted when forcedPlay is true —
+    // see this function's own doc comment.
     log(state, `${enemyLabel(enemy)} shrugs off the overkill and slinks to the back of the line, wounds healed!`);
     state.discardPile.push(...enemy.tableCards);
     enemy.damageTaken = 0;
@@ -917,7 +926,17 @@ function dealDamageAndCheckDefeat(state: GameState, damage: number, attackInclud
   if (state.ruleset === 'legacy') {
     // Legacy enemies always go to the discard pile — no exact-damage/return-to-deck effect (that's mission-specific
     // in the physical game, and doesn't apply cleanly since Legacy enemies don't carry a J/Q/K-style card value).
-    log(state, state.exactKillOnly ? `${enemyLabel(enemy)} felled by an exact hit — banished for good!` : `${enemyLabel(enemy)} defeated!`);
+    // `state.exactKillOnly` alone used to be enough to tell this was an exact hit, since every overkill was caught
+    // by the recycle branch above — no longer true now that a forcedPlay overkill can fall through here too, so
+    // this checks `remaining === 0` directly instead.
+    log(
+      state,
+      state.exactKillOnly
+        ? remaining === 0
+          ? `${enemyLabel(enemy)} felled by an exact hit — banished for good!`
+          : `${enemyLabel(enemy)} is overwhelmed by the forced attack — banished for good despite the overkill!`
+        : `${enemyLabel(enemy)} defeated!`,
+    );
     if (state.exactKillToReserveDeck && remaining === 0) {
       // Mission 4: an exact hit seals a card representing the specimen onto the top of the reserve deck instead
       // of letting it fall into the discard pile — its value mirrors the enemy's attack tier (10/15/20).
@@ -1500,8 +1519,12 @@ function startEndlessRound(state: GameState): EngineResult {
  * class powers, damage, and the resulting AWAIT_DEFEND/turn-advance. Shared by the immediate PLAY_CARDS path
  * (including a Kinfolk Flute combo card folded in), by RESOLVE_COMBO once an open Scarlet Whistle assist window
  * is locked in, and by claimJester's synthetic 8-strength Jester attack.
+ * `forcedPlay` — see dealDamageAndCheckDefeat's own doc comment; threaded straight through to it. playCards and
+ * resolveComboAssist both compute this fresh (allOtherPlayersYieldedLastTurn(state)) right before calling in,
+ * since neither path has done anything by that point that would change what that check reports; claimJester never
+ * passes it (defaults to false) since a Jester claim isn't a response to a rejected yield.
  */
-function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null): EngineResult {
+function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null, forcedPlay = false): EngineResult {
   const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
 
@@ -1665,7 +1688,7 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   // Mission 6, sourced fix: a winning attack that includes a Guardian cancels Myla's zoneVengeanceOnKill
   // team-damage step entirely (see finishEnemyDefeatTail) — a documented mechanic missing from the shipped
   // version. Inert on every other mission, since guardianCards is always empty there.
-  const defeated = dealDamageAndCheckDefeat(state, damage, guardianCards.length > 0);
+  const defeated = dealDamageAndCheckDefeat(state, damage, guardianCards.length > 0, forcedPlay);
 
   if (state.phase !== 'IN_PROGRESS') return ok(state);
 
@@ -1804,7 +1827,11 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
     return ok(state);
   }
 
-  return resolveCommittedPlay(state, player, shapeCards, null);
+  // See dealDamageAndCheckDefeat's own doc comment: true here means every other player had already yielded, so
+  // this player's own YIELD would have been rejected by allOtherPlayersYieldedLastTurn — this play was compulsory,
+  // not a voluntary choice to attack (let alone to overkill).
+  const forcedPlay = allOtherPlayersYieldedLastTurn(state);
+  return resolveCommittedPlay(state, player, shapeCards, null, forcedPlay);
 }
 
 /**
@@ -1877,9 +1904,14 @@ function resolveComboAssist(state: GameState, action: Extract<GameAction, { type
 
   const player = currentPlayer(state);
   const cards = state.currentEnemy!.tableCards.filter((c) => state.comboAssist!.cardIds.includes(c.id));
+  // Recomputed fresh rather than carried over from playCards' own opening of this window — nothing that happens
+  // during an open assist window (only ASSIST_COMBO, which never touches lastActionWasYield) can change what this
+  // reports, so it's exactly what it would have been back when the attacker committed to this play instead of
+  // yielding. See dealDamageAndCheckDefeat's own doc comment.
+  const forcedPlay = allOtherPlayersYieldedLastTurn(state);
   state.comboAssist = null;
   state.turnPhase = 'AWAIT_PLAY';
-  return resolveCommittedPlay(state, player, cards, null);
+  return resolveCommittedPlay(state, player, cards, null, forcedPlay);
 }
 
 function yieldTurn(state: GameState, action: Extract<GameAction, { type: 'YIELD' }>): EngineResult {

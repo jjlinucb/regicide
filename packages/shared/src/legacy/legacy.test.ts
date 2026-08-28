@@ -205,6 +205,40 @@ describe('legacy: exact-kill-only recycling (hydra mission)', () => {
     state = res.state;
     expect(state.phase).toBe('WON');
   });
+
+  it('a forced play (YIELD rejected because everyone else already yielded) that overkills defeats the enemy for real, instead of recycling it', () => {
+    // Same overkill setup as the voluntary-overkill test above (15 taken, +10 overkills a 20-health hydra), but
+    // with a second player whose last action was a yield — so allOtherPlayersYieldedLastTurn is true and the
+    // current player has no legal way to yield instead of playing.
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0', 'p1'],
+      playerNames: ['Player 0', 'Player 1'],
+      seed: 'hydra-forced-test',
+      party: buildInitialParty(),
+      enemies: [hydra, { name: 'Second Hydra', suit: 'C', health: 15, attack: 5 }],
+      jesterCount: 0,
+      exactKillOnly: true,
+    });
+    let state = ensureOk(res).state;
+    state = rig(state, [suited('C', '10')], { damageTaken: 15 });
+    state.lastActionWasYield[1] = true; // Player 1 (the only other player) already yielded last turn
+
+    // YIELD is rejected outright — the current player has no legal way to pass.
+    const yieldRes = applyAction(state, { type: 'YIELD', playerId: state.players[0].id });
+    expect(yieldRes.ok).toBe(false);
+
+    // Forced to play instead: this overkills the hydra by 5, but since the player never had a real choice, the
+    // enemy must go down for good rather than shrugging it off and healing back up.
+    const playRes = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }),
+    );
+    state = playRes.state;
+    expect(state.currentEnemy?.name).toBe('Second Hydra'); // moved on to the next enemy
+    expect(state.castleDeck.length).toBe(0); // NOT recycled to the back of the line (contrast: 1, healed, above)
+    expect(state.log.some((e) => e.message.includes('shrugs off the overkill'))).toBe(false);
+    expect(state.log.some((e) => e.message.includes('overwhelmed by the forced attack'))).toBe(true);
+  });
 });
 
 describe('legacy: feign death', () => {
