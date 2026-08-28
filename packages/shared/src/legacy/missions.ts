@@ -34,8 +34,8 @@ export interface Mission {
    * the same identity at mission end.
    */
   sidelineIdentity?: { suit: Suit; rank: Rank };
-  /** See GameState.jesterClaimNextPlayerOnly. */
-  jesterClaimNextPlayerOnly?: boolean;
+  /** See GameState.standingJesters. */
+  standingJesters?: boolean;
   /** See GameState.discardTopBuffsAttack. */
   discardTopBuffsAttack?: boolean;
   /** See GameState.exactKillToReserveDeck. */
@@ -300,9 +300,14 @@ export const MISSIONS: Mission[] = [
       enemy('The Nine-Coiled Matriarch', 'WARRIOR', 20, 10, 'PALADIN'),
     ],
     exactKillOnly: true,
-    // Modified Jester rule for this mission only: the oppressive dual immunities mean only the very next
-    // player in turn order may claim a played Jester and ignore them — not any player at the table.
-    jesterClaimNextPlayerOnly: true,
+    // UNSOURCED HOUSE RULE (John's own call from the physical game, not the tutorial videos): this mission's 2
+    // Jesters are never shuffled into the reserve deck — with only 6 enemies and heavy dual-immunity gating, they
+    // could sit undrawn for the whole fight. Instead they're a standing resource any player may use, anytime, as
+    // their own turn's action (see GameState.standingJesters / GameAction.USE_STANDING_JESTER) — no player needs
+    // to draw one into hand first. This replaces an earlier, narrower house rule that instead restricted a
+    // hand-played Jester's claim to only the next player in turn order; that no longer applies now that any
+    // player can use a standing Jester directly, for themselves.
+    standingJesters: true,
     // UNSOURCED JUDGMENT CALL (per the user's own knowledge of the physical game): unlike every other mission's
     // fixed/sourced enemy order, this brood's six heads should come out shuffled, and reshuffled again on every
     // retry after a loss — not the same fixed sequence every attempt (see engine.ts's startLegacyMission).

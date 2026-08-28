@@ -288,6 +288,26 @@ export function GamePage({
             </div>
           </div>
         )}
+        {isLegacy && isMyTurn && state.turnPhase === 'AWAIT_PLAY' && state.standingJesters.length > 0 && (
+          <div className="legacy-jester-claim-banner">
+            <span>
+              🃏 {state.standingJesters.length} standing Jester{state.standingJesters.length > 1 ? 's' : ''} available — use one now for a
+              free 8-strength attack, ignoring this enemy's immunity, then draw back up to your hand limit. Pick a class:
+            </span>
+            <div className="jester-picker-choices">
+              {(Object.keys(SUIT_LABEL) as Suit[]).map((suit) => (
+                <button
+                  key={suit}
+                  type="button"
+                  className="btn"
+                  onClick={() => sendAction({ type: 'USE_STANDING_JESTER', playerId: myPlayerId, attackSuit: suit })}
+                >
+                  {SUIT_LABEL[suit]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {isComboAssistWindow && (
           <div className="legacy-jester-claim-banner">
             {isComboAttacker ? (
