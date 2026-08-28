@@ -721,18 +721,28 @@ function resolveSuitPowers(
     !corruptedSuits.includes(s) &&
     (isSuitBlockedByImmunity(s, enemy) || state.zoneImmuneSuits.includes(s) || pileImmuneSuits.includes(s));
   const immuneNoun = state.ruleset === 'legacy' ? 'class' : 'suit';
+  // Which of blocked()'s three OR'd sources is actually responsible for a given blocked suit, so the log names
+  // the real cause instead of always implying the enemy's own printed class/suit. Checked in the same precedence
+  // blocked()'s OR uses (own class, then Mission 12's mission-zone flip, then Mission 11's discard/banish pile
+  // tops), so a suit blocked by more than one source at once reports the first that applies. Only meaningful to
+  // call when blocked(s) is already known true.
+  const blockedClause = (s: 'H' | 'D' | 'C' | 'S') => {
+    if (isSuitBlockedByImmunity(s, enemy)) return `the enemy is immune to its own ${immuneNoun}`;
+    if (state.zoneImmuneSuits.includes(s)) return `the enemy is immune to ${immuneNoun} via the mission zone`;
+    return `the enemy is immune to ${immuneNoun} via the discard/banish piles`;
+  };
 
   if (suits.includes('H')) {
-    if (blocked('H')) log(state, `${powerLabel(state, 'H')} blocked — the enemy is immune to its own ${immuneNoun}.`);
+    if (blocked('H')) log(state, `${powerLabel(state, 'H')} blocked — ${blockedClause('H')}.`);
     else resolveHearts(state, totalValue, hasSpecial(cards, 'REVIVE') ? 2 : 0);
   }
   if (suits.includes('D')) {
-    if (blocked('D')) log(state, `${powerLabel(state, 'D')} blocked — the enemy is immune to its own ${immuneNoun}.`);
+    if (blocked('D')) log(state, `${powerLabel(state, 'D')} blocked — ${blockedClause('D')}.`);
     else resolveDiamonds(state, totalValue, hasSpecial(cards, 'INSPIRE') ? 2 : 0);
   }
   let clubsMultiplier = 1;
   if (suits.includes('C')) {
-    if (blocked('C')) log(state, `${powerLabel(state, 'C')} blocked — the enemy is immune to its own ${immuneNoun}.`);
+    if (blocked('C')) log(state, `${powerLabel(state, 'C')} blocked — ${blockedClause('C')}.`);
     else {
       clubsMultiplier = hasSpecial(cards, 'CLEAVE') ? 3 : 2;
       if (clubsMultiplier === 3) log(state, `${powerLabel(state, 'C')}: damage tripled (Cleave).`);
@@ -741,7 +751,7 @@ function resolveSuitPowers(
   if (suits.includes('S')) {
     if (blocked('S')) {
       enemy.blockedSpadesShield += totalValue;
-      log(state, `${powerLabel(state, 'S')} blocked — the enemy is immune to its own ${immuneNoun} (shield banked for later).`);
+      log(state, `${powerLabel(state, 'S')} blocked — ${blockedClause('S')} (shield banked for later).`);
     } else if (hasSpecial(cards, 'BULWARK')) {
       enemy.spadesShield = enemy.baseAttack;
       log(state, `${powerLabel(state, 'S')}: the enemy's attack is reduced to 0 (Bulwark).`);

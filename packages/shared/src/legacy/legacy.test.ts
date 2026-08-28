@@ -3802,6 +3802,62 @@ describe('legacy: mission 12 start-of-turn banish-pile zone flip', () => {
   });
 });
 
+describe('legacy: resolveSuitPowers blocked-log names the actual immunity source', () => {
+  it("distinguishes the enemy's own class from Mission 12's mission-zone immunity and Mission 11's discard/banish-pile immunity, instead of always claiming the enemy's own class", () => {
+    // A single Boss immune (by its own printed class) to Hearts only. Diamonds is blocked purely via a
+    // Mission-12-style zoneImmuneSuits entry; Clubs is blocked purely via Mission 11's pileTopEnemyBonus reading
+    // the discard pile's top card — neither mission's OWN flip/flip-timing mechanic is exercised here, just the
+    // fields resolveSuitPowers actually reads (see its comment: the check "isn't gated per mission").
+    const enemy: LegacyEnemySpec = { name: 'Test Boss', suit: 'H', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    state.zoneImmuneSuits = ['D'];
+    state.pileTopEnemyBonus = true;
+    state.discardPile = [suited('C', 'K')]; // top of discard is Clubs-suited — pile-immune, not the enemy's own class
+
+    const combo = [suited('H', '2'), suited('D', '2'), suited('C', '2')]; // same rank, combo total 6 — under the cap
+    state = rig(state, combo);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: combo.map((c) => c.id) }),
+    );
+
+    const blockedMessages = res.state.log.map((e) => e.message).filter((m) => m.includes('blocked'));
+    expect(blockedMessages.length).toBe(3); // Hearts, Diamonds, and Clubs all blocked, for three different reasons
+
+    const inherent = blockedMessages.filter((m) => m.includes('is immune to its own class') && !m.includes('via'));
+    const zone = blockedMessages.filter((m) => m.includes('via the mission zone'));
+    const pile = blockedMessages.filter((m) => m.includes('via the discard/banish piles'));
+    expect(inherent.length).toBe(1); // Hearts — the enemy's own printed class
+    expect(zone.length).toBe(1); // Diamonds — the mission zone, not the enemy's own class
+    expect(pile.length).toBe(1); // Clubs — the discard/banish pile tops, not the enemy's own class
+
+    // The bug: all three used to read identically ("immune to its own class") regardless of source.
+    expect(new Set([inherent[0], zone[0], pile[0]]).size).toBe(3);
+  });
+
+  it('still says "its own class" for a Mission-11 pile-driven block that happens to match the class the pile-top card actually belongs to', () => {
+    // Regression guard for the precedence order: an enemy inherently immune to Hearts, with a Hearts card ALSO
+    // sitting on top of the discard pile, must report the inherent reason (its own class), not the pile — the
+    // two sources overlap on the same suit here, and inherent immunity takes precedence in resolveSuitPowers's
+    // own blocked() check (isSuitBlockedByImmunity is checked first).
+    const enemy: LegacyEnemySpec = { name: 'Overlap Boss', suit: 'H', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    state.pileTopEnemyBonus = true;
+    state.discardPile = [suited('H', '9')]; // top of discard is ALSO Hearts — same suit as the enemy's own class
+    const heartsCard = suited('H', '5');
+    state = rig(state, [heartsCard]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [heartsCard.id] }),
+    );
+
+    const blockedMessages = res.state.log.map((e) => e.message).filter((m) => m.includes('blocked'));
+    expect(blockedMessages.length).toBe(1);
+    expect(blockedMessages[0]).toContain('is immune to its own class');
+    expect(blockedMessages[0]).not.toContain('via the discard/banish piles');
+  });
+});
+
 describe('legacy: mission 12 defeat cleanup (banish the mission zone, then the enemy, then the entire discard pile — order preserved)', () => {
   it('banishes all three groups in order and empties both the mission zone and the discard pile', () => {
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 10, attack: 0 };
