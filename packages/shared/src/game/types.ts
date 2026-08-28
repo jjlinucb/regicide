@@ -282,6 +282,21 @@ export type TurnPhase =
   | 'AWAIT_BARD_SURRENDER';
 
 /**
+ * Legacy-only (Mission 8): what engine.ts's resolveChant does once the last pending player finishes trimming
+ * their hand back down from an open chant window (see GameState.chanterWindow):
+ * - `deferredAttack` — the play that opened the chant did NOT defeat the enemy, so the play's own deferred
+ *   enemy-attack-back tail (mirroring an ordinary play's resolution) still needs to run once trimming is done,
+ *   honoring a Guardian shield (`blockNextAttack`) raised in the same play.
+ * - `resumeResolved` — the play ALSO defeated the enemy: dealDamageAndCheckDefeat already fully resolved what
+ *   happens next (continue against the newly-revealed enemy, Mission 9's exact-kill rescue choice, etc.) before
+ *   the chant's forced draw ever ran. Restores that already-decided `turnPhase`/`pendingDamage` once trimming is
+ *   done, instead of resolving a deferred attack against an enemy that's already dead.
+ */
+export type ChanterResolution =
+  | { kind: 'deferredAttack'; blockNextAttack: boolean }
+  | { kind: 'resumeResolved'; turnPhase: TurnPhase; pendingDamage: number };
+
+/**
  * Legacy-only (Mission 9): one of the 3 captured piles seeding GameState.capturedPiles. `faceDown[0]` is the
  * next card to flip when `faceUp` is claimed or cycled away — see engine.ts's buildCapturedPiles/banishForRescue/
  * declineRescue.
@@ -523,10 +538,9 @@ export interface GameState {
    * Legacy-only (Mission 8): the open chant window, opened when a Chanter card is played (see SuitedCard.chanter).
    * Every player has already drawn the chant's card count at once, even past their hand limit; `pendingPlayerIds`
    * queues whoever is now over their hand limit and still needs to trim back down via RESOLVE_CHANT, front of
-   * the queue first. `blockNextAttack` mirrors a Guardian shield raised in the same play, applied once the last
-   * trim resolves and the turn's enemy-attack tail finally runs.
+   * the queue first. `onResolved` — see ChanterResolution — carries what to do once the last trim resolves.
    */
-  chanterWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
+  chanterWindow: { pendingPlayerIds: string[]; onResolved: ChanterResolution } | null;
   /**
    * Legacy-only (Mission 9): when true, gates the whole captured-piles deckbuilding mechanic — the 3
    * `capturedPiles`, the AWAIT_END_OF_TURN banish-to-rescue/decline choice at the end of every turn (skipped
@@ -872,7 +886,7 @@ export interface ClientGameState {
   /** See GameState.zonePurge. Public information — it's on the table. */
   zonePurge: { playerId: string } | null;
   /** See GameState.chanterWindow. Public information — it's on the table. */
-  chanterWindow: { pendingPlayerIds: string[]; blockNextAttack: boolean } | null;
+  chanterWindow: { pendingPlayerIds: string[]; onResolved: ChanterResolution } | null;
   /** See GameState.capturedPilesActive. */
   capturedPilesActive: boolean;
   /** See GameState.capturedPiles — each pile's face-down cards are redacted to a count, its face-up card is public. */

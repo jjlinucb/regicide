@@ -1,4 +1,4 @@
-import type { Card, CapturedPile, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit, SuitedCard, TurnPhase } from './types.js';
+import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit, SuitedCard, TurnPhase } from './types.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,
@@ -1668,10 +1668,23 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   const defeated = dealDamageAndCheckDefeat(state, damage, guardianCards.length > 0);
 
   if (state.phase !== 'IN_PROGRESS') return ok(state);
-  if (defeated) return ok(state); // enemy was defeated, same player continues against the next one
+
+  if (defeated) {
+    // Sourced fix: a Chanter's chant fires on ANY play it's part of, including one that also lands the killing
+    // blow — dealDamageAndCheckDefeat has already fully resolved what happens next (continue against the newly
+    // revealed enemy, Mission 9's exact-kill rescue choice, etc.); beginChant's forced draw (and any resulting
+    // trim window) now runs on top of that, restoring this already-decided turnPhase/pendingDamage once trimming
+    // is done rather than resolving a deferred attack against an enemy that's already dead (see
+    // ChanterResolution's 'resumeResolved'). The shipped version only ever called beginChant below this early
+    // return, so a play that included BOTH a Chanter and the killing blow silently dropped the chant entirely.
+    if (chantCount > 0) {
+      return beginChant(state, chantCount, { kind: 'resumeResolved', turnPhase: state.turnPhase, pendingDamage: state.pendingDamage });
+    }
+    return ok(state); // enemy was defeated, same player continues against the next one
+  }
 
   if (chantCount > 0) {
-    return beginChant(state, chantCount, guardianBlocksNextAttack);
+    return beginChant(state, chantCount, { kind: 'deferredAttack', blockNextAttack: guardianBlocksNextAttack });
   }
 
   // Azure Emblem (Mission 6 relic), sourced fix: whenever a Mage joins the attack, the Mage's OWN player gets
@@ -2255,21 +2268,33 @@ function resolveZonePurge(state: GameState, action: Extract<GameAction, { type: 
 }
 
 /**
+ * Legacy-only (Mission 8): runs whatever a chant's `onResolved` (see ChanterResolution) says to do once every
+ * pending player has trimmed back down — either resolving the play's own deferred enemy-attack-back tail, or
+ * restoring the turnPhase/pendingDamage dealDamageAndCheckDefeat had already resolved before the chant ran.
+ */
+function runChantResolution(state: GameState, onResolved: ChanterResolution): EngineResult {
+  if (onResolved.kind === 'deferredAttack') return finishDeferredAttackTurn(state, onResolved.blockNextAttack);
+  state.turnPhase = onResolved.turnPhase;
+  state.pendingDamage = onResolved.pendingDamage;
+  return ok(state);
+}
+
+/**
  * Legacy-only (Mission 8): opens (or immediately clears) a chant — every player at the table draws `count`
  * cards at once, even past their hand limit, then whoever's now over their limit trims back down one player at
- * a time via RESOLVE_CHANT. `blockNextAttack` mirrors a Guardian shield raised in the same play; it's carried
- * through to whenever the chant's tail (the deferred enemy-attack resolution) finally runs.
+ * a time via RESOLVE_CHANT. `onResolved` (see ChanterResolution) is carried through to whenever the chant's tail
+ * finally runs — either right away, if nobody ended up over their limit, or once the last trim resolves.
  */
-function beginChant(state: GameState, count: number, blockNextAttack: boolean): EngineResult {
+function beginChant(state: GameState, count: number, onResolved: ChanterResolution): EngineResult {
   const totalDrawn = state.players.reduce((sum, p) => sum + forceDrawCards(state, p, count), 0);
   if (totalDrawn > 0) log(state, `The chant draws ${totalDrawn} card(s) across the table.`);
 
   const pendingPlayerIds = state.players.filter((p) => p.hand.length > state.maxHandSize).map((p) => p.id);
   if (pendingPlayerIds.length === 0) {
-    return finishDeferredAttackTurn(state, blockNextAttack);
+    return runChantResolution(state, onResolved);
   }
 
-  state.chanterWindow = { pendingPlayerIds, blockNextAttack };
+  state.chanterWindow = { pendingPlayerIds, onResolved };
   state.turnPhase = 'AWAIT_CHANT_TRIM';
   log(state, `${pendingPlayerIds.length} player(s) are over their hand limit and must trim back down.`);
   return ok(state);
@@ -2299,14 +2324,13 @@ function resolveChant(state: GameState, action: Extract<GameAction, { type: 'RES
   state.discardPile.push(...cards);
   log(state, `${player.name} trims ${cards.length} card(s) back down to their hand limit.`);
 
-  const { blockNextAttack } = state.chanterWindow;
+  const { onResolved } = state.chanterWindow;
   if (rest.length === 0) {
     state.chanterWindow = null;
-    state.turnPhase = 'AWAIT_PLAY';
-    return finishDeferredAttackTurn(state, blockNextAttack);
+    return runChantResolution(state, onResolved);
   }
 
-  state.chanterWindow = { pendingPlayerIds: rest, blockNextAttack };
+  state.chanterWindow = { pendingPlayerIds: rest, onResolved };
   return ok(state);
 }
 

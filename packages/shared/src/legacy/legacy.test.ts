@@ -2518,7 +2518,10 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
     expect(state.players[0].hand.length).toBe(3);
     expect(state.players[1].hand.length).toBe(9);
     expect(state.turnPhase).toBe('AWAIT_CHANT_TRIM');
-    expect(state.chanterWindow).toEqual({ pendingPlayerIds: [player1Id], blockNextAttack: false });
+    expect(state.chanterWindow).toEqual({
+      pendingPlayerIds: [player1Id],
+      onResolved: { kind: 'deferredAttack', blockNextAttack: false },
+    });
   });
 
   it("rejects a trim attempt from anyone but the front of the queue, and rejects the wrong discard count", () => {
@@ -2571,6 +2574,62 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
     state = res.state;
 
     expect(state.players[0].hand.length).toBe(6); // 0 (played) + 6 drawn (Encore doubles 3 -> 6)
+  });
+
+  it('REGRESSION: a Chanter whose own play also lands the killing blow still fires the chant, then the same player continues against the newly-revealed enemy', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    const next: LegacyEnemySpec = { name: 'Drake', suit: 'S', health: 100, attack: 5 };
+    let state = startMission(1, [boss, next]);
+    // A single Diamonds Chanter card worth 5, with the current enemy's health set to exactly 5 — this one card
+    // both lands the killing blow AND should still trigger the chant (the bug: the shipped version's beginChant
+    // call sat behind the "enemy defeated" early return, so the chant was silently dropped whenever the killing
+    // play included a Chanter).
+    state = rig(state, [chanterCard('D', '5')], { maxHealth: 5 });
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    // The kill resolved (new enemy revealed, same player continues, no defend) ...
+    expect(state.currentEnemy?.name).toBe('Drake');
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+    expect(state.pendingDamage).toBe(0);
+    // ... AND the chant still fired: the played card is gone, then 5 were drawn back.
+    expect(state.players[0].hand.length).toBe(5);
+    expect(state.chanterWindow).toBeNull();
+  });
+
+  it('REGRESSION: when the killing play also overflows a hand, the chant trim window still opens, then resumes to "continue against the new enemy" instead of a deferred attack', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    const next: LegacyEnemySpec = { name: 'Drake', suit: 'S', health: 100, attack: 5 };
+    let state = startMission(2, [boss, next]); // hand limit 7 for 2 players
+    state = structuredClone(state);
+    state.players[0].hand = [chanterCard('D', '3')];
+    state.players[1].hand = Array.from({ length: 6 }, () => suited('H', '2'));
+    if (state.currentEnemy) state.currentEnemy.maxHealth = 3; // this single card is also the killing blow
+    const player0Id = state.players[0].id;
+    const player1Id = state.players[1].id;
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    // The kill already revealed the next enemy before the chant's trim window even opens.
+    expect(state.currentEnemy?.name).toBe('Drake');
+    expect(state.turnPhase).toBe('AWAIT_CHANT_TRIM');
+    expect(state.chanterWindow).toEqual({
+      pendingPlayerIds: [player1Id],
+      onResolved: { kind: 'resumeResolved', turnPhase: 'AWAIT_PLAY', pendingDamage: 0 },
+    });
+
+    const toDiscard = state.players[1].hand.slice(0, 2).map((c) => c.id);
+    const trimRes = ensureOk(applyAction(state, { type: 'RESOLVE_CHANT', playerId: player1Id, discardCardIds: toDiscard }));
+    state = trimRes.state;
+
+    // Resumes to "same player continues their turn against the new enemy" — NOT a deferred attack, since the
+    // enemy that would have attacked back is already dead.
+    expect(state.chanterWindow).toBeNull();
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+    expect(state.pendingDamage).toBe(0);
+    expect(state.currentPlayerIndex).toBe(0);
   });
 });
 
