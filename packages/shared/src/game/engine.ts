@@ -2350,16 +2350,24 @@ function useStandingJester(state: GameState, action: Extract<GameAction, { type:
  * power (discard the whole hand, redraw to max — CLAIM_JESTER); 'topUp' is Mission 2/3's own unsourced house rule
  * for their standing Jesters (just draw up to max, without discarding what's already held).
  *
- * Bug-fix (see GameState.pendingJesterRefill): if the synthetic attack didn't kill the enemy, the claimant now
- * owes a defend against its dealt damage (turnPhase is AWAIT_DEFEND). Refilling right here, before that defend
- * is resolved, would swap the claimant's hand out from under them while they're still deciding how to cover
- * that damage — turning what might have been a coverable hit into a lethal one. Defer the refill to defend()
- * instead; every other outcome (the enemy died, or dealt no damage back) has nothing left to resolve, so it
- * still refills immediately, exactly as before.
+ * Bug-fix (see GameState.pendingJesterRefill): if the synthetic attack didn't kill the enemy and refillMode is
+ * 'discard', the claimant now owes a defend against its dealt damage (turnPhase is AWAIT_DEFEND). Refilling right
+ * here, before that defend is resolved, would swap the claimant's hand out from under them while they're still
+ * deciding how to cover that damage — turning what might have been a coverable hit into a lethal one. Defer the
+ * refill to defend() instead; every other outcome (the enemy died, or dealt no damage back) has nothing left to
+ * resolve, so it still refills immediately, exactly as before.
  * (Routed through currentTurnPhase() rather than reading state.turnPhase inline: TS's control-flow narrowing
  * otherwise carries the 'AWAIT_PLAY' literal the caller assigned a few lines above straight through the
  * resolveCommittedPlay() call — which does reassign it internally, TS just has no way to see that — and flags
  * the comparison below as comparing non-overlapping literals. A function-call boundary resets that narrowing.)
+ *
+ * SOURCED FIX (live-play report — see mission-4-jester-empty-hand-defend memory note): 'topUp' (the standing
+ * Jester's own house rule) never discards anything already in hand — it only ever ADDS cards up to the hand
+ * limit — so the "swap the hand out from under them" risk above doesn't apply to it at all. Deferring it the same
+ * way 'discard' defers was actively harmful: a player whose hand was already empty before calling a standing
+ * Jester, against an enemy that survived and countered, was left facing a Defend with zero cards and no refill
+ * until AFTER a Defend they had nothing to pay with — an unwinnable trap. 'topUp' now always refills immediately,
+ * win or lose, dead or alive, so those cards are actually available for the Defend that follows.
  */
 function resolveJesterAttack(state: GameState, player: PlayerState, jesterCard: Card, refillMode: 'discard' | 'topUp'): EngineResult {
   state.currentEnemy!.tableCards.push(jesterCard);
@@ -2367,12 +2375,12 @@ function resolveJesterAttack(state: GameState, player: PlayerState, jesterCard: 
   const result = resolveCommittedPlay(state, player, [syntheticAttack], jesterCard);
   if (!result.ok || state.phase !== 'IN_PROGRESS') return result;
 
-  if (currentTurnPhase(state) === 'AWAIT_DEFEND') {
-    state.pendingJesterRefill = { playerId: player.id, mode: refillMode };
-  } else if (refillMode === 'discard') {
-    refillHandFromDeck(state, player, 'the Jester');
-  } else {
+  if (refillMode === 'topUp') {
     topUpHandFromDeck(state, player, 'the Jester');
+  } else if (currentTurnPhase(state) === 'AWAIT_DEFEND') {
+    state.pendingJesterRefill = { playerId: player.id, mode: refillMode };
+  } else {
+    refillHandFromDeck(state, player, 'the Jester');
   }
   return ok(state);
 }

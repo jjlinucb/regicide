@@ -1110,6 +1110,18 @@ describe('legacy: mission 2 standing Jesters (unsourced house rule)', () => {
     expect(hand.length).toBe(res.state.maxHandSize);
   });
 
+  it('SOURCED FIX (live-play report): refills the hand immediately even when the standing Jester attack leaves a Defend owed, so an empty hand is never stuck facing a Defend with nothing to discard', () => {
+    let state = startStandingJesterMission(1, 5); // enemy survives 8 dmg (100 health) and counters for 5
+    state = rig(state, []); // hand already empty before calling the standing Jester
+    const player = state.players[state.currentPlayerIndex];
+    const res = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id }));
+
+    expect(res.state.turnPhase).toBe('AWAIT_DEFEND'); // still owes a defend against the counter-attack
+    expect(res.state.pendingDamage).toBe(5);
+    expect(res.state.pendingJesterRefill).toBeNull(); // topUp never defers — already refilled
+    expect(res.state.players[0].hand.length).toBe(res.state.maxHandSize); // refilled BEFORE the defend, not after
+  });
+
   it('rejects using a standing Jester once none remain', () => {
     let state = startStandingJesterMission(1);
     const player = state.players[state.currentPlayerIndex];
