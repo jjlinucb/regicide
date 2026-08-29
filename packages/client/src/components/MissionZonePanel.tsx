@@ -23,9 +23,13 @@ function ZoneCardRow({ cards }: { cards: Card[] }) {
  * GameState.pilgrimMechanic), sitting in the owning player's own hand rather than any shared zone.
  */
 export function MissionZonePanel({ state }: { state: ClientGameState }) {
-  const zoneTotal = state.missionZone.reduce((sum, c) => sum + cardValue(c), 0);
+  // Mission 5's rolling zone (see GameState.rollingZoneCards) is a separate pile from the static missionZone every
+  // other zone mode uses — render whichever one this mission actually feeds, so the card row matches the caption's
+  // own total instead of always reading the (permanently empty, for this mission) missionZone.
+  const displayedZoneCards = state.rollingZoneBonus ? state.rollingZoneCards : state.missionZone;
+  const zoneTotal = displayedZoneCards.reduce((sum, c) => sum + cardValue(c), 0);
   const showMissionZone =
-    state.missionZone.length > 0 ||
+    displayedZoneCards.length > 0 ||
     state.rollingZoneBonus ||
     state.zoneVengeanceOnKill ||
     (state.ascendingZone && !state.zoneClosed);
@@ -60,7 +64,7 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
             <span className="mission-zone-title">🏔 Mission Zone</span>
             {caption && <span className="mission-zone-caption">{caption}</span>}
           </div>
-          <ZoneCardRow cards={state.missionZone} />
+          <ZoneCardRow cards={displayedZoneCards} />
           {state.ascendingZone && state.zoneCommittedPlay.length > 0 && (
             <div className="mission-zone-header">
               <span className="mission-zone-caption">
