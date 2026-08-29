@@ -397,6 +397,8 @@ export interface GameState {
     forcedPlay: boolean;
     totalValue: number;
     arcaneBonus: number;
+    /** Suits of every reveal card tucked under the attack so far — merged into the play's own suit-power resolution, see continueResolveCommittedPlay. */
+    arcaneSuits: Suit[];
   } | null;
   /**
    * Legacy-only: when true (Mission 3), the top of the reserve deck flips face-up into `missionZone` at the end
@@ -950,6 +952,7 @@ export interface ClientGameState {
     forcedPlay: boolean;
     totalValue: number;
     arcaneBonus: number;
+    arcaneSuits: Suit[];
   } | null;
   /** See GameState.discardTopBuffsAttack. */
   discardTopBuffsAttack: boolean;

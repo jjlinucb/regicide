@@ -725,6 +725,7 @@ function revealForMage(
   totalValue: number,
   queue: Card[],
   arcaneBonus: number,
+  arcaneSuits: Suit[],
   count: number,
 ): EngineResult {
   const revealed: Card[] = [];
@@ -740,9 +741,9 @@ function revealForMage(
   }
   if (candidates.length === 0) {
     log(state, revealed.length > 0 ? "Nothing's left in the reveal to add to the attack." : 'The reserve deck is empty — the reveal finds nothing.');
-    return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus);
+    return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneSuits);
   }
-  state.mageReveal = { playerId, candidates, queue, cards, claimedJester, forcedPlay, totalValue, arcaneBonus };
+  state.mageReveal = { playerId, candidates, queue, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits };
   state.turnPhase = 'AWAIT_MAGE_REVEAL';
   log(state, `The Mage reveals ${revealed.length} card(s) from the reserve deck — choose one to add to the attack.`);
   return ok(state);
@@ -758,14 +759,15 @@ function advanceMageQueue(
   totalValue: number,
   queue: Card[],
   arcaneBonus: number,
+  arcaneSuits: Suit[],
 ): EngineResult {
   if (queue.length > 0) {
     const [trigger] = queue;
     const rest = queue.slice(1);
-    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, rest, arcaneBonus, mageRevealCount(trigger, totalValue));
+    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, rest, arcaneBonus, arcaneSuits, mageRevealCount(trigger, totalValue));
   }
   const player = state.players.find((p) => p.id === playerId)!;
-  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus);
+  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits);
 }
 
 /** Resolves the AWAIT_MAGE_REVEAL window opened by revealForMage (see GameState.mageReveal). */
@@ -785,7 +787,8 @@ function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, {
   enemy.tableCards.push(chosen);
   const chosenValue = cardValue(chosen);
   const arcaneBonus = window.arcaneBonus + chosenValue;
-  log(state, `${chosen.name ?? `the ${chosen.rank}`} is tucked under the attack, adding +${chosenValue}.`);
+  const arcaneSuits = Array.from(new Set([...window.arcaneSuits, ...cardSuits(chosen)]));
+  log(state, `${chosen.name ?? `the ${chosen.rank}`} is tucked under the attack, adding +${chosenValue} and its own suit power.`);
 
   const { playerId, cards, claimedJester, forcedPlay, totalValue, queue } = window;
   state.mageReveal = null;
@@ -793,9 +796,9 @@ function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, {
 
   if (isMageCard(chosen)) {
     log(state, `${chosen.name ?? 'The chosen card'} is itself a Mage — the reveal chains at its own strength.`);
-    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, mageRevealCount(chosen, chosenValue));
+    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneSuits, mageRevealCount(chosen, chosenValue));
   }
-  return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus);
+  return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneSuits);
 }
 
 /**
@@ -1782,9 +1785,9 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   if (mageQueue.length > 0) {
     const [trigger] = mageQueue;
     const rest = mageQueue.slice(1);
-    return revealForMage(state, player.id, cards, claimedJester, forcedPlay, shape.totalValue, rest, 0, mageRevealCount(trigger, shape.totalValue));
+    return revealForMage(state, player.id, cards, claimedJester, forcedPlay, shape.totalValue, rest, 0, [], mageRevealCount(trigger, shape.totalValue));
   }
-  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, shape.totalValue, 0);
+  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, shape.totalValue, 0, []);
 }
 
 /**
@@ -1802,6 +1805,7 @@ function continueResolveCommittedPlay(
   forcedPlay: boolean,
   totalValue: number,
   arcaneBonus: number,
+  arcaneSuits: Suit[],
 ): EngineResult {
   // Reaver, Guardian, Druid, Chanter, and Evergreen cards' printed suits don't join the combined suit-power
   // resolution below — a Reaver's own class power is the reserve-deck tear resolved just below, a Guardian's is
@@ -1931,7 +1935,11 @@ function continueResolveCommittedPlay(
   if (evergreenActive) {
     log(state, `${(cards.find((c) => c.kind === 'suited' && c.evergreen) as Extract<Card, { kind: 'suited' }> | undefined)?.name ?? 'Evergreen'} surges — all four powers resolve at once, ignoring immunity.`);
   }
-  const effectiveSuits: Suit[] = evergreenActive ? Array.from(new Set([...nonArcaneSuits, 'H', 'D', 'C', 'S'])) : nonArcaneSuits;
+  // A Mage's chosen reveal card independently triggers its own suit power on top of buffing the play's total value
+  // (John's call — see the mage-mechanics thread): its suit joins the combined suit-power resolution below exactly
+  // as if it had been played directly, using the same effectiveTotalValue as every other suit in the play.
+  const suitsWithArcane = Array.from(new Set([...nonArcaneSuits, ...arcaneSuits]));
+  const effectiveSuits: Suit[] = evergreenActive ? Array.from(new Set([...suitsWithArcane, 'H', 'D', 'C', 'S'])) : suitsWithArcane;
   const ignoreImmunityForPlay = Boolean(claimedJester) || evergreenActive;
 
   // Both corrupted and restored cards ignore immunity, per-suit only (not the whole play) — see
