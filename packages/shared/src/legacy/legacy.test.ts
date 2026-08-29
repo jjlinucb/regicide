@@ -1093,6 +1093,22 @@ describe('legacy: mission 2 standing Jesters (unsourced house rule)', () => {
     expect(res.state.currentEnemy?.damageTaken).toBe(8); // the dual immunity was ignored
   });
 
+  it('SOURCED FIX: a used standing Jester never resurfaces in the discard pile, even once the enemy it attacked is later killed', () => {
+    let state = startStandingJesterMission(1);
+    const player = state.players[state.currentPlayerIndex];
+    const jesterCard = state.standingJesters[0];
+    let res = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id }));
+    state = res.state;
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === jesterCard.id)).toBe(false); // never joined the table
+
+    // Finish off the same enemy so its table cards flush to the discard pile.
+    state = rig(state, [suited('C', '9')], { damageTaken: state.currentEnemy!.maxHealth - 18 }); // 18 remaining
+    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player.id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.discardPile.some((c) => c.id === jesterCard.id)).toBe(false);
+  });
+
   it('rejects a standing Jester use from anyone but the current player', () => {
     const state = startStandingJesterMission(2);
     const otherPlayer = state.players[(state.currentPlayerIndex + 1) % state.players.length];

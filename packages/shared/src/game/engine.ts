@@ -2370,7 +2370,13 @@ function useStandingJester(state: GameState, action: Extract<GameAction, { type:
  * win or lose, dead or alive, so those cards are actually available for the Defend that follows.
  */
 function resolveJesterAttack(state: GameState, player: PlayerState, jesterCard: Card, refillMode: 'discard' | 'topUp'): EngineResult {
-  state.currentEnemy!.tableCards.push(jesterCard);
+  // SOURCED FIX (live-play report — see mission-4-jester-empty-hand-defend memory note): only the base game's own
+  // printed Jester (CLAIM_JESTER, 'discard' mode) belongs on the enemy's table, where it'll eventually reach the
+  // discard pile with the rest of that kill's played cards, same as any other attack card. A standing Jester
+  // ('topUp') was already permanently removed from GameState.standingJesters the instant it was called — per
+  // that house rule ("flip it over, it's gone"), it should vanish from the game entirely, not resurface later in
+  // the discard pile as if it had been drawn and played like an ordinary card.
+  if (refillMode === 'discard') state.currentEnemy!.tableCards.push(jesterCard);
   const syntheticAttack: SuitedCard = { id: `${jesterCard.id}-attack`, kind: 'suited', suit: 'D', rank: '8', noSuitPower: true };
   const result = resolveCommittedPlay(state, player, [syntheticAttack], jesterCard);
   if (!result.ok || state.phase !== 'IN_PROGRESS') return result;
