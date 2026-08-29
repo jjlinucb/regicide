@@ -13,12 +13,12 @@ export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '12' |
  * (see legacy/classes.ts). Boosts the normal suit effect when the card is played: CLEAVE triples
  * (instead of doubles) Clubs damage, INSPIRE draws 2 extra on Diamonds, REVIVE heals 2 extra on
  * Hearts, BULWARK reduces the enemy's attack to 0 for the fight instead of by the play's value,
- * ARCANE_SURGE doubles a Mage card's own arcane bolt, PLUNDER tears 2 reserve cards instead of 1 for a Reaver
- * (both still banished; the higher value is kept), AEGIS makes a Guardian's shield hold permanently — reducing
+ * ARCANE_SURGE doubles a Mage card's own arcane bolt, AEGIS makes a Guardian's shield hold permanently — reducing
  * the enemy's attack to 0 for the rest of the fight instead of blocking just its next attack, WELLSPRING salvages
  * 2 cards from the banish pile instead of 1 for a Druid's Regrowth, ENCORE doubles how many cards everyone
  * draws in a Chanter's chant, and EVERGREEN is Gøran's own signature (see SuitedCard.evergreen) carried here
- * only for type-shape consistency with the other classes.
+ * only for type-shape consistency with the other classes. Reaver has no signature ability of its own — its base
+ * "Reveal and Add" (see engine.ts's startReaverPhase) already always doubles the play's damage, unconditionally.
  */
 export type SpecialAbilityId =
   | 'CLEAVE'
@@ -26,7 +26,6 @@ export type SpecialAbilityId =
   | 'REVIVE'
   | 'BULWARK'
   | 'ARCANE_SURGE'
-  | 'PLUNDER'
   | 'AEGIS'
   | 'WELLSPRING'
   | 'ENCORE'
@@ -264,6 +263,8 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * is non-empty, resolved via SURRENDER_CARD_TO_ZONE; engine.ts's advanceToNextPlayer pauses mid-advance right here
  * until it resolves, same shape as AWAIT_END_OF_TURN pausing there for Mission 9. AWAIT_MAGE_REVEAL is Mission 3+
  * only (see GameState.mageReveal) — opened by a Mage card in a play, resolved via CHOOSE_MAGE_REVEAL_CARD.
+ * AWAIT_REAVER_REVEAL is Mission 5+ only (see GameState.reaverReveal) — opened by a Reaver card in a play,
+ * resolved via CHOOSE_REAVER_REVEAL_CARD.
  */
 export type TurnPhase =
   | 'AWAIT_PLAY'
@@ -278,7 +279,8 @@ export type TurnPhase =
   | 'AWAIT_END_OF_TURN'
   | 'AWAIT_RESCUE_CHOICE'
   | 'AWAIT_BARD_SURRENDER'
-  | 'AWAIT_MAGE_REVEAL';
+  | 'AWAIT_MAGE_REVEAL'
+  | 'AWAIT_REAVER_REVEAL';
 
 /**
  * Legacy-only (Mission 8): what engine.ts's resolveChant does once the last pending player finishes trimming
@@ -398,6 +400,27 @@ export interface GameState {
     totalValue: number;
     arcaneBonus: number;
     /** Suits of every reveal card tucked under the attack so far — merged into the play's own suit-power resolution, see continueResolveCommittedPlay. */
+    arcaneSuits: Suit[];
+  } | null;
+  /**
+   * Legacy-only (Mission 5+), John's ruling on the Reaver class ("Reveal and Add"): the open Reaver reveal window.
+   * Playing a Reaver card reveals cards off the top of the reserve deck — one per point of the Reaver card's own
+   * printed rank — and lets `playerId` choose one of them via CHOOSE_REAVER_REVEAL_CARD to add its raw numeric
+   * strength (its class power, if any, is ignored) to the play's attack total. EVERY card revealed this way —
+   * chosen or not — is banished for good, not discarded (see resolveReaverRevealChoice's use of `allRevealed`,
+   * which includes candidates never offered as a choice, like Jesters/corrupted cards). A Reaver's own class power
+   * always doubles the play's total damage on top of this — see continueResolveCommittedPlay's reaverMultiplier —
+   * so combining a Reaver with a Warrior (Clubs) card in the same play compounds into quadruple damage.
+   */
+  reaverReveal: {
+    playerId: string;
+    candidates: SuitedCard[];
+    allRevealed: Card[];
+    cards: Card[];
+    claimedJester: Card | null;
+    forcedPlay: boolean;
+    totalValue: number;
+    arcaneBonus: number;
     arcaneSuits: Suit[];
   } | null;
   /**
@@ -738,13 +761,20 @@ export type GameAction =
        * Legacy-only (Mission 6, also seeded by Mission 8 for its ascending chain's anchor): seeds
        * GameState.missionZone/zoneImmuneSuits with a fixed set of cards at mission start — unlike Mission 3's
        * endOfTurnZoneFlip, this zone is static for the whole mission (never flipped into, never banished on
-       * defeat) since endOfTurnZoneFlip is left unset. Mission 5 no longer uses this (see missions.ts's Mission
-       * 5 entry) — sourced research found Myla was wrongly modeled here as a permanent immunity anchor; she's an
-       * ordinary reserve-deck card instead.
+       * defeat) since endOfTurnZoneFlip is left unset. Mission 5 does not use this field — Myla seeds the
+       * separate, dynamic `presetRollingZoneCards` below instead (see its own doc comment).
        */
       presetMissionZone?: Card[];
       /** See GameState.rollingZoneBonus. */
       rollingZoneBonus?: boolean;
+      /**
+       * Legacy-only (Mission 5), sourced fix: seeds GameState.rollingZoneCards with a fixed set of cards at
+       * mission start, instead of leaving it empty until the first end-of-turn banish-pile flip. Myla's card
+       * starts here — "in the banish pile, immediately sliding into the Mission Zone" per the sourced transcript
+       * — rather than sitting in the reserve deck as an ordinary drawable card the way an earlier session modeled
+       * her. Only meaningful alongside `rollingZoneBonus: true`.
+       */
+      presetRollingZoneCards?: Card[];
       /** See GameState.zoneVengeanceOnKill. */
       zoneVengeanceOnKill?: boolean;
       /** See GameState.pilgrimMechanic. */
@@ -865,6 +895,12 @@ export type GameAction =
    * the attack. Every candidate not chosen falls to the discard pile.
    */
   | { type: 'CHOOSE_MAGE_REVEAL_CARD'; playerId: string; cardId: string }
+  /**
+   * Legacy-only (Mission 5+), from AWAIT_REAVER_REVEAL: the player whose Reaver card opened the reveal (see
+   * GameState.reaverReveal) chooses `cardId`, from the cards just revealed off the reserve deck, to add its
+   * numeric strength to the attack. Every revealed card, chosen or not, is banished for good.
+   */
+  | { type: 'CHOOSE_REAVER_REVEAL_CARD'; playerId: string; cardId: string }
   | { type: 'DEFEND'; playerId: string; cardIds: string[] }
   | { type: 'USE_SOLO_JESTER'; playerId: string }
   /**
@@ -947,6 +983,18 @@ export interface ClientGameState {
     playerId: string;
     candidates: SuitedCard[];
     queue: Card[];
+    cards: Card[];
+    claimedJester: Card | null;
+    forcedPlay: boolean;
+    totalValue: number;
+    arcaneBonus: number;
+    arcaneSuits: Suit[];
+  } | null;
+  /** See GameState.reaverReveal. Public information, same as every other pending-choice window. */
+  reaverReveal: {
+    playerId: string;
+    candidates: SuitedCard[];
+    allRevealed: Card[];
     cards: Card[];
     claimedJester: Card | null;
     forcedPlay: boolean;

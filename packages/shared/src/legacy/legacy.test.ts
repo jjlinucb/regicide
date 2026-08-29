@@ -1589,9 +1589,9 @@ describe('legacy: mission 4 Beast Companions (strength-copying pair) + Scarlet W
   });
 });
 
-describe('legacy: mission 5 mechanics (Reaver reserve-tear, rolling banish-pile zone, exact-kill splash)', () => {
-  function reaverCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
-    return { ...suited(suit, rank), reaver: true, ...(special ? { special: 'PLUNDER' } : {}) };
+describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pile zone, exact-kill splash)', () => {
+  function reaverCard(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
+    return { ...suited(suit, rank), reaver: true };
   }
 
   function startCrimsonMission(
@@ -1615,31 +1615,39 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, rolling banish-pile 
     return res.state;
   }
 
-  it('tears the top reserve card for flat bonus damage and banishes it, without doubling anything on its own', () => {
+  it('reveals cards equal to its own rank, lets the player choose one to add, banishes everything revealed, and doubles the total unconditionally', () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
     let state = startCrimsonMission(1, [boss]);
     state = structuredClone(state);
-    state.tavernDeck = [suited('C', '6'), ...state.tavernDeck];
+    state.tavernDeck = [suited('C', '6'), suited('D', '2'), suited('D', '2'), suited('D', '2'), ...state.tavernDeck];
     const reserveBefore = state.tavernDeck.length;
     state = rig(state, [reaverCard('D', '4')]);
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
-    // 4 + 6 = 10 damage, no multiplier; the revealed 6 is gone from the reserve deck and banished, not drawable again.
-    expect(state.currentEnemy?.damageTaken).toBe(10);
-    expect(state.tavernDeck.length).toBe(reserveBefore - 1);
-    expect(state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')).toBe(true);
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    expect(state.reaverReveal?.candidates.length).toBe(4); // rank 4 reveals the top 4 cards
+    const chosen = state.reaverReveal!.candidates.find((c) => c.rank === '6')!;
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
+    state = res.state;
+
+    // (4 + 6) * 2 (Reaver's own doubling, unconditional) = 20. All 4 revealed cards are banished, not just the chosen one.
+    expect(state.currentEnemy?.damageTaken).toBe(20);
+    expect(state.tavernDeck.length).toBe(reserveBefore - 4);
+    expect(state.banishPile.filter((c) => c.kind === 'suited' && c.rank === '2').length).toBe(3);
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '6')).toBe(true);
   });
 
-  it('stacks with a Warrior (Clubs) card in the same play for double damage — Reaver itself never multiplies', () => {
-    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'H', health: 200, attack: 1 };
+  it('doubles unconditionally on its own, and quadruples when combined with a Warrior (Clubs) card in the same play', () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'H', health: 400, attack: 1 };
     let state = startCrimsonMission(1, [boss]);
     state = structuredClone(state);
-    state.tavernDeck = [suited('S', '6'), ...state.tavernDeck];
+    state.tavernDeck = [suited('S', '6'), suited('S', '1'), suited('S', '1'), suited('S', '1'), suited('S', '1'), ...state.tavernDeck];
     state = rig(state, [suited('C', '5'), reaverCard('D', '5')]); // same-rank combo: Clubs 5 + Reaver 5
 
-    const res = ensureOk(
+    let res = ensureOk(
       applyAction(state, {
         type: 'PLAY_CARDS',
         playerId: state.players[0].id,
@@ -1648,24 +1656,29 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, rolling banish-pile 
     );
     state = res.state;
 
-    // (5 + 5 + 6) * 2 (Clubs only) = 32.
-    expect(state.currentEnemy?.damageTaken).toBe(32);
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    expect(state.reaverReveal?.candidates.length).toBe(5); // reveal count = the Reaver card's own rank (5)
+    const chosen = state.reaverReveal!.candidates.find((c) => c.rank === '6')!;
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
+    state = res.state;
+
+    // (5 + 5 + 6) * 2 (Reaver) * 2 (Clubs) = 64.
+    expect(state.currentEnemy?.damageTaken).toBe(64);
   });
 
-  it("Plunder tears 2 reserve cards instead of 1 and keeps the higher value", () => {
+  it('reveals fewer cards than its rank if the reserve deck runs low, and still doubles even with nothing to add', () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
     let state = startCrimsonMission(1, [boss]);
     state = structuredClone(state);
-    state.tavernDeck = [suited('C', '4'), suited('D', '9'), ...state.tavernDeck];
-    state = rig(state, [reaverCard('H', '3', true)]);
+    state.tavernDeck = []; // nothing left to reveal
+    state = rig(state, [reaverCard('H', '3')]);
 
     const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
-    // 3 + 9 = 12, no multiplier — the higher of the two torn cards (9) is kept, both banished.
-    expect(state.currentEnemy?.damageTaken).toBe(12);
-    expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '4')).toBe(true);
-    expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '9')).toBe(true);
+    // (3 + 0) * 2 (Reaver's own doubling still applies even with no bonus to add) = 6.
+    expect(state.currentEnemy?.damageTaken).toBe(6);
+    expect(state.turnPhase).not.toBe('AWAIT_REAVER_REVEAL'); // resolved immediately — no window opened
   });
 
   it("the engine's generic presetMissionZone capability still seeds a fixed, static set of cards at mission start (no longer how Mission 5 itself uses Myla — see the mission-5 reward describe block below)", () => {
@@ -1793,7 +1806,12 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, rolling banish-pile 
     let step = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: ['hand-reaver'] }));
     state = step.state;
 
-    // The Reaver's own deck-tear mechanic actually fired: the banish pile now holds the torn reserve card.
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    const chosen = state.reaverReveal!.candidates.find((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')!;
+    step = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
+    state = step.state;
+
+    // The Reaver's own reveal-and-add mechanic actually fired: the banish pile now holds the torn reserve card.
     expect(state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')).toBe(true);
     expect(state.currentEnemy).not.toBeNull(); // not an overkill — still fighting the same boss
 
@@ -1804,9 +1822,10 @@ describe('legacy: mission 5 mechanics (Reaver reserve-tear, rolling banish-pile 
     state = step.state;
     expect(state.phase).not.toBe('LOST');
 
-    // The rolling zone actually accumulated the banished card — the buff is no longer permanently stuck at zero.
+    // The rolling zone actually accumulated a banished card — the buff is no longer permanently stuck at zero.
+    // (The Reaver's reveal banishes every card it turned up, not just the chosen one, so which one ends up on
+    // top of the banish pile — and thus gets pulled into the rolling zone first — isn't the C-6 specifically.)
     expect(state.rollingZoneCards.length).toBeGreaterThan(0);
-    expect(state.rollingZoneCards.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')).toBe(true);
     expect(missionZoneValueSum(state.rollingZoneCards)).toBeGreaterThan(0);
   });
 });
@@ -2072,15 +2091,16 @@ describe('legacy: mission 6 setup, bug fix — Guardian cards seeded as fight se
 });
 
 describe('legacy: mission 5 reward (only rank-5 Reaver kept, Myla joins the party, Dual-class Stickers, corrupt-another-card)', () => {
-  it('keeps only the rank-5 Reaver recruit (Haror) permanently — not all 4 originally shipped', () => {
+  it('keeps only the Reaver recruit (Haror, rank 3) permanently — not all 4 originally shipped', () => {
     // Sourced research (regicidelegacy.com compendium / BGG threads / a fan digital reimplementation's rules
     // doc) found the shipped version over-granted: this repo's own mission-5 transcript note ("how to
     // permanently retire cards from the party roster, used here to trim the new Reavers back down after the
-    // mission") and the sourced material agree only rank 5 survives.
+    // mission") and the sourced material agree only Haror survives. Ranks are 3/5/7/9 (John's ruling), not all
+    // rank 5 — Haror is the rank-3 one.
     const mission5 = getMission(5)!;
     const reavers = mission5.reward.recruits.filter((r) => r.class === 'REAVER');
     expect(reavers.length).toBe(1);
-    expect(reavers[0]).toMatchObject({ name: 'Haror', rank: '5' });
+    expect(reavers[0]).toMatchObject({ name: 'Haror', rank: '3' });
   });
 
   it('rewards Myla as a real playable Cleric card, a second round of Dual-class Stickers, and a corrupt-another-card effect', () => {
@@ -2105,10 +2125,11 @@ describe('legacy: mission 5 reward (only rank-5 Reaver kept, Myla joins the part
     expect(corrupted[0].name).not.toBe('Haror');
   });
 
-  it("no longer anchors Myla as a permanent presetMissionZone immunity fixture — she's an ordinary reserve-deck card for the fight itself", () => {
+  it('seeds Myla straight into the rolling Mission Zone (presetRollingZoneCards) instead of the static presetMissionZone or the reserve deck, per the newer sourced transcript', () => {
     const mission5 = getMission(5)!;
     expect(mission5.presetMissionZone).toBeUndefined();
-    expect(mission5.extraReserveCards?.some((c) => c.kind === 'suited' && c.name === 'Myla' && c.suit === 'H')).toBe(true);
+    expect(mission5.extraReserveCards?.some((c) => c.kind === 'suited' && c.name === 'Myla')).toBe(false);
+    expect(mission5.presetRollingZoneCards?.some((c) => c.kind === 'suited' && c.name === 'Myla' && c.suit === 'H')).toBe(true);
   });
 });
 
@@ -4511,7 +4532,7 @@ describe('legacy: mission 12 restored-card redirect (can never land in the banis
     return buildRecruitCard(spec) as SuitedCard;
   }
 
-  it("a Reaver's tear revealing a restored card off the reserve deck redirects it to the bottom of the reserve deck instead of the banish pile", () => {
+  it("a Reaver's reveal turning up a restored card off the reserve deck redirects it to the bottom of the reserve deck instead of the banish pile", () => {
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'S', health: 200, attack: 10 };
     let state = startMission(1, [boss]);
     state.restoredCardMechanic = true;
@@ -4519,8 +4540,12 @@ describe('legacy: mission 12 restored-card redirect (can never land in the banis
     state.tavernDeck = [toReveal, ...state.tavernDeck];
     state = rig(state, [reaverRecruitCard()]);
 
-    const res = ensureOk(
+    let res = ensureOk(
       applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    expect(res.state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    res = ensureOk(
+      applyAction(res.state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: toReveal.id }),
     );
 
     expect(res.state.banishPile.some((c) => c.id === toReveal.id)).toBe(false);

@@ -101,12 +101,9 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
   REAVER: {
     id: 'REAVER',
     name: 'Reaver',
-    tag: 'Reserve Tear',
+    tag: 'Reveal and Add',
     glyph: '🍄',
     color: '#5c6b2f',
-    specialAbility: 'PLUNDER',
-    specialName: 'Plunder',
-    specialText: 'Plunder: tears 2 reserve cards instead of 1 (both banished) and keeps the higher value.',
   },
   GUARDIAN: {
     id: 'GUARDIAN',
