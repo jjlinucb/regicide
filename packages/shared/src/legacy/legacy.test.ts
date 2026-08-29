@@ -1093,6 +1093,22 @@ describe('legacy: mission 2 standing Jesters (unsourced house rule)', () => {
     expect(res.state.currentEnemy?.damageTaken).toBe(8); // the dual immunity was ignored
   });
 
+  it('SOURCED FIX: a used standing Jester never resurfaces in the discard pile, even once the enemy it attacked is later killed', () => {
+    let state = startStandingJesterMission(1);
+    const player = state.players[state.currentPlayerIndex];
+    const jesterCard = state.standingJesters[0];
+    let res = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id }));
+    state = res.state;
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === jesterCard.id)).toBe(false); // never joined the table
+
+    // Finish off the same enemy so its table cards flush to the discard pile.
+    state = rig(state, [suited('C', '9')], { damageTaken: state.currentEnemy!.maxHealth - 18 }); // 18 remaining
+    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player.id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.discardPile.some((c) => c.id === jesterCard.id)).toBe(false);
+  });
+
   it('rejects a standing Jester use from anyone but the current player', () => {
     const state = startStandingJesterMission(2);
     const otherPlayer = state.players[(state.currentPlayerIndex + 1) % state.players.length];
@@ -1108,6 +1124,18 @@ describe('legacy: mission 2 standing Jesters (unsourced house rule)', () => {
     const hand = res.state.players[0].hand;
     expect(hand.some((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '2')).toBe(true); // original card kept
     expect(hand.length).toBe(res.state.maxHandSize);
+  });
+
+  it('SOURCED FIX (live-play report): refills the hand immediately even when the standing Jester attack leaves a Defend owed, so an empty hand is never stuck facing a Defend with nothing to discard', () => {
+    let state = startStandingJesterMission(1, 5); // enemy survives 8 dmg (100 health) and counters for 5
+    state = rig(state, []); // hand already empty before calling the standing Jester
+    const player = state.players[state.currentPlayerIndex];
+    const res = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id }));
+
+    expect(res.state.turnPhase).toBe('AWAIT_DEFEND'); // still owes a defend against the counter-attack
+    expect(res.state.pendingDamage).toBe(5);
+    expect(res.state.pendingJesterRefill).toBeNull(); // topUp never defers — already refilled
+    expect(res.state.players[0].hand.length).toBe(res.state.maxHandSize); // refilled BEFORE the defend, not after
   });
 
   it('rejects using a standing Jester once none remain', () => {
