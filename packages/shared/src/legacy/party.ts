@@ -8,7 +8,7 @@ const ALL_SUITS: Suit[] = ['H', 'D', 'C', 'S'];
 // '12', '19', and '25' never appear on one of the 40 starting party members (12/19 are Mercenary-only, see
 // legacy/mercenaries.ts; 25 is Mission 1's one-off "High Arcana" recruit, see missions.ts) — excluded here too so
 // STARTING_NAMES doesn't need dummy entries for ranks it will never actually be looked up with.
-type NonRoyalRank = Exclude<Rank, 'J' | 'Q' | 'K' | '12' | '19' | '25'>;
+type NonRoyalRank = Exclude<Rank, 'J' | 'Q' | 'K' | '12' | '19' | '25' | 'B'>;
 
 /** Like NonRoyalRank, but keeps '25' — a mission-reward recruit (unlike a starting member) can carry it. */
 type RecruitRank = Exclude<Rank, 'J' | 'Q' | 'K' | '12' | '19'>;

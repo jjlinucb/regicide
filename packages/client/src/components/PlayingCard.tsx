@@ -37,7 +37,7 @@ export function cardLabel(card: Card): string {
 /** Hover/long-press reminder of what a card does — handy for a solo player deciding what to play. */
 export function cardAbilityText(card: Card): string {
   if (card.kind === 'jester') return JESTER_ABILITY_TEXT;
-  const rankLabel = card.rank === 'A' ? 'Ace' : card.rank;
+  const rankLabel = card.rank === 'A' ? 'Ace' : card.rank === 'B' ? 'Beast' : card.rank;
   if (isLegacyCard(card)) {
     const cls = classForCard(card);
     const specialSuffix = card.special ? ` ${cls.specialText}` : '';

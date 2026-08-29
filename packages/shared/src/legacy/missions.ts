@@ -476,10 +476,10 @@ export const MISSIONS: Mission[] = [
     // SuitedCard.corrupted, so it ignores enemy immunity but banishes the reserve deck's top card as the cost.
     reward: {
       recruits: [
-        beastRecruit('Fennow', 'WARRIOR', 'A', 'C'),
-        beastRecruit('Cressida', 'BARD', 'A', 'D'),
-        beastRecruit('Orwick', 'CLERIC', 'A', 'H'),
-        beastRecruit('Sabrielle', 'PALADIN', 'A', 'S'),
+        beastRecruit('Fennow', 'WARRIOR', 'B', 'C'),
+        beastRecruit('Cressida', 'BARD', 'B', 'D'),
+        beastRecruit('Orwick', 'CLERIC', 'B', 'H'),
+        beastRecruit('Sabrielle', 'PALADIN', 'B', 'S'),
         recruit('Goran', 'PALADIN', '8', 'S'),
       ],
       relics: ['SCARLET_WHISTLE'],

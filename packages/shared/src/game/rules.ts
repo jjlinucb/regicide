@@ -6,6 +6,7 @@ export function cardValue(card: Card): number {
   const base = (() => {
     switch (card.rank) {
       case 'A':
+      case 'B':
         return 1;
       case 'J':
         return 10;

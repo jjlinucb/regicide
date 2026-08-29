@@ -6,7 +6,7 @@ export type Suit = 'H' | 'D' | 'C' | 'S';
  * the point it was granted. `cardValue()`'s `Number(card.rank)` fallback (rules.ts) already handles all of
  * these correctly with no dedicated case needed.
  */
-export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '12' | '19' | '25' | 'A' | 'J' | 'Q' | 'K';
+export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '12' | '19' | '25' | 'A' | 'B' | 'J' | 'Q' | 'K';
 
 /**
  * A signature ability a Legacy card can carry on top of its base suit power, one per class
