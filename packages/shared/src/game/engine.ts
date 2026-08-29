@@ -708,6 +708,90 @@ function mageRevealCount(trigger: Card, ownValue: number): number {
   return hasSpecial([trigger], 'ARCANE_SURGE') ? ownValue * 2 : ownValue;
 }
 
+/** Legacy-only, Mission 5+: a "Reaver" for reveal purposes — see GameState.reaverReveal. */
+function isReaverCard(c: Card): c is Extract<Card, { kind: 'suited' }> {
+  return c.kind === 'suited' && Boolean(c.reaver);
+}
+
+/**
+ * Legacy-only, Mission 5+, John's ruling ("Reveal and Add"): reveals `count` cards off the top of the reserve
+ * deck for a Reaver's play — `count` is that Reaver card's own printed rank (see startReaverPhase) — and either
+ * opens AWAIT_REAVER_REVEAL for `playerId` to choose one candidate's raw strength to add to the attack, or, if
+ * nothing revealed is choosable, resolves straight through with no bonus. Every card revealed here, chosen or
+ * not, is banished the instant the choice resolves (see resolveReaverRevealChoice) — unlike a Mage's reveal,
+ * nothing not-chosen falls to the discard pile instead.
+ */
+function revealForReaver(
+  state: GameState,
+  playerId: string,
+  cards: Card[],
+  claimedJester: Card | null,
+  forcedPlay: boolean,
+  totalValue: number,
+  arcaneBonus: number,
+  arcaneSuits: Suit[],
+  count: number,
+): EngineResult {
+  const revealed: Card[] = [];
+  for (let i = 0; i < count; i++) {
+    const card = state.tavernDeck.shift();
+    if (card) revealed.push(card);
+  }
+  const candidates = revealed.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited');
+  const player = state.players.find((p) => p.id === playerId)!;
+  if (candidates.length === 0) {
+    if (revealed.length > 0) {
+      banishCards(state, revealed);
+      log(state, `The Reaver's reveal turns up nothing but Jesters — ${revealed.length} card(s) banished, no bonus.`);
+    } else {
+      log(state, 'The reserve deck is empty — the Reaver finds nothing to add.');
+    }
+    return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, 0);
+  }
+  state.reaverReveal = { playerId, candidates, allRevealed: revealed, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits };
+  state.turnPhase = 'AWAIT_REAVER_REVEAL';
+  log(state, `The Reaver reveals ${revealed.length} card(s) from the reserve deck — choose one to add to the attack.`);
+  return ok(state);
+}
+
+/** Legacy-only, Mission 5+: opens a Reaver's reveal if this play includes one, otherwise resumes resolution immediately with no Reaver bonus. */
+function startReaverPhase(
+  state: GameState,
+  player: PlayerState,
+  cards: Card[],
+  claimedJester: Card | null,
+  forcedPlay: boolean,
+  totalValue: number,
+  arcaneBonus: number,
+  arcaneSuits: Suit[],
+): EngineResult {
+  const reaverTrigger = state.ruleset === 'legacy' ? cards.find(isReaverCard) : undefined;
+  if (reaverTrigger) {
+    return revealForReaver(state, player.id, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, cardValue(reaverTrigger));
+  }
+  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, 0);
+}
+
+/** Resolves the AWAIT_REAVER_REVEAL window opened by revealForReaver (see GameState.reaverReveal). */
+function resolveReaverRevealChoice(state: GameState, action: Extract<GameAction, { type: 'CHOOSE_REAVER_REVEAL_CARD' }>): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_REAVER_REVEAL');
+  if (err) return fail(err);
+  const window = state.reaverReveal;
+  if (!window) return fail('There is no open Reaver reveal to resolve.');
+
+  const chosen = window.candidates.find((c) => c.id === action.cardId);
+  if (!chosen) return fail('That card is not part of the current reveal.');
+  const reaverBonus = cardValue(chosen);
+  banishCards(state, window.allRevealed);
+  log(state, `${chosen.name ?? `the ${chosen.rank}`} is torn from the reserve deck — banished, +${reaverBonus} damage.`);
+
+  const { playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits } = window;
+  state.reaverReveal = null;
+  state.turnPhase = 'AWAIT_PLAY';
+  const player = state.players.find((p) => p.id === playerId)!;
+  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, reaverBonus);
+}
+
 /**
  * Legacy-only, Mission 3+, sourced from a full solo playthrough (see tutorial_vids/summaries/mission-3.md —
  * "Meet Me at the Table"): pulls `count` cards off the top of the reserve deck for a Mage's reveal, discards any
@@ -767,7 +851,7 @@ function advanceMageQueue(
     return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, rest, arcaneBonus, arcaneSuits, mageRevealCount(trigger, totalValue));
   }
   const player = state.players.find((p) => p.id === playerId)!;
-  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits);
+  return startReaverPhase(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits);
 }
 
 /** Resolves the AWAIT_MAGE_REVEAL window opened by revealForMage (see GameState.mageReveal). */
@@ -1611,7 +1695,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.discardCleanupLowToHigh = action.discardCleanupLowToHigh ?? false;
   state.exactKillSplashDamage = action.exactKillSplashDamage ?? false;
   state.rollingZoneBonus = action.rollingZoneBonus ?? false;
-  state.rollingZoneCards = [];
+  state.rollingZoneCards = action.presetRollingZoneCards ?? [];
   state.zoneVengeanceOnKill = action.zoneVengeanceOnKill ?? false;
   state.zoneVengeanceChoice = null;
   state.zoneReliefChoice = null;
@@ -1787,15 +1871,17 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
     const rest = mageQueue.slice(1);
     return revealForMage(state, player.id, cards, claimedJester, forcedPlay, shape.totalValue, rest, 0, [], mageRevealCount(trigger, shape.totalValue));
   }
-  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, shape.totalValue, 0, []);
+  return startReaverPhase(state, player, cards, claimedJester, forcedPlay, shape.totalValue, 0, []);
 }
 
 /**
  * The rest of a committed play's resolution once any Mage reveal(s) (see resolveCommittedPlay/GameState.mageReveal)
- * are fully done — `arcaneBonus` is the total value tucked under the attack from every chosen reveal card, 0 if no
- * Mage was involved. Split out so a play with a Mage in it can pause mid-resolution for AWAIT_MAGE_REVEAL and
- * resume here once the choice (and any chain it kicks off) is settled, the same way Azure Emblem/Chanter windows
- * pause and resume elsewhere in this file.
+ * and any Reaver reveal (see startReaverPhase/GameState.reaverReveal) are fully done — `arcaneBonus` is the total
+ * value tucked under the attack from every chosen Mage reveal card, 0 if no Mage was involved; `reaverBonus` is the
+ * chosen Reaver reveal card's raw strength, 0 if no Reaver was involved (or its reveal found nothing). Split out so
+ * a play with a Mage or Reaver in it can pause mid-resolution for AWAIT_MAGE_REVEAL/AWAIT_REAVER_REVEAL and resume
+ * here once the choice (and any chain it kicks off) is settled, the same way Azure Emblem/Chanter windows pause and
+ * resume elsewhere in this file.
  */
 function continueResolveCommittedPlay(
   state: GameState,
@@ -1806,6 +1892,7 @@ function continueResolveCommittedPlay(
   totalValue: number,
   arcaneBonus: number,
   arcaneSuits: Suit[],
+  reaverBonus: number,
 ): EngineResult {
   // Reaver, Guardian, Druid, Chanter, and Evergreen cards' printed suits don't join the combined suit-power
   // resolution below — a Reaver's own class power is the reserve-deck tear resolved just below, a Guardian's is
@@ -1843,30 +1930,14 @@ function continueResolveCommittedPlay(
     applyRestoredHeal(state, c.name ?? 'A restored card');
   }
 
-  // Reavers (Mission 5): playing one tears the top card off the reserve deck, adds its raw value straight onto
-  // the attack as flat bonus damage, and permanently banishes it. A Reaver never doubles damage on its own —
-  // that bonus still gets folded into a Warrior (Clubs) card's own doubling if one's played alongside it, for
-  // a much bigger hit, but Reaver alone doesn't multiply anything.
+  // Reavers (Mission 5), John's ruling ("Reveal and Add"): playing one already revealed cards off the reserve
+  // deck and folded the player's chosen card's raw strength into `reaverBonus` (see startReaverPhase/
+  // revealForReaver/resolveReaverRevealChoice — that reveal-and-choose step runs BEFORE this function, the same
+  // way a Mage's reveal does). A Reaver's own class power doubles the whole play's damage on top of that bonus —
+  // unconditionally, unlike Clubs' double (which needs a Warrior card present) — so a Reaver played alongside a
+  // Warrior (Clubs) card compounds into quadruple damage.
   const reaverCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.reaver));
-  let reaverBonus = 0;
-  if (state.ruleset === 'legacy' && reaverCards.length > 0) {
-    const tearCount = hasSpecial(reaverCards, 'PLUNDER') ? 2 : 1;
-    const revealed: Card[] = [];
-    for (let i = 0; i < tearCount; i++) {
-      const card = state.tavernDeck.shift();
-      if (card) revealed.push(card);
-    }
-    if (revealed.length > 0) {
-      reaverBonus = Math.max(...revealed.map(cardValue));
-      banishCards(state, revealed);
-      const revealedLabel = revealed
-        .map((c) => (c.kind === 'suited' ? c.name ?? `a ${c.rank}` : 'a Jester'))
-        .join(' and ');
-      log(state, `${reaverCards[0].name ?? 'A Reaver'} tears ${revealedLabel} from the reserve deck — banished, +${reaverBonus} damage.`);
-    } else {
-      log(state, 'The reserve deck is empty — no card to tear for the Reaver bonus.');
-    }
-  }
+  const reaverMultiplier = state.ruleset === 'legacy' && reaverCards.length > 0 ? 2 : 1;
 
   // Guardians (Mission 6): playing one raises an absolute shield that blocks the enemy's very next attack
   // entirely, regardless of the card's own value — spent the instant it's used, not a stacking reduction.
@@ -1953,11 +2024,11 @@ function continueResolveCommittedPlay(
   // richer way of computing the same number.
   const effectiveTotalValue = totalValue + arcaneBonus;
   const clubsMultiplier = resolveSuitPowers(state, cards, effectiveSuits, effectiveTotalValue, ignoreImmunityForPlay, immunityIgnoringSuits);
-  const rawDamage = (effectiveTotalValue + reaverBonus) * clubsMultiplier;
+  const rawDamage = (effectiveTotalValue + reaverBonus) * reaverMultiplier * clubsMultiplier;
   // Mission 10: an enemy Paladin's extra power reduces the damage it takes by its own base strength (see
   // applyEnemyPaladinDamageReduction) — a no-op for every other mission/enemy.
   const damage = applyEnemyPaladinDamageReduction(state, rawDamage);
-  // Logged here — after Clubs' clubsMultiplier, a Reaver's reaverBonus, a Mage's arcaneBonus, and any Paladin
+  // Logged here — after Clubs' clubsMultiplier, a Reaver's reaverMultiplier/reaverBonus, a Mage's arcaneBonus, and any Paladin
   // damage reduction are all folded in — rather than up front off the pre-bonus totalValue, so the number shown
   // always matches what actually lands on the enemy (enemy.damageTaken below).
   log(
@@ -2896,6 +2967,7 @@ export function createLobbyState(): GameState {
     kinfolkBankedThisTurn: false,
     azureEmblemWindow: null,
     mageReveal: null,
+    reaverReveal: null,
     endOfTurnZoneFlip: false,
     missionZone: [],
     zoneImmuneSuits: [],
@@ -2983,6 +3055,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return chooseZoneReliefCard(draft, action);
     case 'CHOOSE_MAGE_REVEAL_CARD':
       return resolveMageRevealChoice(draft, action);
+    case 'CHOOSE_REAVER_REVEAL_CARD':
+      return resolveReaverRevealChoice(draft, action);
     case 'SURRENDER_CARD_TO_ZONE':
       return surrenderCardToZone(draft, action);
     case 'START_ENDLESS_ROUND':

@@ -56,6 +56,8 @@ export interface Mission {
   presetMissionZone?: Card[];
   /** See GameState.rollingZoneBonus. */
   rollingZoneBonus?: boolean;
+  /** See GameState.START_LEGACY_MISSION action's presetRollingZoneCards. */
+  presetRollingZoneCards?: Card[];
   /** See GameState.zoneVengeanceOnKill. */
   zoneVengeanceOnKill?: boolean;
   /** See GameState.pilgrimMechanic. */
@@ -115,18 +117,6 @@ function zoneCompanion(name: string, suit: Suit, rank: Rank): Card {
 }
 
 /**
- * A named one-off card seeded straight into a mission's extraReserveCards: an ordinary, drawable, playable
- * reserve-deck card with no special zone mechanic of its own — contrast zoneCompanion above, which instead
- * anchors a card permanently in the mission zone. Introduced for Mission 5's Myla (see GameState.rollingZoneBonus
- * / this mission's own entry below): sourced research found she was wrongly modeled as a permanent
- * presetMissionZone immunity fixture in the shipped version — the real rule has her as just another card in the
- * fight's reserve deck.
- */
-function reserveCompanion(name: string, suit: Suit, rank: Rank): Card {
-  return { id: `reserve-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name };
-}
-
-/**
  * Mission 5's own fight SETUP (not a reward — see this mission's reward comment below, and the mission-5
  * transcript note: "Four new Reaver party members join"): four Reaver-flagged cards added straight to the fight's
  * reserve deck via extraReserveCards, same non-persistent "mission-only" shape as chanterCompanion below (Mission
@@ -137,9 +127,11 @@ function reserveCompanion(name: string, suit: Suit, rank: Rank): Card {
  * nothing to ever trigger it during the actual fight, since the party held zero Reaver cards to play. That in
  * turn starved rollingZoneBonus (see GameState.rollingZoneCards / engine.ts's rollMissionZoneBonusCard), which
  * recycles the BANISH pile's top card each turn: with the banish pile never receiving anything, the rolling zone
- * buff could never grow, no matter how the fight was played. Only rank 5 (Haror) is ever granted permanently via
+ * buff could never grow, no matter how the fight was played. Only Haror (rank 3) is ever granted permanently via
  * reward.recruits — same "no separate grant-then-retire step needed" simplification Mission 8's Chanters use —
- * the other 3 exist only for this one fight.
+ * the other 3 exist only for this one fight. Ranks are 3/5/7/9 (John's ruling) rather than all rank 5 — each
+ * Reaver's "Reveal and Add" reveals a number of reserve-deck cards equal to its own printed rank (see engine.ts's
+ * startReaverPhase), so a higher-ranked Reaver digs deeper for the same choose-one-card-to-add bonus.
  */
 function reaverCompanion(name: string, suit: Suit, rank: Rank): Card {
   return { id: `reaver-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, reaver: true };
@@ -493,40 +485,40 @@ export const MISSIONS: Mission[] = [
       'The Crimson Grove swallows the road south of Blackwater whole — every root and bough overtaken by the ' +
       "same bloom that broke loose from the lab. What's waiting in the canopy calls itself free now, and it's " +
       "not interested in negotiating: only in how much of the party's own deck it can make disappear.",
-    // 4-4 escalating lineup (one of each of the 4 base classes per tier) — one tier lighter than Mission 4's,
-    // since this mission's real difficulty is the Reaver deck-milling tradeoff, not raw enemy stats.
+    // 4-4 escalating lineup (one of each of the 4 base classes per tier), per newer sourced material (Reddit/BGG
+    // threads + a BGG campaign-playthrough video, see this repo's legacy-missions-transcript-mismatches memory
+    // note): 4 Sporelings (weak tier) then 4 Gloom Spores (strong tier) — a real stat jump over the earlier,
+    // lighter "Elder Sporeling" reading this replaces, matching the source's description of Gloom Spores boasting
+    // some of the highest base health seen up to this point in the campaign.
     enemies: [
-      enemy('Sporeling Choker', 'WARRIOR', 20, 10),
-      enemy('Sporeling Piper', 'BARD', 20, 10),
-      enemy('Sporeling Wailer', 'CLERIC', 20, 10),
-      enemy('Sporeling Bulwark', 'PALADIN', 20, 10),
-      enemy('Elder Sporeling Choker', 'WARRIOR', 30, 15),
-      enemy('Elder Sporeling Piper', 'BARD', 30, 15),
-      enemy('Elder Sporeling Wailer', 'CLERIC', 30, 15),
-      enemy('Elder Sporeling Bulwark', 'PALADIN', 30, 15),
+      enemy('Sporeling Choker', 'WARRIOR', 40, 10),
+      enemy('Sporeling Piper', 'BARD', 40, 10),
+      enemy('Sporeling Wailer', 'CLERIC', 40, 10),
+      enemy('Sporeling Bulwark', 'PALADIN', 40, 10),
+      enemy('Gloom Spore Choker', 'WARRIOR', 60, 15),
+      enemy('Gloom Spore Piper', 'BARD', 60, 15),
+      enemy('Gloom Spore Wailer', 'CLERIC', 60, 15),
+      enemy('Gloom Spore Bulwark', 'PALADIN', 60, 15),
     ],
-    // Myla (value 7) rides along in the reserve deck for this fight as an ordinary, drawable, playable card —
-    // NOT a permanent presetMissionZone immunity anchor the way the mission originally shipped. Sourced research
-    // (regicidelegacy.com compendium / BGG threads / a fan digital reimplementation's rules doc — see this repo's
-    // legacy-missions-transcript-mismatches memory note) found no basis for a static Hearts-immunity fixture
-    // here; she's just another reserve-deck body this mission, same shape as Mission 9/12's own one-off flavor
-    // cards (see reserveCompanion above). She only becomes a real permanent party member starting Mission 6,
-    // via this mission's reward below.
+    // Myla (value 7) starts this fight already in the Mission Zone, per the newer sourced transcript ("her 7
+    // Strength card starts in the banish pile and immediately slides into the Mission Zone... a passive force
+    // multiplier boosting the attack value of whichever Sporeling or Gloom Spore is currently active") — seeded
+    // straight into GameState.rollingZoneCards via presetRollingZoneCards below, rather than as an ordinary
+    // reserve-deck card (an earlier session's reading, since superseded by this newer source). She only becomes
+    // a real permanent party member starting Mission 6, via this mission's reward below.
     //
-    // The 4 Reavers named in the mission-5 transcript ("Four new Reaver party members join") also ride along
-    // here, for real — see reaverCompanion's own doc comment for why this matters beyond flavor: without them
-    // actually in the fight's reserve deck, nothing can ever trigger this mission's Reaver deck-tear mechanic,
+    // The 4 Reavers named in the mission-5 transcript ("Four new Reaver party members join") ride along in the
+    // reserve deck for real — see reaverCompanion's own doc comment for why this matters beyond flavor: without
+    // them actually in the fight's reserve deck, nothing can ever trigger a Reaver's "Reveal and Add" mechanic,
     // which is the ONLY thing that ever puts a card into the banish pile during Mission 5 — and rollingZoneBonus
-    // below reads its buff from exactly that pile. Haror (rank 5, Clubs) matches the identity reward.recruits
-    // grants permanently below; the other 3's names/suits/ranks are an unsourced judgment call (no source names
-    // them individually) — all rank 5 like Haror, one per remaining suit, so "only the Clubs one survives" reads
-    // cleanly at the reward.
+    // below reads its buff from exactly that pile (on top of Myla's own preset seed above). Ranks 3/5/7/9 (John's
+    // ruling) — Haror (rank 3, Clubs) matches the identity reward.recruits grants permanently below; the other
+    // 3's names/suits are an unsourced judgment call (no source names them individually), one per remaining suit.
     extraReserveCards: [
-      reserveCompanion('Myla', 'H', '7'),
-      reaverCompanion('Haror', 'C', '5'),
+      reaverCompanion('Haror', 'C', '3'),
       reaverCompanion('Skarn Hollowtooth', 'S', '5'),
-      reaverCompanion('Petra Duskfang', 'H', '5'),
-      reaverCompanion('Yorrin Grimtide', 'D', '5'),
+      reaverCompanion('Petra Duskfang', 'H', '7'),
+      reaverCompanion('Yorrin Grimtide', 'D', '9'),
     ],
     // The grove's rolling zone, per the tutorial transcript ("a rolling mission zone/banish-pile cycle each turn
     // feeds bonus strength to the current enemy"): every turn, the top card of the BANISH pile recycles into the
@@ -537,6 +529,7 @@ export const MISSIONS: Mission[] = [
     // still uncapped in principle, but bounded in practice by the banish pile's own recycling rate and reset by
     // every kill, instead of guaranteed to grow every single turn all fight long.
     rollingZoneBonus: true,
+    presetRollingZoneCards: [zoneCompanion('Myla', 'H', '7')],
     // An exact kill on a Sporeling bursts outward: the enemy's own base attack is dealt as splash damage
     // straight into whatever's newly revealed — occasionally strong enough to chain into a second kill. This is
     // the transcript's other named mechanic ("defeating an enemy with exact damage carries bonus damage into the
@@ -546,7 +539,7 @@ export const MISSIONS: Mission[] = [
     // Reward: sourced research found the shipped version over-granted here — keeping all 4 new Reaver recruits
     // permanently, when the source (and this repo's own mission-5.md transcript note: "how to permanently retire
     // cards from the party roster, used here to trim the new Reavers back down after the mission") keeps only
-    // rank 5 (Haror) for good. Implemented as a straight, permanent single-recruit grant rather than
+    // rank 3 (Haror) for good. Implemented as a straight, permanent single-recruit grant rather than
     // modeling "recruit all 4, then retire 3" as two separate steps — this campaign's reward model elsewhere
     // (e.g. Mission 11's applyBeastCardChoice) only ever tracks the FINAL kept roster, never an intermediate
     // grant-then-retire history, so the net effect (only Haror ends up in the permanent campaign PARTY roster) is
@@ -556,12 +549,12 @@ export const MISSIONS: Mission[] = [
     // into extraReserveCards entirely, which silently broke rollingZoneBonus by starving it of anything to ever
     // put in the banish pile. Also adds the sourced-but-missing "corrupt another card" effect (see party.ts's
     // applyCorruptAnotherCard) and a second round of Dual-class Stickers. Myla (value 7) — who spent this fight
-    // as an ordinary reserve-deck card, not a mission-zone fixture (see extraReserveCards above) — now joins the
-    // party for real: a normal, drawable, playable Cleric card from Mission 6 onward.
+    // seeded straight into the Mission Zone via presetRollingZoneCards above, not a reserve-deck card — now joins
+    // the party for real: a normal, drawable, playable Cleric card from Mission 6 onward.
     standingJesters: true,
     sidelineHighArcana: true,
     reward: {
-      recruits: [recruit('Haror', 'REAVER', '5', 'C'), recruit('Myla', 'CLERIC', '7')],
+      recruits: [recruit('Haror', 'REAVER', '3', 'C'), recruit('Myla', 'CLERIC', '7')],
       dualClassStickers: 4,
       corruptAnotherCard: true,
     },
