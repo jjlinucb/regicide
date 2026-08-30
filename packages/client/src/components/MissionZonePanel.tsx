@@ -58,6 +58,14 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
 
   return (
     <div className="mission-zone-panels">
+      {!showMissionZone && !state.beastDeckMechanic && (
+        <div className="mission-zone-panel empty">
+          <div className="mission-zone-header">
+            <span className="mission-zone-title">Mission Zone</span>
+            <span className="mission-zone-caption">Not active this mission.</span>
+          </div>
+        </div>
+      )}
       {showMissionZone && (
         <div className="mission-zone-panel">
           <div className="mission-zone-header">

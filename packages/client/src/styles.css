@@ -220,7 +220,7 @@ button {
   gap: 10px;
 }
 
-.z-enemy { grid-area: enemy; min-width: 0; }
+.z-enemy { grid-area: enemy; min-width: 0; display: flex; flex-direction: column; }
 .z-missionzone { grid-area: zone; min-width: 0; display: flex; flex-direction: column; }
 .z-players { grid-area: players; min-width: 0; display: flex; flex-direction: column; }
 .z-decks { grid-area: decks; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -261,6 +261,8 @@ button {
 .z-enemy .enemy-card {
   background: #efe9f9;
   border-color: color-mix(in srgb, var(--ink) 25%, var(--border));
+  flex: 1;
+  justify-content: center;
 }
 
 .z-enemy .enemy-title {
@@ -662,6 +664,10 @@ button {
   gap: 6px;
 }
 
+.mission-zone-panel.empty {
+  opacity: 0.6;
+}
+
 .mission-zone-header {
   display: flex;
   flex-wrap: wrap;
@@ -683,6 +689,8 @@ button {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .mission-zone-empty {
@@ -1009,6 +1017,30 @@ button {
 .playing-card.corrupted::after {
   bottom: -5px;
   transform: scaleY(-1);
+}
+
+/* Buried fan cards (CardPile's back-of-fan cards, mostly hidden behind the top card anyway) would otherwise
+   show this thorn as a black mark floating disconnected above/around the pile — only the front card (the
+   last one in CardPile's DOM order, see its `fanned.slice().reverse()`) keeps it. */
+.card-pile-fan-card:not(:last-child) .playing-card.corrupted::before,
+.card-pile-fan-card:not(:last-child) .playing-card.corrupted::after {
+  display: none;
+}
+
+/* Scaled down for the mission zone's always-small (44x62) cards, where the full-size thorn reads as
+   oversized and can bleed into an adjacent wrapped row. */
+.mission-zone-cards .playing-card.corrupted::before,
+.mission-zone-cards .playing-card.corrupted::after {
+  height: 3px;
+  background-size: 4px 4px;
+}
+
+.mission-zone-cards .playing-card.corrupted::before {
+  top: -2px;
+}
+
+.mission-zone-cards .playing-card.corrupted::after {
+  bottom: -2px;
 }
 
 .corrupted-badge {
