@@ -128,7 +128,7 @@ describe('legacy campaign integration', () => {
     expect(resumedLegacyState.currentMission).toBe(2);
   });
 
-  it('a solo (1-player) Legacy mission still shuffles in both Jesters, unlike classic Regicide\'s player-count-scaled table', async () => {
+  it('a solo (1-player) Legacy mission still gets both Jesters, unlike classic Regicide\'s player-count-scaled table', async () => {
     const client = ioClient(`http://localhost:${port}`);
     await waitFor(client, 'connect');
     const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Solo' });
@@ -136,7 +136,14 @@ describe('legacy campaign integration', () => {
     const result = rooms.startLegacyMission(created.code, created.playerId, 1);
     if ('error' in result) throw new Error(result.error);
 
-    const allCards = [...result.room.gameState.tavernDeck, ...result.room.gameState.players.flatMap((p) => p.hand)];
+    // Mission 1 uses the standing-Jester house rule like every other mission (see GameState.standingJesters) —
+    // both Jesters are carved out into their own always-usable pool instead of being shuffled into the reserve
+    // deck, so count across everywhere a Jester could actually be.
+    const allCards = [
+      ...result.room.gameState.tavernDeck,
+      ...result.room.gameState.players.flatMap((p) => p.hand),
+      ...result.room.gameState.standingJesters,
+    ];
     const jesterCount = allCards.filter((c) => c.kind === 'jester').length;
     expect(jesterCount).toBe(2);
     client.close();
