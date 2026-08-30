@@ -199,9 +199,110 @@ button {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   padding: 12px;
   padding-bottom: 8px;
+}
+
+/* ---------- Campaign board: one zoned grid for everything that's always on the table (enemy, mission zone,
+   piles, party, log) instead of a long single-column stack, so it fits a laptop screen without paging through a
+   tall vertical scroll. Purely a layout grid — each cell's own component already carries its own panel chrome
+   (mission-zone-panel, table-mat, etc.); Party and Log borrow that same mission-zone-panel look via .board-panel
+   below so every region reads as an equally-weighted zone. The enemy zone gets a violet tint (the app's own
+   --ink) against the green everywhere else, so the two sides of the table read apart at a glance. ---------- */
+
+.game-board {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr 0.9fr;
+  grid-template-areas:
+    'enemy  zone    players'
+    'enemy  decks   log';
+  gap: 10px;
+}
+
+.z-enemy { grid-area: enemy; min-width: 0; }
+.z-missionzone { grid-area: zone; min-width: 0; display: flex; flex-direction: column; }
+.z-players { grid-area: players; min-width: 0; display: flex; flex-direction: column; }
+.z-decks { grid-area: decks; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.z-log { grid-area: log; min-width: 0; display: flex; flex-direction: column; }
+
+/* Reuses mission-zone-panel's own look for the two zones (Party, Log) that don't already carry a labeled box. */
+.board-panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+}
+
+.board-panel-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.z-players .player-strip {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  flex-wrap: wrap;
+}
+
+.z-log .log-panel {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+/* The enemy zone is the board's violet half — everything else stays green. */
+.z-enemy .enemy-card {
+  background: #efe9f9;
+  border-color: color-mix(in srgb, var(--ink) 25%, var(--border));
+}
+
+.z-enemy .enemy-title {
+  color: var(--ink);
+}
+
+.relic-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.relic-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px 4px 6px;
+  font-size: 0.72rem;
+  color: var(--ink-dim);
+}
+
+.relic-glyph {
+  font-size: 0.85rem;
+}
+
+.relic-chip.filled {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.relic-chip.empty {
+  opacity: 0.55;
+}
+
+@media (max-width: 900px) {
+  .game-board {
+    grid-template-columns: 1fr;
+    grid-template-areas: 'enemy' 'zone' 'players' 'decks' 'log';
+  }
 }
 
 .enemy-card {
@@ -879,10 +980,35 @@ button {
 }
 
 /* A corrupted card (see SuitedCard.corrupted): playing it ignores enemy immunity but banishes the reserve
-   deck's top card as the cost — a cursed black-flame border marks it apart from an ordinary card. */
+   deck's top card as the cost — a black thorny border (jagged top/bottom edges via a pure-CSS zigzag, no
+   images) marks it apart from an ordinary card, instead of a soft glow. */
 .playing-card.corrupted {
   border-color: #1a1a1a;
-  box-shadow: 0 0 0 1px #1a1a1a, 0 0 8px 1px rgba(140, 60, 220, 0.55);
+  border-width: 2px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
+}
+
+.playing-card.corrupted::before,
+.playing-card.corrupted::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  height: 7px;
+  background: linear-gradient(135deg, #1a1a1a 25%, transparent 0) 0 0,
+    linear-gradient(225deg, #1a1a1a 25%, transparent 0) 0 0;
+  background-size: 8px 8px;
+  background-repeat: repeat-x;
+  pointer-events: none;
+}
+
+.playing-card.corrupted::before {
+  top: -5px;
+}
+
+.playing-card.corrupted::after {
+  bottom: -5px;
+  transform: scaleY(-1);
 }
 
 .corrupted-badge {
