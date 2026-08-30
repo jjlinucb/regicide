@@ -56,8 +56,8 @@ export interface Mission {
   presetMissionZone?: Card[];
   /** See GameState.rollingZoneBonus. */
   rollingZoneBonus?: boolean;
-  /** See GameState.START_LEGACY_MISSION action's presetRollingZoneCards. */
-  presetRollingZoneCards?: Card[];
+  /** See GameState.START_LEGACY_MISSION action's presetBanishPile. */
+  presetBanishPile?: Card[];
   /** See GameState.zoneVengeanceOnKill. */
   zoneVengeanceOnKill?: boolean;
   /** See GameState.pilgrimMechanic. */
@@ -111,7 +111,7 @@ function beastRecruit(name: string, cls: ClassId, rank: RecruitSpec['rank'], sui
   return { name, class: cls, rank, suit, beast: true };
 }
 
-/** A one-off companion card placed straight into a mission's static presetMissionZone (never part of the reserve deck or party). */
+/** A one-off companion card seeded straight into one of a mission's preset piles (presetMissionZone or presetBanishPile) — never part of the reserve deck or party. */
 function zoneCompanion(name: string, suit: Suit, rank: Rank): Card {
   return { id: `zone-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name };
 }
@@ -500,18 +500,23 @@ export const MISSIONS: Mission[] = [
       enemy('Gloom Spore Wailer', 'CLERIC', 60, 15),
       enemy('Gloom Spore Bulwark', 'PALADIN', 60, 15),
     ],
-    // Myla (value 7) starts this fight already in the Mission Zone, per the newer sourced transcript ("her 7
+    // Myla (value 7) starts this fight seeded into the BANISH pile, per the newer sourced transcript ("her 7
     // Strength card starts in the banish pile and immediately slides into the Mission Zone... a passive force
     // multiplier boosting the attack value of whichever Sporeling or Gloom Spore is currently active") — seeded
-    // straight into GameState.rollingZoneCards via presetRollingZoneCards below, rather than as an ordinary
-    // reserve-deck card (an earlier session's reading, since superseded by this newer source). She only becomes
-    // a real permanent party member starting Mission 6, via this mission's reward below.
+    // via presetBanishPile below, rather than as an ordinary reserve-deck card (an earlier session's reading,
+    // since superseded by this newer source). Confirmed against actual gameplay footage: "immediately slides
+    // into the Mission Zone" means via the mission's own normal end-of-turn banish-pile recycle (see
+    // rollMissionZoneBonusCard), not an instant mission-start seed straight into the rolling zone — turn 1's
+    // attack lands at the enemy's unbuffed base value, and only from turn 2 onward, once she's recycled in,
+    // does the +7 apply. An earlier version of this seed skipped the banish pile and put her directly into
+    // rollingZoneCards, which made the buff live one attack too early. She only becomes a real permanent party
+    // member starting Mission 6, via this mission's reward below.
     //
     // The 4 Reavers named in the mission-5 transcript ("Four new Reaver party members join") ride along in the
     // reserve deck for real — see reaverCompanion's own doc comment for why this matters beyond flavor: without
-    // them actually in the fight's reserve deck, nothing can ever trigger a Reaver's "Reveal and Add" mechanic,
-    // which is the ONLY thing that ever puts a card into the banish pile during Mission 5 — and rollingZoneBonus
-    // below reads its buff from exactly that pile (on top of Myla's own preset seed above). Ranks 3/5/7/9 (John's
+    // them actually in the fight's reserve deck, nothing can ever trigger a Reaver's "Reveal and Add" mechanic —
+    // the ONLY thing that ever adds to the banish pile during Mission 5 beyond Myla's own single preset card
+    // above — and rollingZoneBonus below reads its buff from exactly that pile. Ranks 3/5/7/9 (John's
     // ruling) — Haror (rank 3, Clubs) matches the identity reward.recruits grants permanently below; the other
     // 3's names/suits are an unsourced judgment call (no source names them individually), one per remaining suit.
     extraReserveCards: [
@@ -529,7 +534,7 @@ export const MISSIONS: Mission[] = [
     // still uncapped in principle, but bounded in practice by the banish pile's own recycling rate and reset by
     // every kill, instead of guaranteed to grow every single turn all fight long.
     rollingZoneBonus: true,
-    presetRollingZoneCards: [zoneCompanion('Myla', 'H', '7')],
+    presetBanishPile: [zoneCompanion('Myla', 'H', '7')],
     // An exact kill on a Sporeling bursts outward: the enemy's own base attack is dealt as splash damage
     // straight into whatever's newly revealed — occasionally strong enough to chain into a second kill. This is
     // the transcript's other named mechanic ("defeating an enemy with exact damage carries bonus damage into the
@@ -549,7 +554,7 @@ export const MISSIONS: Mission[] = [
     // into extraReserveCards entirely, which silently broke rollingZoneBonus by starving it of anything to ever
     // put in the banish pile. Also adds the sourced-but-missing "corrupt another card" effect (see party.ts's
     // applyCorruptAnotherCard) and a second round of Dual-class Stickers. Myla (value 7) — who spent this fight
-    // seeded straight into the Mission Zone via presetRollingZoneCards above, not a reserve-deck card — now joins
+    // seeded into the banish pile via presetBanishPile above, not a reserve-deck card — now joins
     // the party for real: a normal, drawable, playable Cleric card from Mission 6 onward.
     standingJesters: true,
     sidelineHighArcana: true,

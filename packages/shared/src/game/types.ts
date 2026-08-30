@@ -389,6 +389,10 @@ export interface GameState {
    * pending — an empty reveal (nothing left after discarding Jesters/corrupted) resolves immediately without
    * ever opening this window. `cards`/`claimedJester`/`forcedPlay`/`totalValue` carry everything
    * continueResolveCommittedPlay needs to resume once every queued Mage card's reveal (and any chains) is done.
+   * `trigger` is whichever card actually opened THIS round — the original Mage card from `cards`/`queue`, or, for
+   * a chained reveal, the previously-chosen candidate that turned out to itself be a Mage — so the UI can say
+   * whose reveal is on screen instead of one generic "The Mage reveals..." banner for every round of a multi-Mage
+   * or chained play (a real point of confusion once more than one reveal stacks up in the same combo).
    */
   mageReveal: {
     playerId: string;
@@ -401,16 +405,20 @@ export interface GameState {
     arcaneBonus: number;
     /** Suits of every reveal card tucked under the attack so far — merged into the play's own suit-power resolution, see continueResolveCommittedPlay. */
     arcaneSuits: Suit[];
+    trigger: Card;
   } | null;
   /**
    * Legacy-only (Mission 5+), John's ruling on the Reaver class ("Reveal and Add"): the open Reaver reveal window.
-   * Playing a Reaver card reveals cards off the top of the reserve deck — one per point of the Reaver card's own
-   * printed rank — and lets `playerId` choose one of them via CHOOSE_REAVER_REVEAL_CARD to add its raw numeric
-   * strength (its class power, if any, is ignored) to the play's attack total. EVERY card revealed this way —
+   * Playing a Reaver card reveals cards off the top of the reserve deck — one per point of the WHOLE PLAY's own
+   * combined total value, not just the Reaver card's own printed rank (confirmed live 2026-08-30: a Reaver
+   * combo'd into a bigger same-rank play, including via the Kinfolk Flute, reveals proportionally more) — and
+   * lets `playerId` choose one of them via CHOOSE_REAVER_REVEAL_CARD to add its raw numeric strength (its class
+   * power, if any, is ignored) to the play's attack total. EVERY card revealed this way —
    * chosen or not — is banished for good, not discarded (see resolveReaverRevealChoice's use of `allRevealed`,
    * which includes candidates never offered as a choice, like Jesters/corrupted cards). A Reaver's own class power
    * always doubles the play's total damage on top of this — see continueResolveCommittedPlay's reaverMultiplier —
    * so combining a Reaver with a Warrior (Clubs) card in the same play compounds into quadruple damage.
+   * `trigger` is the Reaver card that opened this reveal, so the UI can name it instead of a generic banner.
    */
   reaverReveal: {
     playerId: string;
@@ -422,6 +430,7 @@ export interface GameState {
     totalValue: number;
     arcaneBonus: number;
     arcaneSuits: Suit[];
+    trigger: SuitedCard;
   } | null;
   /**
    * Legacy-only: when true (Mission 3), the top of the reserve deck flips face-up into `missionZone` at the end
@@ -761,20 +770,23 @@ export type GameAction =
        * Legacy-only (Mission 6, also seeded by Mission 8 for its ascending chain's anchor): seeds
        * GameState.missionZone/zoneImmuneSuits with a fixed set of cards at mission start — unlike Mission 3's
        * endOfTurnZoneFlip, this zone is static for the whole mission (never flipped into, never banished on
-       * defeat) since endOfTurnZoneFlip is left unset. Mission 5 does not use this field — Myla seeds the
-       * separate, dynamic `presetRollingZoneCards` below instead (see its own doc comment).
+       * defeat) since endOfTurnZoneFlip is left unset. Mission 5 does not use this field — Myla instead starts
+       * the fight seeded into `presetBanishPile` below (see its own doc comment).
        */
       presetMissionZone?: Card[];
       /** See GameState.rollingZoneBonus. */
       rollingZoneBonus?: boolean;
       /**
-       * Legacy-only (Mission 5), sourced fix: seeds GameState.rollingZoneCards with a fixed set of cards at
-       * mission start, instead of leaving it empty until the first end-of-turn banish-pile flip. Myla's card
-       * starts here — "in the banish pile, immediately sliding into the Mission Zone" per the sourced transcript
-       * — rather than sitting in the reserve deck as an ordinary drawable card the way an earlier session modeled
-       * her. Only meaningful alongside `rollingZoneBonus: true`.
+       * Legacy-only (Mission 5), sourced fix: seeds GameState.banishPile with a fixed set of cards at mission
+       * start, instead of leaving it empty until something is actually banished during play. Myla's card starts
+       * here — "in the banish pile" per the sourced transcript — so the mission's normal end-of-turn banish-pile
+       * recycle (rollMissionZoneBonusCard) is what slides her into the rolling zone, the same as any other card
+       * that lands in the banish pile. That means her +7 is NOT live from the first attack: turn 1 hits the
+       * enemy's base value, and only from turn 2 onward (once she's recycled in) does the buff apply — confirmed
+       * against actual gameplay footage after an earlier reading had her seeded directly into the rolling zone
+       * instead, which made the buff live one attack too early. Only meaningful alongside `rollingZoneBonus: true`.
        */
-      presetRollingZoneCards?: Card[];
+      presetBanishPile?: Card[];
       /** See GameState.zoneVengeanceOnKill. */
       zoneVengeanceOnKill?: boolean;
       /** See GameState.pilgrimMechanic. */
@@ -989,6 +1001,7 @@ export interface ClientGameState {
     totalValue: number;
     arcaneBonus: number;
     arcaneSuits: Suit[];
+    trigger: Card;
   } | null;
   /** See GameState.reaverReveal. Public information, same as every other pending-choice window. */
   reaverReveal: {
@@ -1001,6 +1014,7 @@ export interface ClientGameState {
     totalValue: number;
     arcaneBonus: number;
     arcaneSuits: Suit[];
+    trigger: SuitedCard;
   } | null;
   /** See GameState.discardTopBuffsAttack. */
   discardTopBuffsAttack: boolean;

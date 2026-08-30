@@ -73,7 +73,7 @@ export function HomePage({
   return (
     <div className="centered-page">
       <h1>
-        Regicide <span className="version-tag">v1.4</span>
+        Regicide <span className="version-tag">v1.5</span>
       </h1>
       <div className="legacy-mode-toggle">
         <button type="button" className={!isLegacy ? 'btn' : 'btn btn-secondary'} onClick={() => setMode('regicide')}>

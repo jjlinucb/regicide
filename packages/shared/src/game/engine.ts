@@ -715,9 +715,12 @@ function isReaverCard(c: Card): c is Extract<Card, { kind: 'suited' }> {
 
 /**
  * Legacy-only, Mission 5+, John's ruling ("Reveal and Add"): reveals `count` cards off the top of the reserve
- * deck for a Reaver's play — `count` is that Reaver card's own printed rank (see startReaverPhase) — and either
- * opens AWAIT_REAVER_REVEAL for `playerId` to choose one candidate's raw strength to add to the attack, or, if
- * nothing revealed is choosable, resolves straight through with no bonus. Every card revealed here, chosen or
+ * deck for a Reaver's play — `count` is the WHOLE PLAY's own combined total value (see startReaverPhase), not
+ * just the Reaver card's own printed rank: a Reaver combined into a bigger same-rank combo (including one
+ * assembled via the Kinfolk Flute) reveals proportionally more. Confirmed live (2026-08-30): an earlier reading
+ * used only the Reaver's own rank here, which under-revealed the moment a Reaver was combo'd with anything else.
+ * Either opens AWAIT_REAVER_REVEAL for `playerId` to choose one candidate's raw strength to add to the attack, or,
+ * if nothing revealed is choosable, resolves straight through with no bonus. Every card revealed here, chosen or
  * not, is banished the instant the choice resolves (see resolveReaverRevealChoice) — unlike a Mage's reveal,
  * nothing not-chosen falls to the discard pile instead.
  */
@@ -731,6 +734,7 @@ function revealForReaver(
   arcaneBonus: number,
   arcaneSuits: Suit[],
   count: number,
+  trigger: SuitedCard,
 ): EngineResult {
   const revealed: Card[] = [];
   for (let i = 0; i < count; i++) {
@@ -739,18 +743,19 @@ function revealForReaver(
   }
   const candidates = revealed.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited');
   const player = state.players.find((p) => p.id === playerId)!;
+  const triggerLabel = trigger.name ?? `the ${trigger.rank}`;
   if (candidates.length === 0) {
     if (revealed.length > 0) {
       banishCards(state, revealed);
-      log(state, `The Reaver's reveal turns up nothing but Jesters — ${revealed.length} card(s) banished, no bonus.`);
+      log(state, `${triggerLabel}'s reveal turns up nothing but Jesters — ${revealed.length} card(s) banished, no bonus.`);
     } else {
-      log(state, 'The reserve deck is empty — the Reaver finds nothing to add.');
+      log(state, `The reserve deck is empty — ${triggerLabel} finds nothing to add.`);
     }
     return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, 0);
   }
-  state.reaverReveal = { playerId, candidates, allRevealed: revealed, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits };
+  state.reaverReveal = { playerId, candidates, allRevealed: revealed, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, trigger };
   state.turnPhase = 'AWAIT_REAVER_REVEAL';
-  log(state, `The Reaver reveals ${revealed.length} card(s) from the reserve deck — choose one to add to the attack.`);
+  log(state, `${triggerLabel}'s reveal turns up ${revealed.length} card(s) from the reserve deck — choose one to add to the attack.`);
   return ok(state);
 }
 
@@ -767,7 +772,10 @@ function startReaverPhase(
 ): EngineResult {
   const reaverTrigger = state.ruleset === 'legacy' ? cards.find(isReaverCard) : undefined;
   if (reaverTrigger) {
-    return revealForReaver(state, player.id, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, cardValue(reaverTrigger));
+    // The reveal count is the whole play's own combined total value, not just the Reaver's own printed rank —
+    // see revealForReaver's doc comment for why (a Reaver combo'd with another same-rank card, including via the
+    // Kinfolk Flute, reveals proportionally more).
+    return revealForReaver(state, player.id, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, totalValue, reaverTrigger);
   }
   return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, 0);
 }
@@ -811,6 +819,7 @@ function revealForMage(
   arcaneBonus: number,
   arcaneSuits: Suit[],
   count: number,
+  trigger: Card,
 ): EngineResult {
   const revealed: Card[] = [];
   for (let i = 0; i < count; i++) {
@@ -819,6 +828,7 @@ function revealForMage(
   }
   const setAside = revealed.filter((c) => c.kind === 'jester' || (c.kind === 'suited' && c.corrupted));
   const candidates = revealed.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !c.corrupted);
+  const triggerLabel = trigger.kind === 'suited' ? (trigger.name ?? `the ${trigger.rank}`) : 'The Mage';
   if (setAside.length > 0) {
     state.discardPile.push(...setAside);
     log(state, `The Mage's reveal turns up ${setAside.length} Jester(s)/corrupted card(s) — discarded.`);
@@ -827,9 +837,9 @@ function revealForMage(
     log(state, revealed.length > 0 ? "Nothing's left in the reveal to add to the attack." : 'The reserve deck is empty — the reveal finds nothing.');
     return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneSuits);
   }
-  state.mageReveal = { playerId, candidates, queue, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits };
+  state.mageReveal = { playerId, candidates, queue, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, trigger };
   state.turnPhase = 'AWAIT_MAGE_REVEAL';
-  log(state, `The Mage reveals ${revealed.length} card(s) from the reserve deck — choose one to add to the attack.`);
+  log(state, `${triggerLabel}'s reveal turns up ${revealed.length} card(s) from the reserve deck — choose one to add to the attack.`);
   return ok(state);
 }
 
@@ -848,7 +858,7 @@ function advanceMageQueue(
   if (queue.length > 0) {
     const [trigger] = queue;
     const rest = queue.slice(1);
-    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, rest, arcaneBonus, arcaneSuits, mageRevealCount(trigger, totalValue));
+    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, rest, arcaneBonus, arcaneSuits, mageRevealCount(trigger, totalValue), trigger);
   }
   const player = state.players.find((p) => p.id === playerId)!;
   return startReaverPhase(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits);
@@ -880,7 +890,7 @@ function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, {
 
   if (isMageCard(chosen)) {
     log(state, `${chosen.name ?? 'The chosen card'} is itself a Mage — the reveal chains at its own strength.`);
-    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneSuits, mageRevealCount(chosen, chosenValue));
+    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneSuits, mageRevealCount(chosen, chosenValue), chosen);
   }
   return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneSuits);
 }
@@ -1686,7 +1696,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.zoneImmuneSuits = action.ascendingZone
     ? []
     : Array.from(new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))));
-  state.banishPile = [];
+  state.banishPile = action.presetBanishPile ?? [];
   // See deckJesterCount above — when standingJesters is set, the mission's Jesters never enter the shuffled
   // reserve deck at all; they're built directly into this standing pool instead (see GameState.standingJesters).
   state.standingJesters = action.standingJesters ? makeJesters(action.jesterCount) : [];
@@ -1695,7 +1705,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.discardCleanupLowToHigh = action.discardCleanupLowToHigh ?? false;
   state.exactKillSplashDamage = action.exactKillSplashDamage ?? false;
   state.rollingZoneBonus = action.rollingZoneBonus ?? false;
-  state.rollingZoneCards = action.presetRollingZoneCards ?? [];
+  state.rollingZoneCards = [];
   state.zoneVengeanceOnKill = action.zoneVengeanceOnKill ?? false;
   state.zoneVengeanceChoice = null;
   state.zoneReliefChoice = null;
@@ -1869,7 +1879,7 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   if (mageQueue.length > 0) {
     const [trigger] = mageQueue;
     const rest = mageQueue.slice(1);
-    return revealForMage(state, player.id, cards, claimedJester, forcedPlay, shape.totalValue, rest, 0, [], mageRevealCount(trigger, shape.totalValue));
+    return revealForMage(state, player.id, cards, claimedJester, forcedPlay, shape.totalValue, rest, 0, [], mageRevealCount(trigger, shape.totalValue), trigger);
   }
   return startReaverPhase(state, player, cards, claimedJester, forcedPlay, shape.totalValue, 0, []);
 }

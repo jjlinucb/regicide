@@ -516,7 +516,7 @@ export class RoomManager {
       exactKillSplashDamage: mission.exactKillSplashDamage,
       presetMissionZone: mission.presetMissionZone,
       rollingZoneBonus: mission.rollingZoneBonus,
-      presetRollingZoneCards: mission.presetRollingZoneCards,
+      presetBanishPile: mission.presetBanishPile,
       zoneVengeanceOnKill: mission.zoneVengeanceOnKill,
       pilgrimMechanic: mission.pilgrimMechanic,
       pilgrimCards: mission.pilgrimCards,
