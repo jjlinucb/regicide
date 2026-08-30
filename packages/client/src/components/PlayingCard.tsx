@@ -44,9 +44,12 @@ export function cardAbilityText(card: Card): string {
     const dualSuffix = card.secondSuit ? ` Also a ${SUIT_TO_CLASS[card.secondSuit].name} (Dual-class Sticker).` : '';
     const flexSuffix = card.flexibleComboRank ? ` Combos as a ${card.flexibleComboRank} too.` : '';
     const wildSuffix = card.wildSuit ? ' Choose a suit for it when you play it.' : '';
-    const corruptedSuffix = card.corrupted ? ' Corrupted: ignores enemy immunity, but banishes the top of the reserve deck when played.' : '';
+    const corruptedSuffix = card.corrupted ? ' Cursed: ignores enemy immunity, but burns the top card of the reserve deck when played.' : '';
+    const reaverSuffix = card.reaver
+      ? ` Reveals cards off the reserve deck equal to its own rank (${card.rank}), then choose one to add its strength to the attack — every revealed card is banished. Always doubles the play's total damage.`
+      : '';
     const displayName = card.name ?? (card.wildSuit ? 'Any-Suit Ace' : 'Mercenary');
-    return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${flexSuffix}${wildSuffix}${corruptedSuffix}`;
+    return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${flexSuffix}${wildSuffix}${corruptedSuffix}${reaverSuffix}`;
   }
   const tierSuffix = card.tier ? ` (upgraded ${card.tier} tier${card.tier > 1 ? 's' : ''} past King, from an Endless Mode win)` : '';
   return `${rankLabel} of ${SUIT_NAME[card.suit]} — value ${cardValue(card)}${tierSuffix}. ${SUIT_ABILITY_TEXT[card.suit]}`;
@@ -105,7 +108,7 @@ export function PlayingCard({
       title={blocked ? `${abilityText} — no effect on this boss` : abilityText}
     >
       {card.special && !small && <span className="special-badge" aria-hidden="true">✦</span>}
-      {card.corrupted && !small && <span className="corrupted-badge" aria-hidden="true">🔥</span>}
+      {card.corrupted && !small && <span className="corrupted-badge" aria-hidden="true">🥀</span>}
       <span className="rank">{rankLabel}</span>
       <span className="glyph">{glyph}</span>
       {legacy && card.secondSuit && !small && (

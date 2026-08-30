@@ -23,6 +23,7 @@ import { VictoryCrest } from '../components/VictoryCrest';
 import { ZonePurgePicker } from '../components/ZonePurgePicker';
 import { CapturedPiles } from '../components/CapturedPiles';
 import { EnemyCardPicker } from '../components/EnemyCardPicker';
+import { RelicsTray } from '../components/RelicsTray';
 
 const MEDAL_INFO: Record<'gold' | 'silver' | 'bronze', { emoji: string; label: string }> = {
   gold: { emoji: '🥇', label: 'Gold Victory' },
@@ -343,18 +344,37 @@ export function GamePage({
             </button>
           </div>
         )}
-        {state.currentEnemy && (
-          <EnemyDisplay
-            enemy={state.currentEnemy}
-            liveAttack={state.liveEnemyAttack ?? 0}
-            zoneImmuneSuits={state.zoneImmuneSuits}
-          />
-        )}
-        <MissionZonePanel state={state} />
-        <DeckPiles state={state} myPlayerId={myPlayerId} />
-        {state.capturedPilesActive && <CapturedPiles piles={state.capturedPiles} />}
-        <PlayerList state={state} myPlayerId={myPlayerId} />
-        <ActionLog state={state} />
+        {isLegacy && <RelicsTray state={state} myPlayerId={myPlayerId} />}
+        <div className="game-board">
+          <div className="z-enemy">
+            {state.currentEnemy && (
+              <EnemyDisplay
+                enemy={state.currentEnemy}
+                liveAttack={state.liveEnemyAttack ?? 0}
+                zoneImmuneSuits={state.zoneImmuneSuits}
+              />
+            )}
+          </div>
+          <div className="z-missionzone">
+            <MissionZonePanel state={state} />
+          </div>
+          <div className="z-players">
+            <div className="board-panel">
+              <span className="board-panel-title">Party</span>
+              <PlayerList state={state} myPlayerId={myPlayerId} />
+            </div>
+          </div>
+          <div className="z-decks">
+            <DeckPiles state={state} myPlayerId={myPlayerId} />
+            {state.capturedPilesActive && <CapturedPiles piles={state.capturedPiles} />}
+          </div>
+          <div className="z-log">
+            <div className="board-panel">
+              <span className="board-panel-title">Log</span>
+              <ActionLog state={state} />
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="hand-area">
