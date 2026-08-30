@@ -516,12 +516,15 @@ export const MISSIONS: Mission[] = [
     // reserve deck for real — see reaverCompanion's own doc comment for why this matters beyond flavor: without
     // them actually in the fight's reserve deck, nothing can ever trigger a Reaver's "Reveal and Add" mechanic —
     // the ONLY thing that ever adds to the banish pile during Mission 5 beyond Myla's own single preset card
-    // above — and rollingZoneBonus below reads its buff from exactly that pile. Ranks 3/5/7/9 (John's
-    // ruling) — Haror (rank 3, Clubs) matches the identity reward.recruits grants permanently below; the other
-    // 3's names/suits are an unsourced judgment call (no source names them individually), one per remaining suit.
+    // above — and rollingZoneBonus below reads its buff from exactly that pile. Ranks 3/5/7/9 (John's ruling).
+    // Confirmed live (2026-08-30): the rank-5 Reaver (Haror) is the one kept permanently by the reward below, NOT
+    // rank 3 (an earlier reading had this backwards) — Skarn Hollowtooth now takes the rank-3/Clubs slot Haror
+    // used to hold, and Haror takes the rank-5/Spades slot Skarn used to hold, so the identity reward.recruits
+    // grants permanently still matches the card that actually fights at that rank in this mission. The other 2
+    // names/suits are an unsourced judgment call (no source names them individually), one per remaining suit.
     extraReserveCards: [
-      reaverCompanion('Haror', 'C', '3'),
-      reaverCompanion('Skarn Hollowtooth', 'S', '5'),
+      reaverCompanion('Skarn Hollowtooth', 'C', '3'),
+      reaverCompanion('Haror', 'S', '5'),
       reaverCompanion('Petra Duskfang', 'H', '7'),
       reaverCompanion('Yorrin Grimtide', 'D', '9'),
     ],
@@ -544,24 +547,43 @@ export const MISSIONS: Mission[] = [
     // Reward: sourced research found the shipped version over-granted here — keeping all 4 new Reaver recruits
     // permanently, when the source (and this repo's own mission-5.md transcript note: "how to permanently retire
     // cards from the party roster, used here to trim the new Reavers back down after the mission") keeps only
-    // rank 3 (Haror) for good. Implemented as a straight, permanent single-recruit grant rather than
-    // modeling "recruit all 4, then retire 3" as two separate steps — this campaign's reward model elsewhere
-    // (e.g. Mission 11's applyBeastCardChoice) only ever tracks the FINAL kept roster, never an intermediate
-    // grant-then-retire history, so the net effect (only Haror ends up in the permanent campaign PARTY roster) is
-    // the same either way. That equivalence is scoped to the permanent roster only, though — it does NOT excuse
-    // the 4 Reavers from also needing to actually join THIS FIGHT'S reserve deck (see extraReserveCards above and
-    // reaverCompanion's doc comment): a prior version of this comment conflated the two and skipped seeding them
-    // into extraReserveCards entirely, which silently broke rollingZoneBonus by starving it of anything to ever
-    // put in the banish pile. Also adds the sourced-but-missing "corrupt another card" effect (see party.ts's
-    // applyCorruptAnotherCard) and a second round of Dual-class Stickers. Myla (value 7) — who spent this fight
-    // seeded into the banish pile via presetBanishPile above, not a reserve-deck card — now joins
-    // the party for real: a normal, drawable, playable Cleric card from Mission 6 onward.
+    // rank 5 (Haror — see extraReserveCards above for the rank swap) for good. Implemented as a straight,
+    // permanent single-recruit grant rather than modeling "recruit all 4, then retire 3" as two separate steps —
+    // this campaign's reward model elsewhere (e.g. Mission 11's applyBeastCardChoice) only ever tracks the FINAL
+    // kept roster, never an intermediate grant-then-retire history, so the net effect (only Haror ends up in the
+    // permanent campaign PARTY roster) is the same either way. That equivalence is scoped to the permanent
+    // roster only, though — it does NOT excuse the 4 Reavers from also needing to actually join THIS FIGHT'S
+    // reserve deck (see extraReserveCards above and reaverCompanion's doc comment): a prior version of this
+    // comment conflated the two and skipped seeding them into extraReserveCards entirely, which silently broke
+    // rollingZoneBonus by starving it of anything to ever put in the banish pile. Also adds the sourced-but-
+    // missing "corrupt another card" effect (see party.ts's applyCorruptAnotherCard) and a second round of
+    // Dual-class Stickers.
+    //
+    // Myla (value 7) — who spent this fight seeded into the banish pile via presetBanishPile above, not a
+    // reserve-deck card — now joins the party for real, but confirmed live (2026-08-30) as a plain rank-7 card
+    // with NO class power at all (`noSuitPower`), not a working Cleric as an earlier reading had it — she still
+    // carries the Hearts suit for identity/immunity-bookkeeping continuity with her Mission 5/6 zone appearances,
+    // it just never resolves when she's played.
+    //
+    // Goran (recruited back at Mission 4, rank 8/Spades/Paladin, no special ability) permanently gains Clubs
+    // (Warrior) as a second suit here (`secondSuitByName`), confirmed live — both suit powers now trigger
+    // whenever he's played, the same "second class" shape Dual-class Stickers grant randomly elsewhere, just
+    // targeted: Goran is rank 8, outside the "Lucky 4" 3/5/7/9 ranks that generic mechanic targets, so he'd never
+    // be reachable by it otherwise.
+    //
+    // `reaverStickerChoice`: confirmed live — after this mission, the player picks one of their existing
+    // eligible rank-6 Bard/Cleric/or Paladin party members (never Warrior) to permanently gain a bonus Reaver
+    // sticker (see party.ts's reaverStickerEligible/applyReaverStickerChoice, GameState's secondClassReaver doc).
+    // A genuine player choice, unlike the Mage/Guardian stickers elsewhere in this file — resolved from the
+    // campaign lobby (see CampaignLobbyPage's ReaverStickerPicker), not auto-applied by applyReward.
     standingJesters: true,
     sidelineHighArcana: true,
     reward: {
-      recruits: [recruit('Haror', 'REAVER', '3', 'C'), recruit('Myla', 'CLERIC', '7')],
+      recruits: [recruit('Haror', 'REAVER', '5', 'S'), { name: 'Myla', class: 'CLERIC', rank: '7', suit: 'H', noSuitPower: true }],
       dualClassStickers: 4,
       corruptAnotherCard: true,
+      secondSuitByName: { name: 'Goran', suit: 'C' },
+      reaverStickerChoice: true,
     },
   },
   {

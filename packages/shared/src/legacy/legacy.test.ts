@@ -12,10 +12,13 @@ import {
   applyEvergreenUpgrade,
   applyGuardianSticker,
   applyMageSticker,
+  applyReaverStickerChoice,
   applyReward,
   applyRestoredPartyCards,
+  applySecondSuitByName,
   buildInitialParty,
   buildRecruitCard,
+  reaverStickerEligible,
 } from './party.js';
 
 function suited(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
@@ -2105,24 +2108,25 @@ describe('legacy: mission 6 setup, bug fix — Guardian cards seeded as fight se
   });
 });
 
-describe('legacy: mission 5 reward (only rank-5 Reaver kept, Myla joins the party, Dual-class Stickers, corrupt-another-card)', () => {
-  it('keeps only the Reaver recruit (Haror, rank 3) permanently — not all 4 originally shipped', () => {
+describe('legacy: mission 5 reward (rank-5 Reaver kept, Myla joins with no ability, Goran gains a second suit, a player-chosen Reaver sticker, Dual-class Stickers, corrupt-another-card)', () => {
+  it('keeps only the Reaver recruit (Haror, rank 5) permanently — not all 4 originally shipped, and not rank 3', () => {
     // Sourced research (regicidelegacy.com compendium / BGG threads / a fan digital reimplementation's rules
     // doc) found the shipped version over-granted: this repo's own mission-5 transcript note ("how to
     // permanently retire cards from the party roster, used here to trim the new Reavers back down after the
-    // mission") and the sourced material agree only Haror survives. Ranks are 3/5/7/9 (John's ruling), not all
-    // rank 5 — Haror is the rank-3 one.
+    // mission") and the sourced material agree only Haror survives. Ranks are 3/5/7/9 (John's ruling). Confirmed
+    // live (2026-08-30): Haror is the rank-5 one, not rank 3 as an earlier reading had it — see missions.ts's
+    // Mission 5 extraReserveCards for the corresponding fight-setup rank swap.
     const mission5 = getMission(5)!;
     const reavers = mission5.reward.recruits.filter((r) => r.class === 'REAVER');
     expect(reavers.length).toBe(1);
-    expect(reavers[0]).toMatchObject({ name: 'Haror', rank: '3' });
+    expect(reavers[0]).toMatchObject({ name: 'Haror', rank: '5' });
   });
 
-  it('rewards Myla as a real playable Cleric card, a second round of Dual-class Stickers, and a corrupt-another-card effect', () => {
+  it('rewards Myla as a joinable rank-7 card with NO class power, a second round of Dual-class Stickers, and a corrupt-another-card effect', () => {
     const mission5 = getMission(5)!;
     const myla = mission5.reward.recruits.find((r) => r.name === 'Myla');
-    expect(myla?.class).toBe('CLERIC');
     expect(myla?.rank).toBe('7');
+    expect(myla?.noSuitPower).toBe(true);
     expect(mission5.reward.dualClassStickers).toBe(4);
     expect(mission5.reward.corruptAnotherCard).toBe(true);
 
@@ -2130,6 +2134,8 @@ describe('legacy: mission 5 reward (only rank-5 Reaver kept, Myla joins the part
     const mylaCard = party.find((c) => c.kind === 'suited' && c.name === 'Myla');
     expect(mylaCard).toBeDefined();
     if (mylaCard?.kind === 'suited') {
+      expect(mylaCard.suit).toBe('H'); // kept for identity/immunity bookkeeping, even with no live suit power
+      expect(mylaCard.noSuitPower).toBe(true);
       expect(mylaCard.guardian).toBeUndefined();
       expect(mylaCard.reaver).toBeUndefined();
     }
@@ -2138,6 +2144,30 @@ describe('legacy: mission 5 reward (only rank-5 Reaver kept, Myla joins the part
     expect(corrupted.length).toBe(1);
     expect(corrupted[0].name).not.toBe('Myla');
     expect(corrupted[0].name).not.toBe('Haror');
+  });
+
+  it('gives Goran (recruited back at Mission 4) Clubs as a permanent second suit, confirmed live', () => {
+    const mission4 = getMission(4)!;
+    const mission5 = getMission(5)!;
+    expect(mission5.reward.secondSuitByName).toEqual({ name: 'Goran', suit: 'C' });
+
+    let party = applyReward(buildInitialParty(), mission4.reward);
+    party = applyReward(party, mission5.reward);
+    const goran = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
+    expect(goran).toBeDefined();
+    if (goran?.kind === 'suited') {
+      expect(goran.suit).toBe('S'); // his original Spades/Paladin identity is untouched
+      expect(goran.secondSuit).toBe('C'); // Clubs/Warrior added on top
+    }
+  });
+
+  it('flags a player-chosen (not automatic) Reaver sticker as this mission\'s reward, unlike the Mage/Guardian stickers elsewhere', () => {
+    const mission5 = getMission(5)!;
+    expect(mission5.reward.reaverStickerChoice).toBe(true);
+    // Deliberately not auto-applied by applyReward — no party card should ever come out of a Mission 5 reward
+    // already carrying the sticker without the player having picked a target.
+    const party = applyReward(buildInitialParty(), mission5.reward);
+    expect(party.some((c) => c.kind === 'suited' && c.secondClassReaver)).toBe(false);
   });
 
   it('seeds Myla straight into the banish pile (presetBanishPile) instead of the static presetMissionZone, the rolling zone, or the reserve deck, per the newer sourced transcript', () => {
@@ -2262,6 +2292,54 @@ describe('legacy: bonus Guardian sticker (secondClassGuardian — keeps its own 
     const stickered = next.filter((c) => c.kind === 'suited' && c.secondClassGuardian);
     expect(stickered.length).toBe(1);
     expect(stickered[0].kind === 'suited' && stickered[0].rank).toBe('8');
+  });
+});
+
+describe('legacy: bonus Reaver sticker (secondClassReaver — Mission 5\'s player-chosen reward, keeps its own suit power AND triggers the full Reveal and Add mechanic)', () => {
+  it('resolves both its printed suit power and the Reaver mechanic (reveal-and-add, unconditional doubling) when played', () => {
+    const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 1 };
+    let state = startMission(1, [boss]);
+    state = structuredClone(state);
+    // Hearts (Cleric) has no damage-affecting suit power of its own, so this isolates the Reaver math cleanly —
+    // unlike the Guardian-sticker test above, which deliberately used Clubs to prove the suit power ALSO fires.
+    state.tavernDeck = [suited('D', '9'), suited('S', '1'), suited('S', '1'), suited('S', '1'), suited('S', '1'), suited('S', '1'), ...state.tavernDeck];
+    const stickered: SuitedCard = { ...suited('H', '6'), secondClassReaver: true }; // Cleric-6 + bonus Reaver sticker
+    state = rig(state, [stickered]);
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL'); // the bonus sticker triggers a real reveal, not just a suit power
+    expect(state.reaverReveal?.candidates.length).toBe(6); // reveal count = the play's own total value (6), same as a pure Reaver
+    const chosen = state.reaverReveal!.candidates.find((c) => c.rank === '9')!;
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
+    state = res.state;
+
+    // (6 + 9) * 2 (Reaver's unconditional doubling, same as a pure Reaver card) = 30.
+    expect(state.currentEnemy?.damageTaken).toBe(30);
+  });
+
+  it('reaverStickerEligible restricts to rank-6 Bard/Cleric/Paladin, excluding Warrior and anything already special or already stickered', () => {
+    expect(reaverStickerEligible(suited('D', '6'))).toBe(true); // Bard
+    expect(reaverStickerEligible(suited('H', '6'))).toBe(true); // Cleric
+    expect(reaverStickerEligible(suited('S', '6'))).toBe(true); // Paladin
+    expect(reaverStickerEligible(suited('C', '6'))).toBe(false); // Warrior — explicitly excluded
+    expect(reaverStickerEligible(suited('H', '7'))).toBe(false); // wrong rank
+    expect(reaverStickerEligible({ ...suited('H', '6'), reaver: true })).toBe(false); // already a primary special class
+    expect(reaverStickerEligible({ ...suited('H', '6'), secondClassReaver: true })).toBe(false); // already stickered
+  });
+
+  it('applyReaverStickerChoice applies the sticker to exactly the chosen card, and is a no-op for an ineligible id', () => {
+    const target = suited('D', '6');
+    const party = [target, suited('C', '6'), suited('H', '3')];
+
+    const next = applyReaverStickerChoice(party, target.id);
+    const stickered = next.find((c) => c.id === target.id);
+    expect(stickered?.kind === 'suited' && stickered.secondClassReaver).toBe(true);
+    expect(next.filter((c) => c.kind === 'suited' && c.secondClassReaver).length).toBe(1);
+
+    const unchanged = applyReaverStickerChoice(party, 'not-a-real-id');
+    expect(unchanged).toBe(party); // same reference — no-op
   });
 });
 

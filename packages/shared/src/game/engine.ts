@@ -708,9 +708,9 @@ function mageRevealCount(trigger: Card, ownValue: number): number {
   return hasSpecial([trigger], 'ARCANE_SURGE') ? ownValue * 2 : ownValue;
 }
 
-/** Legacy-only, Mission 5+: a "Reaver" for reveal purposes — see GameState.reaverReveal. */
+/** Legacy-only, Mission 5+: a "Reaver" for reveal purposes — a pure Reaver card, or a card carrying a bonus Reaver sticker (Mission 5's reaverStickerChoice reward). See GameState.reaverReveal. */
 function isReaverCard(c: Card): c is Extract<Card, { kind: 'suited' }> {
-  return c.kind === 'suited' && Boolean(c.reaver);
+  return c.kind === 'suited' && Boolean(c.reaver || c.secondClassReaver);
 }
 
 /**
@@ -1945,8 +1945,10 @@ function continueResolveCommittedPlay(
   // revealForReaver/resolveReaverRevealChoice — that reveal-and-choose step runs BEFORE this function, the same
   // way a Mage's reveal does). A Reaver's own class power doubles the whole play's damage on top of that bonus —
   // unconditionally, unlike Clubs' double (which needs a Warrior card present) — so a Reaver played alongside a
-  // Warrior (Clubs) card compounds into quadruple damage.
-  const reaverCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.reaver));
+  // Warrior (Clubs) card compounds into quadruple damage. Reuses isReaverCard (not a raw `.reaver` check) so a
+  // secondClassReaver sticker card (Mission 5's reaverStickerChoice reward) gets the same doubling, not just the
+  // reveal — the whole "Reveal and Add" package, exactly like a pure Reaver card.
+  const reaverCards = cards.filter(isReaverCard);
   const reaverMultiplier = state.ruleset === 'legacy' && reaverCards.length > 0 ? 2 : 1;
 
   // Guardians (Mission 6): playing one raises an absolute shield that blocks the enemy's very next attack

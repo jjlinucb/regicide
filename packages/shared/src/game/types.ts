@@ -126,6 +126,15 @@ export interface SuitedCard {
    */
   secondClassGuardian?: boolean;
   /**
+   * Legacy-only: marks a card that's picked up a bonus Reaver sticker (Mission 5's reward, a player-chosen pick —
+   * see legacy/party.ts's applyReaverStickerChoice/reaverStickerEligible) on top of an existing class. Unlike a
+   * pure Reaver recruit's `reaver` flag (which replaces suit-power resolution entirely), this card keeps
+   * resolving its normal suit power AND triggers the Reaver's full "Reveal and Add" mechanic, including its
+   * unconditional damage doubling, when played (see engine.ts's isReaverCard / GameState.reaverReveal) — the
+   * same "second class" shape as secondClassArcane/secondClassGuardian above.
+   */
+  secondClassReaver?: boolean;
+  /**
    * Legacy-only: marks a Beast Companion (Mission 4's reward, x4, each tied to a specific character). Works like
    * an Animal Companion (see rules.ts's isAnimalCompanion) — playable alone, or paired with exactly one other
    * card — but instead of contributing its own printed value (an Ace's flat 1) to the pair's total, it copies

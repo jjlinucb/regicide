@@ -1,7 +1,7 @@
 import { buildStandardPartyCards, shuffle } from '../game/deck.js';
 import type { Card, Rank, Suit } from '../game/types.js';
 import type { ClassId } from './classes.js';
-import { CLASS_THEME } from './classes.js';
+import { CLASS_THEME, SUIT_TO_CLASS } from './classes.js';
 
 const ALL_SUITS: Suit[] = ['H', 'D', 'C', 'S'];
 
@@ -89,6 +89,8 @@ export interface RecruitSpec {
   suit?: Suit;
   /** Mission 4's Beast Companion reward (x4): marks the built card with SuitedCard.beast (see rules.ts's isBeastCompanion). Tied to one of the 4 base classes like any other recruit — just also plays by the Animal/Beast Companion pairing rule. */
   beast?: boolean;
+  /** Mission 5's Myla, sourced fix: a named recruit that carries a real suit (for immunity bookkeeping/identity) but whose class power never resolves — same SuitedCard.noSuitPower flag a Mercenary "19" uses, just on an otherwise-ordinary named recruit instead. */
+  noSuitPower?: boolean;
 }
 
 /**
@@ -114,6 +116,7 @@ export function buildRecruitCard(spec: RecruitSpec): Card {
     ...(spec.class === 'EVERGREEN' ? { evergreen: true } : {}),
     ...(spec.special ? { special: CLASS_THEME[spec.class].specialAbility } : {}),
     ...(spec.beast ? { beast: true } : {}),
+    ...(spec.noSuitPower ? { noSuitPower: true } : {}),
   };
 }
 
@@ -160,6 +163,24 @@ export interface MissionReward {
    * name-based lookup was unaffected by that move, since it never depended on a specific mission's placement.)
    */
   upgradeEvergreenCard?: string;
+  /**
+   * Mission 5's reward, sourced fix: gives the existing party member matching this NAME a specific second suit
+   * (see applySecondSuitByName) — the same SuitedCard.secondSuit Dual-class Stickers grant randomly, but targeted
+   * and deterministic. Used for Goran (recruited by Mission 4's own reward, rank 8 — outside the "Lucky 4"
+   * 3/5/7/9 ranks Dual-class Stickers target, so he'd otherwise never be reachable by that generic mechanic):
+   * this mission adds Clubs (Warrior) on top of his existing Spades (Paladin), matching live gameplay footage.
+   */
+  secondSuitByName?: { name: string; suit: Suit };
+  /**
+   * Mission 5's reward, sourced fix (confirmed live 2026-08-30): after the mission, the player picks ONE of
+   * their existing eligible rank-6 Bard/Cleric/or Paladin party members (never Warrior) to permanently gain a
+   * bonus Reaver sticker (SuitedCard.secondClassReaver — see engine.ts's isReaverCard/reaverStickerEligible
+   * below) on top of its own class power, the same "keeps its own suit power AND gets the bonus mechanic" shape
+   * as applyMageSticker/applyGuardianSticker. Unlike those two, this one is a PLAYER CHOICE, not an automatic
+   * random pick — see RoomManager's chooseReaverSticker/CampaignLobbyPage's picker. Deliberately NOT auto-applied
+   * by applyReward below (there is no card to target yet without the player's own input).
+   */
+  reaverStickerChoice?: boolean;
 }
 
 /** The "Lucky 4" ranks Dual-class Stickers target — one sticker per rank, matching the physical game's 4-sticker sheets. */
@@ -307,9 +328,66 @@ export function applyEvergreenUpgradeByName(party: Card[], name?: string): Card[
 }
 
 /**
+ * Mission 5's Goran bonus (see MissionReward.secondSuitByName's doc): finds the existing party member matching
+ * `target.name` and permanently gives it `target.suit` as SuitedCard.secondSuit — the same field Dual-class
+ * Stickers set randomly, just targeted at a specific card and suit instead. A no-op (same reference) if
+ * `target` is unset or no matching card is found.
+ */
+export function applySecondSuitByName(party: Card[], target?: { name: string; suit: Suit }): Card[] {
+  if (!target) return party;
+  let upgraded = false;
+  const next = party.map((c) => {
+    if (upgraded || c.kind !== 'suited' || c.name !== target.name) return c;
+    upgraded = true;
+    return { ...c, secondSuit: target.suit };
+  });
+  return upgraded ? next : party;
+}
+
+/**
+ * Mission 5's reward, sourced fix (see MissionReward.reaverStickerChoice's doc): whether `card` is a legal
+ * target for the player's post-mission Reaver-sticker pick — rank 6, one of the Bard/Cleric/Paladin classes
+ * (Warrior is explicitly excluded, per the source), not already carrying a special class of its own, and not
+ * already stickered with this same bonus. Exported so both RoomManager's server-side validation and the
+ * client's picker UI (CampaignLobbyPage) filter on the exact same rule.
+ */
+export function reaverStickerEligible(card: Card): card is Extract<Card, { kind: 'suited' }> {
+  return (
+    card.kind === 'suited' &&
+    card.rank === '6' &&
+    ['BARD', 'CLERIC', 'PALADIN'].includes(SUIT_TO_CLASS[card.suit].id) &&
+    !card.arcane &&
+    !card.reaver &&
+    !card.guardian &&
+    !card.druid &&
+    !card.chanter &&
+    !card.evergreen &&
+    !card.secondClassReaver
+  );
+}
+
+/**
+ * Applies the player's chosen target (see reaverStickerEligible) for Mission 5's Reaver-sticker reward —
+ * permanently gives that one card SuitedCard.secondClassReaver, mirroring applyMageSticker/applyGuardianSticker's
+ * "keeps its own suit power AND gets the bonus mechanic" shape, but for a player-picked `cardId` instead of an
+ * `rng` pick. A no-op (same reference) if `cardId` doesn't match an eligible card — callers should validate with
+ * reaverStickerEligible first and surface an error rather than rely on this silently doing nothing.
+ */
+export function applyReaverStickerChoice(party: Card[], cardId: string): Card[] {
+  let applied = false;
+  const next = party.map((c) => {
+    if (applied || c.id !== cardId || !reaverStickerEligible(c)) return c;
+    applied = true;
+    return { ...c, secondClassReaver: true };
+  });
+  return applied ? next : party;
+}
+
+/**
  * Adds a mission's reward — recruits, any Dual-class Stickers, any Mage sticker, any corrupt-another-card effect,
- * any Guardian sticker, and any sidelined-card or existing-card evergreen upgrade — to the campaign's permanent
- * party roster. Relics are tracked separately (see RoomManager's permanentRules).
+ * any Guardian sticker, any sidelined-card or existing-card evergreen upgrade, and any targeted second suit — to
+ * the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules).
+ * `reaverStickerChoice` is deliberately NOT applied here — see its own doc comment.
  *
  * `rng` defaults to Math.random, matching every live call site (mission rewards don't need to be reproducible
  * in actual play) — pass a seeded source (e.g. deck.ts's `makeRng`) from a campaign simulation/test that needs
@@ -324,6 +402,7 @@ export function applyReward(party: Card[], reward: MissionReward, rng: () => num
   if (reward.guardianSticker) next = applyGuardianSticker(next, rng);
   if (reward.upgradeSidelinedCard) next = applyEvergreenUpgrade(next, reward.upgradeSidelinedCard);
   if (reward.upgradeEvergreenCard) next = applyEvergreenUpgradeByName(next, reward.upgradeEvergreenCard);
+  if (reward.secondSuitByName) next = applySecondSuitByName(next, reward.secondSuitByName);
   return next;
 }
 
