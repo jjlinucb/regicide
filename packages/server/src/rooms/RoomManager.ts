@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { applyAction, createLobbyState, ENDLESS_MODE_MAX_LOOP } from '@regicide/shared';
 import type { Card, GameAction, GameState, LegacySavePayload, MercenaryProgress, MercenaryTypeId, SuitedCard } from '@regicide/shared';
 import {
+  applyReaverStickerChoice,
   applyRestoredPartyCards,
   applyReward,
   buildInitialParty,
@@ -11,6 +12,7 @@ import {
   LEGACY_JESTER_COUNT,
   mercenaryCoinsForLosses,
   missionEnemiesToSpecs,
+  reaverStickerEligible,
 } from '@regicide/shared';
 import { generateRoomCode } from './roomCode.js';
 import { generateUniqueCampaignCode, type CampaignRecord, type CampaignStore } from '../db/campaigns.js';
@@ -600,6 +602,31 @@ export class RoomManager {
       return { error: 'That card is not in the Beast Companion pool.' };
     }
     room.legacy.selectedBeastCompanionId = cardId;
+    await this.campaignStore.save(toRecord(room));
+    return { room };
+  }
+
+  /**
+   * Resolves Mission 5's player-chosen Reaver-sticker reward (see MissionReward.reaverStickerChoice's doc):
+   * permanently gives `cardId` a bonus Reaver sticker. Unlike the Mage/Guardian stickers elsewhere (auto-applied,
+   * random, inside applyReward), this one needs the player's own pick, so there's no dedicated pending-state
+   * field to check here — "is this still available" is derived the same way the client derives it (see
+   * CampaignLobbyPage): has any completed mission's reward set reaverStickerChoice, and does no party card carry
+   * the sticker yet. `cardId` is re-validated against reaverStickerEligible here regardless of what the client
+   * already filtered for, same as every other player-submitted id in this file.
+   */
+  async chooseReaverSticker(code: string, requestingPlayerId: string, cardId: string): Promise<{ room: Room } | { error: string }> {
+    const room = this.getRoom(code);
+    if (!room || !room.legacy) return { error: 'Campaign not found.' };
+    if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can choose the Reaver sticker.' };
+    if (room.legacy.party.some((c) => c.kind === 'suited' && c.secondClassReaver)) {
+      return { error: 'The Reaver sticker has already been used.' };
+    }
+    const target = room.legacy.party.find((c) => c.id === cardId);
+    if (!target || !reaverStickerEligible(target)) {
+      return { error: 'That card is not eligible for the Reaver sticker.' };
+    }
+    room.legacy.party = applyReaverStickerChoice(room.legacy.party, cardId);
     await this.campaignStore.save(toRecord(room));
     return { room };
   }

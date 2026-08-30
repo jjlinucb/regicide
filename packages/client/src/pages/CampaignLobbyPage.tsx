@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { MISSIONS } from '@regicide/shared';
+import { MISSIONS, reaverStickerEligible } from '@regicide/shared';
 import type { LegacySavePayload, LegacyStatePayload, MercenaryTypeId, RoomStatePayload } from '@regicide/shared';
 import { MercenaryCamp } from '../components/MercenaryCamp';
 import { BeastCompanionPicker } from '../components/BeastCompanionPicker';
+import { ReaverStickerPicker } from '../components/ReaverStickerPicker';
 
 /** Downloads the campaign's current progress as a JSON save file — a local backup independent of server persistence. */
 function downloadSave(legacyState: LegacyStatePayload): void {
@@ -30,6 +31,7 @@ export function CampaignLobbyPage({
   onStartMission,
   onSetMercenaryLoadout,
   onSetBeastCompanionSelection,
+  onChooseReaverSticker,
   onLeave,
 }: {
   roomState: RoomStatePayload;
@@ -38,9 +40,16 @@ export function CampaignLobbyPage({
   onStartMission: (missionId: number) => void;
   onSetMercenaryLoadout: (loadout: Partial<Record<MercenaryTypeId, number>>) => Promise<{ ok: true } | { ok: false; error: string }>;
   onSetBeastCompanionSelection: (cardId: string | null) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onChooseReaverSticker: (cardId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   onLeave: () => void;
 }) {
   const isHost = roomState.players.find((p) => p.id === myPlayerId)?.isHost ?? false;
+  // Mission 5's reward, sourced fix: a one-time player choice, unlike the Mage/Guardian stickers (auto-applied at
+  // random). No dedicated "pending" field exists for it — derived the same way RoomManager's chooseReaverSticker
+  // validates it server-side: has any completed mission granted it, and has nobody used it yet.
+  const reaverStickerGranted = MISSIONS.some((m) => legacyState.missionsCompleted.includes(m.id) && m.reward.reaverStickerChoice);
+  const reaverStickerUsed = legacyState.party.some((c) => c.kind === 'suited' && c.secondClassReaver);
+  const reaverStickerEligibleCards = legacyState.party.filter(reaverStickerEligible);
   // MISSIONS.length is not the highest built mission id — the list currently has a gap (Mission 7 isn't in yet),
   // so "all missions complete" must compare against the actual max id, not the array's count.
   const maxMissionId = Math.max(...MISSIONS.map((m) => m.id));
@@ -106,6 +115,10 @@ export function CampaignLobbyPage({
             isHost={isHost}
             onSave={onSetBeastCompanionSelection}
           />
+        )}
+
+        {reaverStickerGranted && !reaverStickerUsed && reaverStickerEligibleCards.length > 0 && (
+          <ReaverStickerPicker eligible={reaverStickerEligibleCards} isHost={isHost} onChoose={onChooseReaverSticker} />
         )}
 
         {selectedMission && (

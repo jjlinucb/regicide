@@ -13,15 +13,17 @@ export function RewardRevealPage({ missionId, onContinue }: { missionId: number;
         <div className="legacy-recruit-list">
           {mission.reward.recruits.map((r) => {
             const cls = CLASS_THEME[r.class];
+            // Mission 5's Myla, sourced fix: a named recruit whose class power never resolves (SuitedCard.noSuitPower) —
+            // shown plainly rather than under a class glyph/color it doesn't actually carry into play.
             return (
-              <div key={r.name} className="legacy-recruit-chip" style={{ borderColor: cls.color }}>
-                <span className="legacy-recruit-glyph" style={{ background: cls.color }}>
-                  {cls.glyph}
+              <div key={r.name} className="legacy-recruit-chip" style={{ borderColor: r.noSuitPower ? 'var(--ink-dim)' : cls.color }}>
+                <span className="legacy-recruit-glyph" style={{ background: r.noSuitPower ? 'var(--ink-dim)' : cls.color }}>
+                  {r.noSuitPower ? '—' : cls.glyph}
                 </span>
                 <span>
                   <strong>{r.name}</strong>
                   <br />
-                  {cls.name} · strength {r.rank}
+                  {r.noSuitPower ? 'No ability' : cls.name} · strength {r.rank}
                 </span>
               </div>
             );

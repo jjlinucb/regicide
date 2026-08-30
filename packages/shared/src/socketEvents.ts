@@ -67,6 +67,8 @@ export interface ClientToServerEvents {
   'legacy:setMercenaryLoadout': (payload: { code: string; loadout: Partial<Record<MercenaryTypeId, number>> }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   /** Sourced Mission 4 mechanic (see tutorial_vids/summaries/mission-4.md): picks one card (by id, or null to bring none) from legacy:state's beastCompanionPool to ride along into the next mission attempt's reserve deck. */
   'legacy:setBeastCompanionSelection': (payload: { code: string; cardId: string | null }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
+  /** Mission 5's reward, sourced fix (see legacy/party.ts's MissionReward.reaverStickerChoice): permanently gives the named existing party card a bonus Reaver sticker — validated server-side against reaverStickerEligible, not trusted from the client. */
+  'legacy:chooseReaverSticker': (payload: { code: string; cardId: string }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   /** Loads a durable Endless Mode save by code, same shape as legacy:resume — joins the in-memory room if it's still in its post-load lobby, otherwise fetches it from storage and starts a fresh one. The host then fires room:start to actually deal into the next round (RESUME_ENDLESS_SAVE). */
   'endless:load': (payload: { code: string; name: string }, cb: (res: { ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
 }
