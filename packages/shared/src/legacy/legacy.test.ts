@@ -1615,7 +1615,7 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
     return res.state;
   }
 
-  it('reveals cards equal to its own rank, lets the player choose one to add, banishes everything revealed, and doubles the total unconditionally', () => {
+  it('reveals cards equal to the play\'s total value (a lone card\'s own rank, absent any combo), lets the player choose one to add, banishes everything revealed, and doubles the total unconditionally', () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
     let state = startCrimsonMission(1, [boss]);
     state = structuredClone(state);
@@ -1627,7 +1627,7 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
     state = res.state;
 
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
-    expect(state.reaverReveal?.candidates.length).toBe(4); // rank 4 reveals the top 4 cards
+    expect(state.reaverReveal?.candidates.length).toBe(4); // lone card, so total value = its own rank (4)
     const chosen = state.reaverReveal!.candidates.find((c) => c.rank === '6')!;
 
     res = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
@@ -1657,13 +1657,28 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
     state = res.state;
 
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
-    expect(state.reaverReveal?.candidates.length).toBe(5); // reveal count = the Reaver card's own rank (5)
+    expect(state.reaverReveal?.candidates.length).toBe(10); // reveal count = the whole play's combined total (5 Clubs + 5 Reaver), not just the Reaver's own rank
     const chosen = state.reaverReveal!.candidates.find((c) => c.rank === '6')!;
     res = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
     state = res.state;
 
     // (5 + 5 + 6) * 2 (Reaver) * 2 (Clubs) = 64.
     expect(state.currentEnemy?.damageTaken).toBe(64);
+  });
+
+  it("sourced correction (live play, 2026-08-30): the reveal count scales with the whole play's combined total, not just the Reaver's own rank — a Reaver-5 combo'd with another 5 (e.g. via the Kinfolk Flute) reveals 10, not 5", () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
+    let state = startCrimsonMission(1, [boss]);
+    state = structuredClone(state);
+    state = rig(state, [suited('H', '5'), reaverCard('D', '5')]); // same-rank combo: Bard 5 + Reaver 5, no Clubs involved
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }),
+    );
+    state = res.state;
+
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    expect(state.reaverReveal?.candidates.length).toBe(10);
   });
 
   it('reveals fewer cards than its rank if the reserve deck runs low, and still doubles even with nothing to add', () => {
@@ -2125,11 +2140,50 @@ describe('legacy: mission 5 reward (only rank-5 Reaver kept, Myla joins the part
     expect(corrupted[0].name).not.toBe('Haror');
   });
 
-  it('seeds Myla straight into the rolling Mission Zone (presetRollingZoneCards) instead of the static presetMissionZone or the reserve deck, per the newer sourced transcript', () => {
+  it('seeds Myla straight into the banish pile (presetBanishPile) instead of the static presetMissionZone, the rolling zone, or the reserve deck, per the newer sourced transcript', () => {
     const mission5 = getMission(5)!;
     expect(mission5.presetMissionZone).toBeUndefined();
     expect(mission5.extraReserveCards?.some((c) => c.kind === 'suited' && c.name === 'Myla')).toBe(false);
-    expect(mission5.presetRollingZoneCards?.some((c) => c.kind === 'suited' && c.name === 'Myla' && c.suit === 'H')).toBe(true);
+    expect(mission5.presetBanishPile?.some((c) => c.kind === 'suited' && c.name === 'Myla' && c.suit === 'H')).toBe(true);
+  });
+
+  it("sourced correction: Myla is NOT live from turn 1 — she starts in the banish pile and the enemy's first attack is unbuffed; only the end-of-turn recycle into the rolling zone (turn 2 onward) adds her +7", () => {
+    const mission5 = getMission(5)!;
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'crimson-myla-timing-test',
+      party: buildInitialParty(),
+      enemies: missionEnemiesToSpecs(mission5.enemies),
+      jesterCount: 0,
+      rollingZoneBonus: mission5.rollingZoneBonus,
+      presetBanishPile: mission5.presetBanishPile,
+    });
+    if (!res.ok) throw new Error(res.error);
+    let state = res.state;
+
+    // Mission start: Myla is sitting in the banish pile, not yet live in the rolling zone.
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.name === 'Myla')).toBe(true);
+    expect(state.rollingZoneCards).toEqual([]);
+    const baseAttack = state.currentEnemy!.baseAttack;
+
+    // Turn 1: yield straight into the boss's live attack — the rolling zone is still empty, so no +7 yet.
+    state = rig(state, [suited('H', '10'), suited('H', '10')]);
+    let step = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = step.state;
+    expect(state.pendingDamage).toBe(baseAttack);
+    step = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = step.state;
+
+    // End of turn 1's recycle pulls Myla out of the banish pile and into the rolling zone.
+    expect(state.rollingZoneCards.some((c) => c.kind === 'suited' && c.name === 'Myla')).toBe(true);
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.name === 'Myla')).toBe(false);
+
+    // Turn 2: the same boss's attack is now buffed by Myla's +7.
+    step = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+    state = step.state;
+    expect(state.pendingDamage).toBe(baseAttack + 7);
   });
 });
 

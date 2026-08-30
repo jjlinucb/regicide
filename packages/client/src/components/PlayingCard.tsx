@@ -46,7 +46,7 @@ export function cardAbilityText(card: Card): string {
     const wildSuffix = card.wildSuit ? ' Choose a suit for it when you play it.' : '';
     const corruptedSuffix = card.corrupted ? ' Cursed: ignores enemy immunity, but burns the top card of the reserve deck when played.' : '';
     const reaverSuffix = card.reaver
-      ? ` Reveals cards off the reserve deck equal to its own rank (${card.rank}), then choose one to add its strength to the attack — every revealed card is banished. Always doubles the play's total damage.`
+      ? " Reveals cards off the reserve deck equal to this attack's total value (including anything combo'd with it), then choose one to add its strength to the attack — every revealed card is banished. Always doubles the play's total damage."
       : '';
     const displayName = card.name ?? (card.wildSuit ? 'Any-Suit Ace' : 'Mercenary');
     return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${flexSuffix}${wildSuffix}${corruptedSuffix}${reaverSuffix}`;

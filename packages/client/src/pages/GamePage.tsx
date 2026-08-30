@@ -151,12 +151,20 @@ export function GamePage({
   const isMageRevealWindow = state.turnPhase === 'AWAIT_MAGE_REVEAL' && Boolean(state.mageReveal);
   const mageRevealPlayerId = state.mageReveal?.playerId;
   const isMyMageRevealWindow = isMageRevealWindow && mageRevealPlayerId === myPlayerId;
+  // Naming whose reveal is on screen — plain "The Mage reveals..." was ambiguous the moment a combo stacked up
+  // more than one reveal in a row (a second Mage card still queued, or a chain from a revealed card that's
+  // itself a Mage): every round looked identical, so there was no way to tell which one you were resolving.
+  const mageTrigger = state.mageReveal?.trigger;
+  const mageTriggerLabel = mageTrigger ? (mageTrigger.kind === 'suited' ? (mageTrigger.name ?? `the ${mageTrigger.rank}`) : 'The Mage') : 'The Mage';
+  const mageQueueRemaining = state.mageReveal?.queue.length ?? 0;
 
   // Mission 5+, John's ruling ("Reveal and Add"): the Reaver reveal window, opened whenever a Reaver card joins
   // an attack — only the player whose Reaver it is resolves it.
   const isReaverRevealWindow = state.turnPhase === 'AWAIT_REAVER_REVEAL' && Boolean(state.reaverReveal);
   const reaverRevealPlayerId = state.reaverReveal?.playerId;
   const isMyReaverRevealWindow = isReaverRevealWindow && reaverRevealPlayerId === myPlayerId;
+  const reaverTrigger = state.reaverReveal?.trigger;
+  const reaverTriggerLabel = reaverTrigger ? (reaverTrigger.name ?? `the ${reaverTrigger.rank}`) : 'The Reaver';
   const canPlaceInZone =
     isLegacy &&
     state.ascendingZone &&
@@ -250,12 +258,12 @@ export function GamePage({
                   : `${state.players[state.currentPlayerIndex]?.name} is choosing a card to sacrifice into the mission zone...`
                 : isMageRevealWindow
                   ? isMyMageRevealWindow
-                    ? 'The Mage reveals cards from the reserve deck — choose one to tuck under the attack.'
-                    : `${state.players.find((p) => p.id === mageRevealPlayerId)?.name} is choosing a card from the Mage's reveal...`
+                    ? `${mageTriggerLabel}'s reveal — choose one card to tuck under the attack.${mageQueueRemaining > 0 ? ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)` : ''}`
+                    : `${state.players.find((p) => p.id === mageRevealPlayerId)?.name} is choosing a card from ${mageTriggerLabel}'s reveal...`
                   : isReaverRevealWindow
                     ? isMyReaverRevealWindow
-                      ? 'The Reaver reveals cards from the reserve deck — choose one to add to the attack.'
-                      : `${state.players.find((p) => p.id === reaverRevealPlayerId)?.name} is choosing a card from the Reaver's reveal...`
+                      ? `${reaverTriggerLabel}'s reveal — choose one card to add to the attack.`
+                      : `${state.players.find((p) => p.id === reaverRevealPlayerId)?.name} is choosing a card from ${reaverTriggerLabel}'s reveal...`
                   : isChantWindow
                   ? isMyChantTrim
                     ? `The chant drew everyone up — discard exactly ${myChantOverflow} card(s) to get back to your hand limit.`
@@ -547,7 +555,10 @@ export function GamePage({
 
       {isMyMageRevealWindow && (
         <div className="jester-picker">
-          <span>✦ The Mage's reveal turns up these cards — choose one to tuck under the attack.</span>
+          <span>
+            ✦ {mageTriggerLabel}'s reveal turns up these cards — choose one to tuck under the attack.
+            {mageQueueRemaining > 0 && ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)`}
+          </span>
           <EnemyCardPicker
             cards={state.mageReveal?.candidates ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: myPlayerId, cardId })}
@@ -557,7 +568,7 @@ export function GamePage({
 
       {isMyReaverRevealWindow && (
         <div className="jester-picker">
-          <span>🍄 The Reaver's reveal turns up these cards — choose one to add to the attack.</span>
+          <span>🍄 {reaverTriggerLabel}'s reveal turns up these cards — choose one to add to the attack.</span>
           <EnemyCardPicker
             cards={state.reaverReveal?.candidates ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: myPlayerId, cardId })}
