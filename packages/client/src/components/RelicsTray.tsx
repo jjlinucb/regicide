@@ -4,6 +4,7 @@ const RELIC_INFO: Record<string, { glyph: string; name: string }> = {
   KINFOLK_FLUTE: { glyph: '🪶', name: 'Kinfolk Flute' },
   SCARLET_WHISTLE: { glyph: '🎗️', name: 'Scarlet Whistle' },
   AZURE_EMBLEM: { glyph: '🔷', name: 'Azure Emblem' },
+  EVERGREEN_MOTHER: { glyph: '🌲', name: 'Evergreen Mother' },
 };
 
 const ALL_RELIC_IDS = Object.keys(RELIC_INFO);
