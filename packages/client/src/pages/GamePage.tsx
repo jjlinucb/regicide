@@ -582,11 +582,16 @@ export function GamePage({
 
       {isMyReaverRevealWindow && (
         <div className="jester-picker">
-          <span>🍄 {reaverTriggerLabel}'s reveal turns up these cards — choose one to add to the attack.</span>
+          <span>🍄 {reaverTriggerLabel}'s reveal turns up these cards — choose one to add to the attack, or decline.</span>
           <EnemyCardPicker
             cards={state.reaverReveal?.candidates ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: myPlayerId, cardId })}
           />
+          <div className="jester-picker-choices">
+            <button className="btn-secondary btn" onClick={() => sendAction({ type: 'DECLINE_REAVER_REVEAL', playerId: myPlayerId })}>
+              Decline — no bonus damage
+            </button>
+          </div>
         </div>
       )}
 

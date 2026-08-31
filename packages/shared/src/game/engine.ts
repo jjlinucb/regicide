@@ -803,6 +803,29 @@ function resolveReaverRevealChoice(state: GameState, action: Extract<GameAction,
 }
 
 /**
+ * Resolves the AWAIT_REAVER_REVEAL window via DECLINE_REAVER_REVEAL (John's house rule): the player skips the
+ * bonus damage entirely — e.g. to land an exact kill without overkilling past it and losing the Mission 5
+ * death-throes splash. The revealed cards are still banished for good, same as resolveReaverRevealChoice; only
+ * the +damage is skipped.
+ */
+function declineReaverReveal(state: GameState, action: Extract<GameAction, { type: 'DECLINE_REAVER_REVEAL' }>): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_REAVER_REVEAL');
+  if (err) return fail(err);
+  const window = state.reaverReveal;
+  if (!window) return fail('There is no open Reaver reveal to resolve.');
+
+  banishCards(state, window.allRevealed);
+  const triggerLabel = window.trigger.name ?? `the ${window.trigger.rank}`;
+  log(state, `${triggerLabel}'s reveal is declined — ${window.allRevealed.length} card(s) banished, no bonus.`);
+
+  const { playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits } = window;
+  state.reaverReveal = null;
+  state.turnPhase = 'AWAIT_PLAY';
+  const player = state.players.find((p) => p.id === playerId)!;
+  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, 0);
+}
+
+/**
  * Legacy-only, Mission 3+, sourced from a full solo playthrough (see tutorial_vids/summaries/mission-3.md —
  * "Meet Me at the Table"): pulls `count` cards off the top of the reserve deck for a Mage's reveal, discards any
  * Jesters/corrupted cards found among them, and either opens AWAIT_MAGE_REVEAL for `playerId` to choose one of
@@ -3131,6 +3154,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return resolveMageRevealChoice(draft, action);
     case 'CHOOSE_REAVER_REVEAL_CARD':
       return resolveReaverRevealChoice(draft, action);
+    case 'DECLINE_REAVER_REVEAL':
+      return declineReaverReveal(draft, action);
     case 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD':
       return resolveScarletWhistleSoloChoice(draft, action);
     case 'SURRENDER_CARD_TO_ZONE':
