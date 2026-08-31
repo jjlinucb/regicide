@@ -1620,22 +1620,56 @@ describe('legacy: mission 4 Beast Companions (strength-copying pair) + Scarlet W
     return res.state;
   }
 
-  it("solo variant, sourced fix: pulls the top of the discard pile into the attack immediately instead of opening a pointless assist window", () => {
+  it("solo variant, John's house rule: opens a real choice among the WHOLE discard pile, not an automatic pull of just its top card", () => {
     let state = startBeastMissionSolo();
     const beast: SuitedCard = { ...suited('S', 'A'), beast: true };
     state = rig(state, [beast]);
-    state.discardPile = [suited('C', '2'), suited('S', '6')]; // top is the Spades 6
+    const bottomCard = suited('S', '9');
+    const topCard = suited('S', '6'); // "top" = last element, same convention as every other discardPile push site
+    state.discardPile = [bottomCard, topCard];
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [beast.id] }));
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [beast.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_SCARLET_WHISTLE_SOLO');
+    expect(state.scarletWhistleSoloChoice?.candidates.length).toBe(2);
+
+    // Deliberately choosing the BOTTOM card proves this is a real pick, not the old sourced behavior's automatic
+    // top-of-pile pull (which could only ever have grabbed topCard here).
+    res = ensureOk(
+      applyAction(state, { type: 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD', playerId: state.players[0].id, cardId: bottomCard.id }),
+    );
     state = res.state;
 
-    expect(state.turnPhase).not.toBe('AWAIT_COMBO_ASSIST'); // no one else to wait on solo — resolves immediately
-    expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '6')).toBe(false); // pulled out
-    // Beast copies the pulled Spades-6's value: Spades reduces the enemy's attack by 6 (copied) + 6 (the real card) = 12.
+    expect(state.turnPhase).not.toBe('AWAIT_SCARLET_WHISTLE_SOLO');
+    expect(state.discardPile.some((c) => c.id === bottomCard.id)).toBe(false); // pulled out
+    expect(state.discardPile.some((c) => c.id === topCard.id)).toBe(true); // the other candidate is left alone
+    // Beast copies the pulled Spades-9's value: Spades reduces the enemy's attack by 9 (copied) + 9 (the real card) = 18.
+    expect(state.currentEnemy?.spadesShield).toBe(18);
+  });
+
+  it('solo variant: still offers a choice among the discard pile\'s suited cards even when a Jester sits on top (the Jester itself is never offered)', () => {
+    let state = startBeastMissionSolo();
+    const beast: SuitedCard = { ...suited('S', 'A'), beast: true };
+    state = rig(state, [beast]);
+    const belowJester = suited('S', '6');
+    state.discardPile = [belowJester, jester()];
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [beast.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_SCARLET_WHISTLE_SOLO');
+    expect(state.scarletWhistleSoloChoice?.candidates.length).toBe(1);
+    expect(state.scarletWhistleSoloChoice?.candidates[0].id).toBe(belowJester.id);
+
+    res = ensureOk(
+      applyAction(state, { type: 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD', playerId: state.players[0].id, cardId: belowJester.id }),
+    );
+    state = res.state;
+    expect(state.discardPile.length).toBe(1);
+    expect(state.discardPile[0].kind).toBe('jester'); // the Jester itself was never a candidate — still sitting there
     expect(state.currentEnemy?.spadesShield).toBe(12);
   });
 
-  it('solo variant: resolves the lone Companion alone, same as before, when the discard pile is empty', () => {
+  it('solo variant: resolves the lone Companion alone, no window opened, when the discard pile is empty', () => {
     let state = startBeastMissionSolo();
     const beast: SuitedCard = { ...suited('S', 'A'), beast: true };
     state = rig(state, [beast]);
@@ -1644,21 +1678,22 @@ describe('legacy: mission 4 Beast Companions (strength-copying pair) + Scarlet W
     const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [beast.id] }));
     state = res.state;
 
-    expect(state.turnPhase).not.toBe('AWAIT_COMBO_ASSIST');
+    expect(state.turnPhase).not.toBe('AWAIT_SCARLET_WHISTLE_SOLO');
     // No partner to copy — falls back to a Beast Companion's own printed value (an Ace's flat 1).
     expect(state.currentEnemy?.spadesShield).toBe(1);
   });
 
-  it('solo variant: skips the pull if the discard pile\'s top card is a Jester (never joins a normal combo)', () => {
+  it('solo variant: resolves the lone Companion alone, no window opened, when the discard pile holds only Jesters', () => {
     let state = startBeastMissionSolo();
     const beast: SuitedCard = { ...suited('S', 'A'), beast: true };
     state = rig(state, [beast]);
-    state.discardPile = [suited('C', '2'), jester()];
+    state.discardPile = [jester()];
 
     const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [beast.id] }));
     state = res.state;
 
-    expect(state.discardPile.length).toBe(2); // left untouched
+    expect(state.turnPhase).not.toBe('AWAIT_SCARLET_WHISTLE_SOLO');
+    expect(state.discardPile.length).toBe(1); // left untouched
     expect(state.currentEnemy?.spadesShield).toBe(1); // resolves the Companion alone instead
   });
 });

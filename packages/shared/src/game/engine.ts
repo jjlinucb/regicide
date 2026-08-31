@@ -2227,27 +2227,54 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
   }
 
   // Solo variant of the Scarlet Whistle, sourced from a fuller solo playthrough (see
-  // tutorial_vids/summaries/mission-4.md): with nobody else at the table to slip in a card, the lone attacker
-  // instead pulls the top card of the discard pile into the attack immediately, pairing it with the Companion the
-  // same way a second player's assisted card would. A no-op (resolves the Companion alone, as before) if the
-  // discard pile is empty, or if its top happens to be a Jester (a claimed Jester can end up there — a Jester can
-  // never join a normal combo, per validatePlayShape).
-  const discardTop = state.discardPile[state.discardPile.length - 1];
-  const soloAssistCard =
-    state.ruleset === 'legacy' && state.players.length === 1 && scarletAssist && discardTop?.kind === 'suited'
-      ? (state.discardPile.pop() as Extract<Card, { kind: 'suited' }>)
-      : null;
-  const soloAssistCards = soloAssistCard ? [...shapeCards, soloAssistCard] : shapeCards;
-  if (soloAssistCard) {
-    state.currentEnemy!.tableCards.push(soloAssistCard);
-    log(state, `${player.name} attacks alone with a Companion card — the Scarlet Whistle pulls ${soloAssistCard.name ?? `the ${soloAssistCard.rank}`} from the discard pile to help.`);
-  }
+  // tutorial_vids/summaries/mission-4.md), reworked into a real choice (John's house rule — the sourced version
+  // only ever auto-pulled the discard pile's TOP card): with nobody else at the table to slip in a card, the lone
+  // attacker instead picks ANY ONE suited card out of the whole discard pile to pair with the Companion, via
+  // CHOOSE_SCARLET_WHISTLE_DISCARD_CARD (see resolveScarletWhistleSoloChoice). A no-op (resolves the Companion
+  // alone, as before, no window opened) if the discard pile holds no suited card at all — a claimed Jester can
+  // leave one sitting there, but a Jester can never join a normal combo, per validatePlayShape.
+  const soloDiscardCandidates = state.discardPile.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited');
+  const canOpenSoloDiscardChoice =
+    state.ruleset === 'legacy' && state.players.length === 1 && scarletAssist && soloDiscardCandidates.length > 0;
 
   // See dealDamageAndCheckDefeat's own doc comment: true here means every other player had already yielded, so
   // this player's own YIELD would have been rejected by allOtherPlayersYieldedLastTurn — this play was compulsory,
   // not a voluntary choice to attack (let alone to overkill).
   const forcedPlay = allOtherPlayersYieldedLastTurn(state);
-  return resolveCommittedPlay(state, player, soloAssistCards, null, forcedPlay);
+
+  if (canOpenSoloDiscardChoice) {
+    state.scarletWhistleSoloChoice = { playerId: player.id, candidates: soloDiscardCandidates, cards: shapeCards, forcedPlay };
+    state.turnPhase = 'AWAIT_SCARLET_WHISTLE_SOLO';
+    log(state, `${player.name} attacks alone with a Companion card — the Scarlet Whistle lets them pull any one card from the discard pile to help.`);
+    return ok(state);
+  }
+
+  return resolveCommittedPlay(state, player, shapeCards, null, forcedPlay);
+}
+
+/** Resolves the AWAIT_SCARLET_WHISTLE_SOLO window opened by playCards (see GameState.scarletWhistleSoloChoice). */
+function resolveScarletWhistleSoloChoice(
+  state: GameState,
+  action: Extract<GameAction, { type: 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD' }>,
+): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_SCARLET_WHISTLE_SOLO');
+  if (err) return fail(err);
+  const window = state.scarletWhistleSoloChoice;
+  if (!window) return fail('There is no open Scarlet Whistle discard choice to resolve.');
+
+  if (!window.candidates.some((c) => c.id === action.cardId)) return fail('That card is not part of the open discard choice.');
+  const discardIdx = state.discardPile.findIndex((c) => c.id === action.cardId);
+  if (discardIdx === -1) return fail('That card is no longer in the discard pile.');
+  const [chosen] = state.discardPile.splice(discardIdx, 1) as [Extract<Card, { kind: 'suited' }>];
+
+  state.currentEnemy!.tableCards.push(chosen);
+  log(state, `${chosen.name ?? `the ${chosen.rank}`} is pulled from the discard pile to help (Scarlet Whistle).`);
+
+  const { playerId, cards, forcedPlay } = window;
+  state.scarletWhistleSoloChoice = null;
+  state.turnPhase = 'AWAIT_PLAY';
+  const player = state.players.find((p) => p.id === playerId)!;
+  return resolveCommittedPlay(state, player, [...cards, chosen], null, forcedPlay);
 }
 
 /**
@@ -3010,6 +3037,7 @@ export function createLobbyState(): GameState {
     exactKillOnly: false,
     relics: [],
     comboAssist: null,
+    scarletWhistleSoloChoice: null,
     kinfolkBankedThisTurn: false,
     azureEmblemWindow: null,
     mageReveal: null,
@@ -3103,6 +3131,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return resolveMageRevealChoice(draft, action);
     case 'CHOOSE_REAVER_REVEAL_CARD':
       return resolveReaverRevealChoice(draft, action);
+    case 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD':
+      return resolveScarletWhistleSoloChoice(draft, action);
     case 'SURRENDER_CARD_TO_ZONE':
       return surrenderCardToZone(draft, action);
     case 'START_ENDLESS_ROUND':

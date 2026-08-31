@@ -6,7 +6,9 @@ function isBlocked(card: Card, enemy?: EnemyState | null): boolean {
   // Chanter's chant window, Gøran's Evergreen, and a Mercenary "19" (see SuitedCard.noSuitPower) either aren't
   // suit powers, always ignore immunity outright, or never resolve a suit power at all — so enemy suit immunity
   // never blocks them (see engine.ts's resolveArcaneBolts / resolveCommittedPlay's
-  // reaverCards/guardianCards/druidCards/chanterCards/evergreenActive/nonArcaneCards handling).
+  // reaverCards/guardianCards/druidCards/chanterCards/evergreenActive/nonArcaneCards handling). A corrupted or
+  // restored card's own suit power ignores immunity too, at its usual banish/heal cost (see SuitedCard.corrupted/
+  // .restored, engine.ts's immunityIgnoringSuits) — so it's never actually a "No effect" play either.
   if (
     card.kind !== 'suited' ||
     card.arcane ||
@@ -15,7 +17,9 @@ function isBlocked(card: Card, enemy?: EnemyState | null): boolean {
     card.druid ||
     card.chanter ||
     card.evergreen ||
-    card.noSuitPower
+    card.noSuitPower ||
+    card.corrupted ||
+    card.restored
   )
     return false;
   return Boolean(enemy) && isSuitBlockedByImmunity(card.suit, enemy!);

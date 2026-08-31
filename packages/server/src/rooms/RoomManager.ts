@@ -428,7 +428,16 @@ export class RoomManager {
     }
   }
 
-  startLegacyMission(code: string, requestingPlayerId: string, missionId: number): { room: Room } | { error: string } {
+  /**
+   * `stopForPendingChoices` (default false, preserving every existing caller's one-shot jump-and-start behavior
+   * — see below): the client sets this when the host clicks "Jump to Mission N" from CampaignLobbyPage.
+   */
+  startLegacyMission(
+    code: string,
+    requestingPlayerId: string,
+    missionId: number,
+    opts: { stopForPendingChoices?: boolean } = {},
+  ): { room: Room } | { error: string } {
     const room = this.getRoom(code);
     if (!room || !room.legacy) return { error: 'Campaign not found.' };
     if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can start the mission.' };
@@ -442,11 +451,32 @@ export class RoomManager {
     // grant every skipped mission's reward first, as if it had been won normally, so the party arrives at
     // full strength.
     if (missionId > room.legacy.currentMission) {
+      // BUG FIX: a skipped mission can grant an interactive reward choice — Mission 4's Beast Companion pool
+      // pick (BeastCompanionPicker) or Mission 5's Reaver sticker pick (ReaverStickerPicker) — both of which only
+      // ever render on CampaignLobbyPage. Granting the reward and starting the target mission in this same call
+      // used to fuse those two steps atomically, so the client never got routed back through the lobby screen to
+      // show the picker before gameplay began (the pool/choice was still there server-side, just unreachable
+      // until the party happened to return to the lobby after finishing the jumped-to mission).
+      //
+      // Gated behind `stopForPendingChoices` (only the live client UI sets it) rather than made unconditional:
+      // plenty of existing, deliberate test coverage calls this one-shot-jump-and-start in a single call (see
+      // legacy.integration.test.ts's mission 8/10/11 jump tests) and asserts gameState is already IN_PROGRESS by
+      // the time it returns — flipping this on for every caller would silently break all of those. So: if any
+      // skipped mission introduces one of these choices AND the caller asked to stop for them, stop here —
+      // advance currentMission and return the updated room (still in LOBBY) without dispatching
+      // START_LEGACY_MISSION, so the host sees the lobby refresh with the picker(s) available and its "Jump to
+      // Mission N" button turn into "Begin Mission N" (see CampaignLobbyPage's isCurrent/isSelected derivation) —
+      // a second click, now with currentMission already caught up, actually starts the mission below.
+      let introducesInteractiveChoice = false;
       for (let id = room.legacy.currentMission; id < missionId; id++) {
         const skipped = getMission(id);
-        if (skipped) this.grantMissionReward(room.legacy, skipped);
+        if (skipped) {
+          this.grantMissionReward(room.legacy, skipped);
+          if (skipped.reward.recruits.some((r) => r.beast) || skipped.reward.reaverStickerChoice) introducesInteractiveChoice = true;
+        }
       }
       room.legacy.currentMission = missionId;
+      if (opts.stopForPendingChoices && introducesInteractiveChoice) return { room };
     }
 
     // Mercenary loadout (see shared/legacy/mercenaries.ts): a different mission than whatever mercenaryProgress

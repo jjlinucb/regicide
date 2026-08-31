@@ -168,6 +168,12 @@ export function GamePage({
   const isMyReaverRevealWindow = isReaverRevealWindow && reaverRevealPlayerId === myPlayerId;
   const reaverTrigger = state.reaverReveal?.trigger;
   const reaverTriggerLabel = reaverTrigger ? (reaverTrigger.name ?? `the ${reaverTrigger.rank}`) : 'The Reaver';
+
+  // Mission 4+, John's house rule (see engine.ts's resolveScarletWhistleSoloChoice): the solo Scarlet Whistle
+  // window — playing a lone Companion in solo play opens a real choice among the WHOLE discard pile instead of
+  // silently auto-pulling its top card.
+  const isScarletWhistleSoloWindow = state.turnPhase === 'AWAIT_SCARLET_WHISTLE_SOLO' && Boolean(state.scarletWhistleSoloChoice);
+  const isMyScarletWhistleSoloWindow = isScarletWhistleSoloWindow && state.scarletWhistleSoloChoice?.playerId === myPlayerId;
   const canPlaceInZone =
     isLegacy &&
     state.ascendingZone &&
@@ -267,6 +273,10 @@ export function GamePage({
                     ? isMyReaverRevealWindow
                       ? `${reaverTriggerLabel}'s reveal — choose one card to add to the attack.`
                       : `${state.players.find((p) => p.id === reaverRevealPlayerId)?.name} is choosing a card from ${reaverTriggerLabel}'s reveal...`
+                  : isScarletWhistleSoloWindow
+                    ? isMyScarletWhistleSoloWindow
+                      ? 'Scarlet Whistle — choose one card from the discard pile to pair with your Companion.'
+                      : `${state.players.find((p) => p.id === state.scarletWhistleSoloChoice?.playerId)?.name} is choosing a card from the discard pile (Scarlet Whistle)...`
                   : isChantWindow
                   ? isMyChantTrim
                     ? `The chant drew everyone up — discard exactly ${myChantOverflow} card(s) to get back to your hand limit.`
@@ -576,6 +586,16 @@ export function GamePage({
           <EnemyCardPicker
             cards={state.reaverReveal?.candidates ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: myPlayerId, cardId })}
+          />
+        </div>
+      )}
+
+      {isMyScarletWhistleSoloWindow && (
+        <div className="jester-picker">
+          <span>🎗️ Scarlet Whistle — choose any one card from the discard pile to pair with your Companion.</span>
+          <EnemyCardPicker
+            cards={state.scarletWhistleSoloChoice?.candidates ?? []}
+            onChoose={(cardId) => sendAction({ type: 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD', playerId: myPlayerId, cardId })}
           />
         </div>
       )}

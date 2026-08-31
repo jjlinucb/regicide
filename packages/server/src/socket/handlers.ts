@@ -152,10 +152,10 @@ export function registerSocketHandlers(io: IOServer, socket: IOSocket, rooms: Ro
     broadcastRoom(io, room);
   });
 
-  socket.on('legacy:startMission', ({ code, missionId }, cb) => {
+  socket.on('legacy:startMission', ({ code, missionId, stopForPendingChoices }, cb) => {
     const found = rooms.findPlayerBySocket(socket.id);
     if (!found) return cb({ ok: false, error: 'Not in a room.' });
-    const result = rooms.startLegacyMission(code, found.player.id, missionId);
+    const result = rooms.startLegacyMission(code, found.player.id, missionId, { stopForPendingChoices });
     if ('error' in result) return cb({ ok: false, error: result.error });
     cb({ ok: true });
     broadcastRoom(io, result.room);
