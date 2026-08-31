@@ -911,9 +911,14 @@ function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, {
   const [chosen] = candidates.splice(idx, 1);
   if (candidates.length > 0) state.discardPile.push(...candidates);
 
-  const enemy = state.currentEnemy!;
-  enemy.tableCards.push(chosen);
+  // John's ruling (correcting the earlier "tucked under the attack" reading — see tutorial_vids/summaries/
+  // mission-3.md, which described it that way): the chosen card is banished the instant it's picked, same as
+  // a Reaver's reveal (see resolveReaverRevealChoice) — it never enters enemy.tableCards, so it isn't subject
+  // to the attackIncludesMage overkill/exact-kill discard-vs-banish branch in finishEnemyDefeatTail. Its suit
+  // power still fires despite being banished rather than played — see arcaneSuits below, folded into
+  // continueResolveCommittedPlay's effectiveSuits independently of tableCards membership.
   const chosenValue = cardValue(chosen);
+  banishCards(state, [chosen]);
   const arcaneBonus = window.arcaneBonus + chosenValue;
   const arcaneSuits = Array.from(new Set([...window.arcaneSuits, ...cardSuits(chosen)]));
   // John's house rule: a corrupted ("cursed") Mage's reveal passes its own immunity-ignoring property on to
@@ -925,7 +930,7 @@ function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, {
     : window.arcaneImmuneSuits;
   log(
     state,
-    `${chosen.name ?? `the ${chosen.rank}`} is tucked under the attack, adding +${chosenValue} and its own suit power${triggerIsCorruptedMage ? ' — ignoring immunity, courtesy of the corrupted Mage' : ''}.`,
+    `${chosen.name ?? `the ${chosen.rank}`} is torn from the reserve deck and banished — adding +${chosenValue} and its own suit power${triggerIsCorruptedMage ? ' — ignoring immunity, courtesy of the corrupted Mage' : ''}.`,
   );
 
   const { playerId, cards, claimedJester, forcedPlay, totalValue, queue } = window;
@@ -2094,12 +2099,12 @@ function continueResolveCommittedPlay(
   // corrupted Mage's reveal pulled up (see resolveMageRevealChoice) — the Mage itself already paid the corrupted
   // cost when its reveal fired (see revealForMage).
   const immunityIgnoringSuits = Array.from(new Set([...corruptedSuits, ...restoredSuits, ...arcaneImmuneSuits]));
-  // Sourced fix (see tutorial_vids/summaries/mission-3.md): a Mage's chosen reveal card is "tucked under the
-  // attack, adding its value" — folded into the play's own total value here, so it buffs every other class power
-  // (heal/draw/enemy-strength-reduction amounts) exactly like an ordinary extra card would, and gets doubled by a
-  // Clubs multiplier same as the rest of the attack. The old, simpler arcane-bolt mechanic this replaced instead
-  // added its bonus as flat extra damage only, outside the multiplier — a real behavior change, not just a
-  // richer way of computing the same number.
+  // Sourced fix (see tutorial_vids/summaries/mission-3.md), refined by John's later ruling (see
+  // resolveMageRevealChoice): a Mage's chosen reveal card is banished, but its value is still folded into the
+  // play's own total value here, so it buffs every other class power (heal/draw/enemy-strength-reduction amounts)
+  // exactly like an ordinary extra card would, and gets doubled by a Clubs multiplier same as the rest of the
+  // attack. The old, simpler arcane-bolt mechanic this replaced instead added its bonus as flat extra damage
+  // only, outside the multiplier — a real behavior change, not just a richer way of computing the same number.
   const effectiveTotalValue = totalValue + arcaneBonus;
   const clubsMultiplier = resolveSuitPowers(state, cards, effectiveSuits, effectiveTotalValue, ignoreImmunityForPlay, immunityIgnoringSuits);
   const rawDamage = (effectiveTotalValue + reaverBonus) * reaverMultiplier * clubsMultiplier;
