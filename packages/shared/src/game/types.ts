@@ -825,6 +825,13 @@ export type GameAction =
       restoredCardMechanic?: boolean;
       /** See missions.ts's Mission.randomizeEnemyOrder — Mission 2 only. Shuffles `enemies` before building the fight queue. */
       randomizeEnemyOrder?: boolean;
+      /**
+       * See missions.ts's Mission.randomizeEnemyTierOrder — Mission 5 only. Reshuffles the class order within
+       * each fixed-size 4-enemy tier of `enemies` independently, preserving tier order (so e.g. all 4 weak-tier
+       * enemies still precede all 4 strong-tier ones) — unlike randomizeEnemyOrder above, which shuffles the
+       * whole list flat with no tier structure to preserve.
+       */
+      randomizeEnemyTierOrder?: boolean;
     }
   /**
    * `chosenSuits` resolves any Mercenary any-suit Ace among `cardIds` (see SuitedCard.wildSuit) — cardId -> one

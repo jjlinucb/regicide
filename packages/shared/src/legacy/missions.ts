@@ -87,6 +87,15 @@ export interface Mission {
    * fresh random order on every attempt, including retries after a loss.
    */
   randomizeEnemyOrder?: boolean;
+  /**
+   * See GameAction's START_LEGACY_MISSION.randomizeEnemyTierOrder. UNSOURCED JUDGMENT CALL (per the user's own
+   * knowledge of the physical game): Mission 5's `enemies` list is two fixed 4-enemy tiers (weak, then strong),
+   * one of each class per tier — the tier order itself (weak before strong) is sourced and stays fixed, but
+   * nothing pins the four classes within a tier to always fight in the same Warrior/Bard/Cleric/Paladin order.
+   * This flag reshuffles the class order within each 4-enemy tier independently on every attempt (including
+   * retries after a loss), without ever letting a tier-2 enemy come up before tier 1 is cleared.
+   */
+  randomizeEnemyTierOrder?: boolean;
 }
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
@@ -489,7 +498,10 @@ export const MISSIONS: Mission[] = [
     // threads + a BGG campaign-playthrough video, see this repo's legacy-missions-transcript-mismatches memory
     // note): 4 Sporelings (weak tier) then 4 Gloom Spores (strong tier) — a real stat jump over the earlier,
     // lighter "Elder Sporeling" reading this replaces, matching the source's description of Gloom Spores boasting
-    // some of the highest base health seen up to this point in the campaign.
+    // some of the highest base health seen up to this point in the campaign. The order written below (Warrior,
+    // Bard, Cleric, Paladin within each tier) is just this list's own fixed declaration order, not a sourced fight
+    // order — randomizeEnemyTierOrder (below) reshuffles each tier's 4 classes independently every attempt, while
+    // still guaranteeing all 4 weak-tier Sporelings fall before any strong-tier Gloom Spore (John's call).
     enemies: [
       enemy('Sporeling Choker', 'WARRIOR', 40, 10),
       enemy('Sporeling Piper', 'BARD', 40, 10),
@@ -578,6 +590,7 @@ export const MISSIONS: Mission[] = [
     // campaign lobby (see CampaignLobbyPage's ReaverStickerPicker), not auto-applied by applyReward.
     standingJesters: true,
     sidelineHighArcana: true,
+    randomizeEnemyTierOrder: true,
     reward: {
       recruits: [recruit('Haror', 'REAVER', '5', 'S'), { name: 'Myla', class: 'CLERIC', rank: '7', suit: 'H', noSuitPower: true }],
       dualClassStickers: 4,

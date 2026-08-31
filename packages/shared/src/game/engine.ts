@@ -1588,7 +1588,17 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   // mission's `enemies` order is fixed/sourced and must reach makeLegacyEnemy untouched, but this brood's six
   // heads should come out shuffled, and reshuffled again on every retry — a fresh order per attempt, not the
   // same fixed sequence every time.
-  const orderedEnemies = action.randomizeEnemyOrder ? shuffle(action.enemies, buildRng) : action.enemies;
+  const flatShuffledEnemies = action.randomizeEnemyOrder ? shuffle(action.enemies, buildRng) : action.enemies;
+  // Mission 5 only (UNSOURCED JUDGMENT CALL — see missions.ts's Mission.randomizeEnemyTierOrder): its 8 enemies
+  // are two fixed 4-enemy tiers (weak, then strong). Unlike randomizeEnemyOrder above, this shuffles each tier's
+  // 4-class order independently instead of flattening the whole list, so tier 1 always finishes before tier 2
+  // starts — only which class comes up first/second/third/fourth within a tier is randomized.
+  const ENEMY_TIER_SIZE = 4;
+  const orderedEnemies = action.randomizeEnemyTierOrder
+    ? Array.from({ length: Math.ceil(flatShuffledEnemies.length / ENEMY_TIER_SIZE) }, (_, i) =>
+        shuffle(flatShuffledEnemies.slice(i * ENEMY_TIER_SIZE, (i + 1) * ENEMY_TIER_SIZE), buildRng),
+      ).flat()
+    : flatShuffledEnemies;
   const enemyDeck = action.standardCastle
     ? buildCastleDeck(buildRng)
     : corruptedEnemyBuild

@@ -531,6 +531,7 @@ export class RoomManager {
       pileTopEnemyBonus: mission.pileTopEnemyBonus,
       restoredCardMechanic: mission.restoredCardMechanic,
       randomizeEnemyOrder: mission.randomizeEnemyOrder,
+      randomizeEnemyTierOrder: mission.randomizeEnemyTierOrder,
       relics: room.legacy.permanentRules,
     });
     if (!result.ok) return { error: result.error };
