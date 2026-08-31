@@ -273,7 +273,7 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * until it resolves, same shape as AWAIT_END_OF_TURN pausing there for Mission 9. AWAIT_MAGE_REVEAL is Mission 3+
  * only (see GameState.mageReveal) — opened by a Mage card in a play, resolved via CHOOSE_MAGE_REVEAL_CARD.
  * AWAIT_REAVER_REVEAL is Mission 5+ only (see GameState.reaverReveal) — opened by a Reaver card in a play,
- * resolved via CHOOSE_REAVER_REVEAL_CARD. AWAIT_SCARLET_WHISTLE_SOLO is Mission 4+ only, gated by the
+ * resolved via CHOOSE_REAVER_REVEAL_CARD or (declining any bonus) DECLINE_REAVER_REVEAL. AWAIT_SCARLET_WHISTLE_SOLO is Mission 4+ only, gated by the
  * 'SCARLET_WHISTLE' relic (see GameState.scarletWhistleSoloChoice) — opened by a solo player's lone Companion
  * play, resolved via CHOOSE_SCARLET_WHISTLE_DISCARD_CARD.
  */
@@ -442,9 +442,11 @@ export interface GameState {
    * combined total value, not just the Reaver card's own printed rank (confirmed live 2026-08-30: a Reaver
    * combo'd into a bigger same-rank play, including via the Kinfolk Flute, reveals proportionally more) — and
    * lets `playerId` choose one of them via CHOOSE_REAVER_REVEAL_CARD to add its raw numeric strength (its class
-   * power, if any, is ignored) to the play's attack total. EVERY card revealed this way —
-   * chosen or not — is banished for good, not discarded (see resolveReaverRevealChoice's use of `allRevealed`,
-   * which includes candidates never offered as a choice, like Jesters/corrupted cards). A Reaver's own class power
+   * power, if any, is ignored) to the play's attack total — or decline entirely via DECLINE_REAVER_REVEAL (John's
+   * house rule) if no bonus is wanted, e.g. to avoid overkilling past an exact kill. EVERY card revealed this way —
+   * chosen or not, or even if the player declines outright — is banished for good, not discarded (see
+   * resolveReaverRevealChoice/declineReaverReveal's use of `allRevealed`, which includes candidates never offered
+   * as a choice, like Jesters/corrupted cards). A Reaver's own class power
    * always doubles the play's total damage on top of this — see continueResolveCommittedPlay's reaverMultiplier —
    * so combining a Reaver with a Warrior (Clubs) card in the same play compounds into quadruple damage.
    * `trigger` is the Reaver card that opened this reveal, so the UI can name it instead of a generic banner.
@@ -950,6 +952,14 @@ export type GameAction =
    * numeric strength to the attack. Every revealed card, chosen or not, is banished for good.
    */
   | { type: 'CHOOSE_REAVER_REVEAL_CARD'; playerId: string; cardId: string }
+  /**
+   * Legacy-only (Mission 5+), John's house rule, from AWAIT_REAVER_REVEAL: the player declines to add any of the
+   * revealed cards' strength to the attack — e.g. to land an exact kill without overkilling past it and losing
+   * the Mission 5 death-throes splash (see dealDamageAndCheckDefeat's exactKillSplashDamage branch). The revealed
+   * cards are still banished for good either way, same as resolveReaverRevealChoice — declining only skips the
+   * bonus damage, not the reveal's cost.
+   */
+  | { type: 'DECLINE_REAVER_REVEAL'; playerId: string }
   /**
    * Legacy-only (Mission 4+), gated by the 'SCARLET_WHISTLE' relic, John's house rule, from
    * AWAIT_SCARLET_WHISTLE_SOLO: the solo attacker whose lone Companion play opened the window (see

@@ -1749,6 +1749,48 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
     expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '6')).toBe(true);
   });
 
+  it('lets the player decline the reveal\'s bonus entirely (John\'s house rule) — revealed cards are still banished, but no value is added', () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
+    let state = startCrimsonMission(1, [boss]);
+    state = structuredClone(state);
+    state.tavernDeck = [suited('C', '6'), suited('D', '2'), suited('D', '2'), suited('D', '2'), ...state.tavernDeck];
+    const reserveBefore = state.tavernDeck.length;
+    state = rig(state, [reaverCard('D', '4')]);
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    res = ensureOk(applyAction(state, { type: 'DECLINE_REAVER_REVEAL', playerId: state.players[0].id }));
+    state = res.state;
+
+    // 4 * 2 (Reaver's own doubling, unconditional) = 8 — no bonus from the declined reveal.
+    expect(state.currentEnemy?.damageTaken).toBe(8);
+    expect(state.turnPhase).not.toBe('AWAIT_REAVER_REVEAL');
+    expect(state.tavernDeck.length).toBe(reserveBefore - 4); // still revealed (and consumed) even though declined
+    expect(state.banishPile.filter((c) => c.kind === 'suited' && c.rank === '2').length).toBe(3);
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '6')).toBe(true); // banished, not added to the attack
+  });
+
+  it('declining the bonus can preserve an exact kill (and its Mission 5 death-throes splash) that choosing a card would have overkilled', () => {
+    const first: LegacyEnemySpec = { name: 'First Sporeling', suit: 'C', health: 8, attack: 7 };
+    const second: LegacyEnemySpec = { name: 'Second Sporeling', suit: 'D', health: 20, attack: 3 };
+    let state = startCrimsonMission(1, [first, second], { exactKillSplashDamage: true });
+    state = structuredClone(state);
+    state.tavernDeck = [suited('C', '5'), ...state.tavernDeck]; // a bonus that would overkill if chosen
+    state = rig(state, [reaverCard('D', '4')]); // (4 + 0) * 2 (Reaver's own doubling) = 8, an exact kill
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    res = ensureOk(applyAction(state, { type: 'DECLINE_REAVER_REVEAL', playerId: state.players[0].id }));
+    state = res.state;
+
+    expect(state.currentEnemy?.name).toBe('Second Sporeling');
+    expect(state.currentEnemy?.damageTaken).toBe(7); // First Sporeling's base attack (7), splashed in
+  });
+
   it('doubles unconditionally on its own, and quadruples when combined with a Warrior (Clubs) card in the same play', () => {
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'H', health: 400, attack: 1 };
     let state = startCrimsonMission(1, [boss]);
