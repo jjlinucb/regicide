@@ -157,6 +157,9 @@ export function GamePage({
   const mageTrigger = state.mageReveal?.trigger;
   const mageTriggerLabel = mageTrigger ? (mageTrigger.kind === 'suited' ? (mageTrigger.name ?? `the ${mageTrigger.rank}`) : 'The Mage') : 'The Mage';
   const mageQueueRemaining = state.mageReveal?.queue.length ?? 0;
+  // John's house rule: a corrupted ("cursed") Mage's reveal passes its immunity-ignoring property on to whatever
+  // card it pulls up (see engine.ts's resolveMageRevealChoice) — flagged here so the reveal prompt can call it out.
+  const mageTriggerIsCursed = mageTrigger?.kind === 'suited' && Boolean(mageTrigger.corrupted);
 
   // Mission 5+, John's ruling ("Reveal and Add"): the Reaver reveal window, opened whenever a Reaver card joins
   // an attack — only the player whose Reaver it is resolves it.
@@ -258,7 +261,7 @@ export function GamePage({
                   : `${state.players[state.currentPlayerIndex]?.name} is choosing a card to sacrifice into the mission zone...`
                 : isMageRevealWindow
                   ? isMyMageRevealWindow
-                    ? `${mageTriggerLabel}'s reveal — choose one card to tuck under the attack.${mageQueueRemaining > 0 ? ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)` : ''}`
+                    ? `${mageTriggerLabel}'s reveal${mageTriggerIsCursed ? ' (cursed — the chosen card will ignore immunity)' : ''} — choose one card to tuck under the attack.${mageQueueRemaining > 0 ? ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)` : ''}`
                     : `${state.players.find((p) => p.id === mageRevealPlayerId)?.name} is choosing a card from ${mageTriggerLabel}'s reveal...`
                   : isReaverRevealWindow
                     ? isMyReaverRevealWindow
@@ -557,6 +560,7 @@ export function GamePage({
         <div className="jester-picker">
           <span>
             ✦ {mageTriggerLabel}'s reveal turns up these cards — choose one to tuck under the attack.
+            {mageTriggerIsCursed && ' The chosen card will ignore enemy immunity, courtesy of the corrupted Mage.'}
             {mageQueueRemaining > 0 && ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)`}
           </span>
           <EnemyCardPicker

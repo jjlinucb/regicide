@@ -414,6 +414,12 @@ export interface GameState {
     arcaneBonus: number;
     /** Suits of every reveal card tucked under the attack so far — merged into the play's own suit-power resolution, see continueResolveCommittedPlay. */
     arcaneSuits: Suit[];
+    /**
+     * John's house rule: suits (a subset of arcaneSuits) whose reveal was triggered by a corrupted Mage — these
+     * ignore enemy immunity, same as SuitedCard.corrupted's own suit, at the cost of the corrupted Mage banishing
+     * the reserve deck's top card when its reveal fires (see engine.ts's revealForMage/continueResolveCommittedPlay).
+     */
+    arcaneImmuneSuits: Suit[];
     trigger: Card;
   } | null;
   /**
@@ -439,6 +445,7 @@ export interface GameState {
     totalValue: number;
     arcaneBonus: number;
     arcaneSuits: Suit[];
+    arcaneImmuneSuits: Suit[];
     trigger: SuitedCard;
   } | null;
   /**
@@ -1017,6 +1024,7 @@ export interface ClientGameState {
     totalValue: number;
     arcaneBonus: number;
     arcaneSuits: Suit[];
+    arcaneImmuneSuits: Suit[];
     trigger: Card;
   } | null;
   /** See GameState.reaverReveal. Public information, same as every other pending-choice window. */
@@ -1030,6 +1038,7 @@ export interface ClientGameState {
     totalValue: number;
     arcaneBonus: number;
     arcaneSuits: Suit[];
+    arcaneImmuneSuits: Suit[];
     trigger: SuitedCard;
   } | null;
   /** See GameState.discardTopBuffsAttack. */

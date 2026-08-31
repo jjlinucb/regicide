@@ -783,6 +783,34 @@ describe('legacy: mission playthrough', () => {
     expect(state.discardPile.some((c) => c.kind === 'suited' && c.corrupted)).toBe(true);
   });
 
+  it("John's house rule: a corrupted Mage pays the normal corrupted-card cost and passes its immunity-ignoring property to whatever its reveal chooses", () => {
+    // Enemy is immune to Clubs (its own suit) — without the fix, a Clubs card tucked under the attack would have
+    // its doubling blocked like any other immune suit.
+    const enemy: LegacyEnemySpec = { name: 'Warded Foe', suit: 'C', health: 100, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const cursedMage: SuitedCard = { ...suited('H', '4'), arcane: true, corrupted: true };
+    state = rig(state, [cursedMage]);
+    const costCard = suited('S', '9');
+    const chosenClubs = suited('C', '5');
+    // costCard is banished immediately as the corrupted-Mage cost, before the reveal draws its 4 (the play's own
+    // total value) candidates from what's left.
+    state.tavernDeck = [costCard, suited('S', '2'), suited('D', '2'), chosenClubs, suited('D', '3')];
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [cursedMage.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+    expect(state.mageReveal?.candidates.length).toBe(4);
+    // The cost is paid the instant the corrupted Mage's reveal fires, not deferred until a card is chosen.
+    expect(state.banishPile.some((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '9')).toBe(true);
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: chosenClubs.id }));
+    state = res.state;
+    // Clubs power resolved (doubled) despite the enemy's own immunity — no "blocked" log entry for it.
+    expect(state.log.some((e) => e.message.includes('blocked'))).toBe(false);
+    // (4 play + 5 chosen) * 2 (Clubs double, no longer blocked) = 18.
+    expect(state.currentEnemy?.damageTaken).toBe(18);
+  });
+
   it('auto-continues without opening a choice when the reserve deck has nothing left to reveal', () => {
     const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
     let state = startMission(1, [enemy]);
