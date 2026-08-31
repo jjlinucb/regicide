@@ -1208,6 +1208,27 @@ describe('legacy: mission 2 standing Jesters (unsourced house rule)', () => {
     const res = applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id });
     expect(res.ok).toBe(false);
   });
+
+  it('SOURCED FIX: a Mercenary Camp Jester purchase joins the standing pool instead of being shuffled into the deck', () => {
+    const ids = ['p0'];
+    const enemy: LegacyEnemySpec = { name: 'Hydra Head', suit: 'H', secondSuit: 'D', health: 100, attack: 0 };
+    const res = ensureOk(
+      applyAction(createLobbyState(), {
+        type: 'START_LEGACY_MISSION',
+        playerIds: ids,
+        playerNames: ['Player 0'],
+        seed: 'standing-jester-mercenary-test',
+        party: buildInitialParty(),
+        enemies: [enemy],
+        jesterCount: 2,
+        standingJesters: true,
+        extraReserveCards: [buildMercenaryCard('JESTER')],
+      }),
+    );
+    expect(res.state.standingJesters.length).toBe(3); // 2 base + 1 bought
+    expect(res.state.tavernDeck.some((c) => c.kind === 'jester')).toBe(false);
+    expect(res.state.players.flatMap((p) => p.hand).some((c) => c.kind === 'jester')).toBe(false);
+  });
 });
 
 describe('legacy: mission 3 mechanics (end-of-turn mission zone)', () => {
