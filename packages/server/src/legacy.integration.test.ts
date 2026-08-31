@@ -128,6 +128,36 @@ describe('legacy campaign integration', () => {
     expect(resumedLegacyState.currentMission).toBe(2);
   });
 
+  it("John's easy-mode call: a fresh campaign's mercenary tracker is already open at 0 losses (not null), so the +15-coin bonus is spendable on mission 1's very first attempt, and again fresh for mission 2 after a win", async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Nell' });
+
+    let room = rooms.getRoom(created.code)!;
+    expect(room.legacy!.mercenaryProgress).toEqual({ missionId: 1, lossCount: 0, loadout: {} });
+
+    const startResult = rooms.startLegacyMission(created.code, created.playerId, 1);
+    if ('error' in startResult) throw new Error(startResult.error);
+    expect(startResult.room.legacy!.mercenaryProgress).toEqual({ missionId: 1, lossCount: 0, loadout: {} });
+
+    // Win mission 1 outright (rigged one-hit kill, same trick as the very first test in this file).
+    room.gameState.castleDeck = [];
+    room.gameState.currentEnemy!.maxHealth = 1;
+    const playerId = room.gameState.players[room.gameState.currentPlayerIndex].id;
+    const cardToPlay = room.gameState.players[room.gameState.currentPlayerIndex].hand[0];
+    const playResult = await emitAsync<{ ok: true } | { ok: false; error: string }>(client, 'game:action', {
+      code: created.code,
+      action: { type: 'PLAY_CARDS', playerId, cardIds: [cardToPlay.id] },
+    });
+    expect(playResult.ok).toBe(true);
+
+    room = rooms.getRoom(created.code)!;
+    expect(room.legacy!.currentMission).toBe(2);
+    // Fresh for the new mission too, not carried over and not cleared to null.
+    expect(room.legacy!.mercenaryProgress).toEqual({ missionId: 2, lossCount: 0, loadout: {} });
+    client.close();
+  });
+
   it('a solo (1-player) Legacy mission still gets both Jesters, unlike classic Regicide\'s player-count-scaled table', async () => {
     const client = ioClient(`http://localhost:${port}`);
     await waitFor(client, 'connect');

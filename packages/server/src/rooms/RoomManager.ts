@@ -293,7 +293,10 @@ export class RoomManager {
       missionsCompleted: [],
       currentMission: 1,
       permanentRules: [],
-      mercenaryProgress: null,
+      // John's easy-mode call: every mission starts with a mercenary loadout tracker already open (0 losses),
+      // not null, so the Mercenary Camp's +15 easy-mode coin bonus (see mercenaryCoinsForLosses) is spendable
+      // on the very first attempt instead of only unlocking after a loss.
+      mercenaryProgress: { missionId: 1, lossCount: 0, loadout: {} },
       beastCompanionPool: [],
       selectedBeastCompanionId: null,
     };
@@ -485,7 +488,9 @@ export class RoomManager {
     // (already coin-budget-validated when it was set, see setMercenaryLoadout) into this attempt's deck.
     let mercenaryCards: Card[] = [];
     if (room.legacy.mercenaryProgress?.missionId !== missionId) {
-      room.legacy.mercenaryProgress = null;
+      // Easy-mode call (see createLegacyCampaign): a fresh 0-loss tracker for THIS mission, not null, so its
+      // +15-coin bonus is available right away instead of only after a loss.
+      room.legacy.mercenaryProgress = { missionId, lossCount: 0, loadout: {} };
     } else {
       const built = buildMercenaryLoadout(room.legacy.mercenaryProgress.loadout, mercenaryCoinsForLosses(room.legacy.mercenaryProgress.lossCount));
       // A stored loadout was already validated when set — a re-validation failure here would mean the catalog
@@ -586,7 +591,9 @@ export class RoomManager {
         this.grantMissionReward(legacy, mission, room.gameState.restoredPartyCards);
         legacy.currentMission = missionId + 1;
       }
-      legacy.mercenaryProgress = null;
+      // Easy-mode call (see createLegacyCampaign): the new mission gets a fresh 0-loss tracker, not null, so its
+      // own +15-coin bonus is available right away rather than only after a loss.
+      legacy.mercenaryProgress = { missionId: legacy.currentMission, lossCount: 0, loadout: {} };
     } else {
       const priorLosses = legacy.mercenaryProgress?.missionId === missionId ? legacy.mercenaryProgress.lossCount : 0;
       const priorLoadout = legacy.mercenaryProgress?.missionId === missionId ? legacy.mercenaryProgress.loadout : {};
