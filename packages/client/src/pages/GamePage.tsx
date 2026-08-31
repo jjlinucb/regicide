@@ -267,7 +267,7 @@ export function GamePage({
                   : `${state.players[state.currentPlayerIndex]?.name} is choosing a card to sacrifice into the mission zone...`
                 : isMageRevealWindow
                   ? isMyMageRevealWindow
-                    ? `${mageTriggerLabel}'s reveal${mageTriggerIsCursed ? ' (cursed — the chosen card will ignore immunity)' : ''} — choose one card to tuck under the attack.${mageQueueRemaining > 0 ? ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)` : ''}`
+                    ? `${mageTriggerLabel}'s reveal${mageTriggerIsCursed ? ' (cursed — the chosen card will ignore immunity)' : ''} — choose one card to banish and add to the attack.${mageQueueRemaining > 0 ? ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)` : ''}`
                     : `${state.players.find((p) => p.id === mageRevealPlayerId)?.name} is choosing a card from ${mageTriggerLabel}'s reveal...`
                   : isReaverRevealWindow
                     ? isMyReaverRevealWindow
@@ -569,7 +569,7 @@ export function GamePage({
       {isMyMageRevealWindow && (
         <div className="jester-picker">
           <span>
-            ✦ {mageTriggerLabel}'s reveal turns up these cards — choose one to tuck under the attack.
+            ✦ {mageTriggerLabel}'s reveal turns up these cards — choose one to banish and add to the attack.
             {mageTriggerIsCursed && ' The chosen card will ignore enemy immunity, courtesy of the corrupted Mage.'}
             {mageQueueRemaining > 0 && ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)`}
           </span>
