@@ -57,16 +57,25 @@ const MERCENARY_BY_ID: Record<MercenaryTypeId, MercenaryTypeSpec> = Object.fromE
 ) as Record<MercenaryTypeId, MercenaryTypeSpec>;
 
 /**
+ * John's own easy-mode call (2026-08-31, unsourced): a flat bonus added on top of the sourced per-loss formula
+ * below, since the missions keep getting harder — every mission attempt (even the very first, zero-loss one)
+ * starts with this many coins already available to spend at the Mercenary Camp, on top of whatever losses have
+ * additionally earned.
+ */
+const EASY_MODE_BONUS_COINS = 15;
+
+/**
  * Sourced coin formula — linear, one coin per loss (corrected from an earlier, wrong triangular guess): a real
  * session report's numbers confirm this exactly (hiewandboardgames.blogspot.com, "Regicide Legacy review and
  * photo book", 2026-08-08) — "It took us 6 attempts to beat [Mission 9] ... by that game we managed to win, we
  * had 5 coins to employ mercenaries," i.e. 5 losses before the winning 6th attempt = 5 coins, not the 15 a
  * triangular formula would give. This is a growing BUDGET CEILING re-spendable as a whole on every retry, not a
  * wallet that depletes — see RoomManager's mercenary-loadout handling, which lets the party freely re-pick any
- * combination up to this total each time.
+ * combination up to this total each time. EASY_MODE_BONUS_COINS is layered on top, not part of the sourced number
+ * itself.
  */
 export function mercenaryCoinsForLosses(losses: number): number {
-  return losses;
+  return losses + EASY_MODE_BONUS_COINS;
 }
 
 /**

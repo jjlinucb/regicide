@@ -448,6 +448,24 @@ describe('solo Jester', () => {
     const res = applyAction(state, { type: 'USE_SOLO_JESTER', playerId: state.players[0].id });
     expect(res.ok).toBe(false);
   });
+
+  it("John's house rule: used while already owing a Defend, it also spares the player the enemy's counter-attack entirely — no discard needed, on top of the usual hand refresh", () => {
+    let state = startGame('solo-jester-defend', 1);
+    state = rig(state, [suited('H', '9')]);
+    let res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] });
+    expect(res.ok).toBe(true);
+    state = (res as any).state;
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    expect(state.pendingDamage).toBe(10);
+
+    res = applyAction(state, { type: 'USE_SOLO_JESTER', playerId: state.players[0].id });
+    expect(res.ok).toBe(true);
+    const newState = (res as any).state as GameState;
+    expect(newState.turnPhase).not.toBe('AWAIT_DEFEND'); // no discard owed — the counter-attack never lands
+    expect(newState.pendingDamage).toBe(0);
+    expect(newState.players[0].hand.length).toBe(newState.maxHandSize); // still refreshed, same as always
+    expect(newState.soloJestersUsed).toBe(1);
+  });
 });
 
 function specialCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special: NonNullable<SuitedCard['special']>): SuitedCard {

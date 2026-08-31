@@ -17,6 +17,11 @@ function isLegacyCard(card: Extract<Card, { kind: 'suited' }>): boolean {
 
 /** Classic Regicide Endless Mode only: a King pushed past its ceiling shows as "K+N" (see SuitedCard.tier). */
 function tieredRankLabel(card: Extract<Card, { kind: 'suited' }>): string {
+  // John's own call: Goran shows as "G" on his card face, same idea as Aces showing "A" and Beast Companions
+  // showing "B" — purely cosmetic, so he's still an ordinary 8 (value, combos, starting-roster identity) under
+  // the hood; only the rendered label changes. Matched by name, same as Goran's other name-targeted mechanics
+  // (see party.ts's applySecondSuitByName/applyEvergreenUpgradeByName) — he has no distinct suit/rank of his own.
+  if (card.name === 'Goran') return 'G';
   const base = card.rank === 'A' ? 'A' : card.rank;
   // A Mercenary's flexibleComboRank (see SuitedCard.flexibleComboRank) is printed on the physical card as both
   // values together (e.g. "2/5") — shown lower-value-first to match. tier and flexibleComboRank never coexist
