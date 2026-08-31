@@ -745,22 +745,6 @@ export interface GameState {
    * flipBanishPileZoneCard to skip that turn's flip, mirroring Mission 11's skipNextBeastDeckFlip.
    */
   skipNextBanishZoneFlip: boolean;
-  /**
-   * Legacy-only: set by claimJester when its synthetic 8-strength attack didn't kill the enemy and left the
-   * claimant owing a defend (turnPhase AWAIT_DEFEND) — non-null until that specific attack's damage is fully
-   * resolved. Defers the base game's own printed "discard hand, redraw to max" Jester power past that defend, so
-   * the claimant sees and chooses from their PRE-refill hand when deciding how to cover the jester's own dealt
-   * damage, rather than a hand that's already been silently replaced out from under them (see engine.ts's
-   * resolveJesterAttack/defend). Never set (and thus a no-op) when the attack killed outright or dealt no damage
-   * back — those cases still refill immediately, same as before. `mode` is always 'discard' in practice: a
-   * standing Jester's own house-rule "topUp" refill (Mission 2+, see GameState.standingJesters) only ever ADDS
-   * cards, never discards what's already held, so it has no "hand swapped out from under them" risk to defer
-   * against — it always refills immediately instead, even mid-Defend, so those cards are actually available to
-   * cover the damage (a live-play bug fix: a standing Jester used with an already-empty hand, against an enemy
-   * that survived and countered, used to leave the claimant facing a Defend with nothing to discard and no
-   * refill until after a Defend they had no way to pay).
-   */
-  pendingJesterRefill: { playerId: string; mode: 'discard' | 'topUp' } | null;
 }
 
 export interface GameEvent {

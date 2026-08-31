@@ -43,11 +43,9 @@ export function MercenaryCamp({
     <div className="panel legacy-panel mercenary-camp">
       <h3>Mercenary Camp</h3>
       <p style={{ fontSize: '0.85rem', color: 'var(--ink-dim)', margin: 0 }}>
-        {progress.lossCount} loss{progress.lossCount === 1 ? '' : 'es'} against this mission earned{' '}
-        <strong>
-          {budget} coin{budget === 1 ? '' : 's'}
-        </strong>{' '}
-        — hire mercenaries to ride along in the deck on your next attempt. Coins reset when the mission is won.
+        {progress.lossCount} loss{progress.lossCount === 1 ? '' : 'es'} against this mission plus a standing 15-coin
+        bonus give you <strong>{budget} coins</strong> — hire mercenaries to ride along in the deck on your next
+        attempt. Coins reset when the mission is won.
       </p>
 
       <div className="mercenary-list">

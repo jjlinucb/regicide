@@ -1564,7 +1564,6 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.soloJestersUsed = 0;
   state.victoryMedal = null;
   state.jesterClaim = null;
-  state.pendingJesterRefill = null;
   state.endlessLoop = 0;
   state.exactKillOnly = false;
   state.relics = [];
@@ -1736,7 +1735,6 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.soloJestersUsed = 0;
   state.victoryMedal = null;
   state.jesterClaim = null;
-  state.pendingJesterRefill = null;
   state.endlessLoop = 0;
   state.exactKillOnly = action.exactKillOnly ?? false;
   state.relics = action.relics ?? [];
@@ -1854,7 +1852,6 @@ function startEndlessRound(state: GameState): EngineResult {
   state.soloJestersUsed = 0;
   state.victoryMedal = null;
   state.jesterClaim = null;
-  state.pendingJesterRefill = null;
   state.endlessLoop = loop;
 
   log(
@@ -2145,9 +2142,20 @@ function continueResolveCommittedPlay(
     return beginAzureEmblem(state, player.id, mageCardIds, guardianBlocksNextAttack);
   }
 
-  const enemyAttack = guardianBlocksNextAttack ? 0 : resolvedEnemyAttack(state);
+  // John's house rule: a claimed/used Jester's own synthetic attack also spares the claimant the enemy's
+  // counter-attack entirely (no Defend, no discarding) — stacks with the Jester's existing 8-strength
+  // damage + hand refill, rather than replacing either. Applies uniformly to CLAIM_JESTER and
+  // USE_STANDING_JESTER, since both route their synthetic attack through here with a non-null claimedJester.
+  const enemyAttack = guardianBlocksNextAttack || claimedJester ? 0 : resolvedEnemyAttack(state);
   if (enemyAttack <= 0) {
-    log(state, guardianBlocksNextAttack ? 'The shield holds — no damage suffered.' : `The enemy's attack has been reduced to 0 — no damage suffered.`);
+    log(
+      state,
+      guardianBlocksNextAttack
+        ? 'The shield holds — no damage suffered.'
+        : claimedJester
+          ? 'The Jester leaves the enemy no opening to strike back — no damage suffered.'
+          : `The enemy's attack has been reduced to 0 — no damage suffered.`,
+    );
     endTurnOrAwaitRescue(state);
     return ok(state);
   }
@@ -2454,16 +2462,6 @@ function playJester(state: GameState, action: Extract<GameAction, { type: 'PLAY_
 }
 
 /**
- * Reads state.turnPhase through a function boundary rather than inline — used by claimJester right after a call
- * that can reassign it (resolveCommittedPlay), where TS's control-flow narrowing would otherwise keep treating
- * state.turnPhase as whatever literal it was narrowed to just before that call, since TS can't see into an
- * arbitrary function to know it mutates a passed-in object's property.
- */
-function currentTurnPhase(state: GameState): TurnPhase {
-  return state.turnPhase;
-}
-
-/**
  * Legacy-only: claims an open Jester window. Validated against the window being open, not turn ownership — any
  * player may claim. Resolves immediately as its own attack (see below) rather than handing the claimant a
  * separate PLAY_CARDS step, matching the base game's own printed Jester text ("play it on its own, instead of
@@ -2525,24 +2523,10 @@ function useStandingJester(state: GameState, action: Extract<GameAction, { type:
  * power (discard the whole hand, redraw to max — CLAIM_JESTER); 'topUp' is Mission 2/3's own unsourced house rule
  * for their standing Jesters (just draw up to max, without discarding what's already held).
  *
- * Bug-fix (see GameState.pendingJesterRefill): if the synthetic attack didn't kill the enemy and refillMode is
- * 'discard', the claimant now owes a defend against its dealt damage (turnPhase is AWAIT_DEFEND). Refilling right
- * here, before that defend is resolved, would swap the claimant's hand out from under them while they're still
- * deciding how to cover that damage — turning what might have been a coverable hit into a lethal one. Defer the
- * refill to defend() instead; every other outcome (the enemy died, or dealt no damage back) has nothing left to
- * resolve, so it still refills immediately, exactly as before.
- * (Routed through currentTurnPhase() rather than reading state.turnPhase inline: TS's control-flow narrowing
- * otherwise carries the 'AWAIT_PLAY' literal the caller assigned a few lines above straight through the
- * resolveCommittedPlay() call — which does reassign it internally, TS just has no way to see that — and flags
- * the comparison below as comparing non-overlapping literals. A function-call boundary resets that narrowing.)
- *
- * SOURCED FIX (live-play report — see mission-4-jester-empty-hand-defend memory note): 'topUp' (the standing
- * Jester's own house rule) never discards anything already in hand — it only ever ADDS cards up to the hand
- * limit — so the "swap the hand out from under them" risk above doesn't apply to it at all. Deferring it the same
- * way 'discard' defers was actively harmful: a player whose hand was already empty before calling a standing
- * Jester, against an enemy that survived and countered, was left facing a Defend with zero cards and no refill
- * until AFTER a Defend they had nothing to pay with — an unwinnable trap. 'topUp' now always refills immediately,
- * win or lose, dead or alive, so those cards are actually available for the Defend that follows.
+ * John's house rule: this synthetic attack ALSO spares the claimant the enemy's counter-attack entirely, no
+ * matter whether it kills outright, wounds without killing, or does neither (see continueResolveCommittedPlay's
+ * own claimedJester check) — so a Jester attack can never leave the claimant owing a Defend. That means the
+ * refill below always fires immediately, with nothing left to defer past.
  */
 function resolveJesterAttack(state: GameState, player: PlayerState, jesterCard: Card, refillMode: 'discard' | 'topUp'): EngineResult {
   // SOURCED FIX (live-play report — see mission-4-jester-empty-hand-defend memory note): only the base game's own
@@ -2558,8 +2542,6 @@ function resolveJesterAttack(state: GameState, player: PlayerState, jesterCard: 
 
   if (refillMode === 'topUp') {
     topUpHandFromDeck(state, player, 'the Jester');
-  } else if (currentTurnPhase(state) === 'AWAIT_DEFEND') {
-    state.pendingJesterRefill = { playerId: player.id, mode: refillMode };
   } else {
     refillHandFromDeck(state, player, 'the Jester');
   }
@@ -2614,6 +2596,11 @@ function useSoloJester(state: GameState, action: Extract<GameAction, { type: 'US
   }
   if (state.soloJestersUsed >= MAX_SOLO_JESTERS) return fail('No solo Jesters remaining.');
 
+  // John's house rule: using a solo Jester while already owing a Defend also spares the player that
+  // counter-attack entirely — stacks with the discard-and-redraw below, rather than replacing it. Used
+  // proactively from AWAIT_PLAY (before anything is owed), it's just the hand refresh, same as always.
+  const wasAwaitingDefend = state.turnPhase === 'AWAIT_DEFEND';
+
   const player = cp;
   state.discardPile.push(...player.hand);
   player.hand = [];
@@ -2622,6 +2609,12 @@ function useSoloJester(state: GameState, action: Extract<GameAction, { type: 'US
   }
   state.soloJestersUsed += 1;
   log(state, `${player.name} flips a Jester — hand discarded and refilled to ${player.hand.length}. (${MAX_SOLO_JESTERS - state.soloJestersUsed} left)`);
+
+  if (wasAwaitingDefend) {
+    log(state, 'The Jester leaves the enemy no opening to strike back — no damage suffered.');
+    state.pendingDamage = 0;
+    endTurnOrAwaitRescue(state);
+  }
   return ok(state);
 }
 
@@ -2693,19 +2686,6 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
     state.lastActionWasYield[state.currentPlayerIndex] = false;
   } else {
     log(state, `${player.name} discards ${cards.length} card(s) to cover ${state.pendingDamage} damage.`);
-  }
-
-  // Bug-fix (see GameState.pendingJesterRefill / resolveJesterAttack): this specific attack's damage is now fully
-  // resolved — a claimed/used Jester's own hand-refill deferred past the defend above happens right here, using
-  // whatever's left of the claimant's hand AFTER they chose how to cover the damage, never before.
-  if (state.pendingJesterRefill && state.pendingJesterRefill.playerId === player.id) {
-    const { mode } = state.pendingJesterRefill;
-    state.pendingJesterRefill = null;
-    if (mode === 'discard') {
-      refillHandFromDeck(state, player, 'the Jester');
-    } else {
-      topUpHandFromDeck(state, player, 'the Jester');
-    }
   }
 
   endTurnOrAwaitRescue(state);
@@ -3055,7 +3035,6 @@ export function createLobbyState(): GameState {
     soloJestersUsed: 0,
     victoryMedal: null,
     jesterClaim: null,
-    pendingJesterRefill: null,
     endlessLoop: 0,
     exactKillOnly: false,
     relics: [],

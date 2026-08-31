@@ -417,9 +417,9 @@ describe('legacy: feign death', () => {
 });
 
 describe('legacy: jester claim', () => {
-  it('lets any player claim an open jester for a free 8-strength attack that ignores immunity, deferring the hand refill until the resulting damage is defended (not a permanent immunity break)', () => {
+  it('lets any player claim an open jester for a free 8-strength attack that ignores immunity, and spares them the enemy\'s counter-attack entirely (John\'s house rule, stacking on top of the free attack + hand refill)', () => {
     // Cleric-class enemy (suit H) — immune to Cleric (Hearts) powers until the claimed attack ignores it. Health
-    // is high enough to survive the 8-strength attack, so it retaliates for its own attack (5) afterward.
+    // is high enough to survive the 8-strength attack, so it would normally retaliate for its own attack (5).
     const enemy: LegacyEnemySpec = { name: 'Warden', suit: 'H', health: 100, attack: 5 };
     let state = startMission(2, [enemy], 0);
     const [p1, p2] = state.players;
@@ -433,9 +433,6 @@ describe('legacy: jester claim', () => {
 
     const untouchedDiscard = [suited('C', '2'), suited('C', '3'), suited('C', '4')];
     state.discardPile = untouchedDiscard;
-    // p2's own hand, rigged to a single card worth exactly the enemy's retaliation (5). The regression this
-    // guards against is refillHandFromDeck firing BEFORE the defend below, which would silently swap this exact
-    // card out from under p2 and could turn a coverable hit into a lethal one.
     const oldHand = [suited('S', '5')];
     state.players[1].hand = oldHand;
 
@@ -445,28 +442,20 @@ describe('legacy: jester claim', () => {
     state = res.state;
 
     expect(state.jesterClaim).toBeNull(); // consumed
-    expect(state.currentPlayerIndex).toBe(1);
     expect(state.currentEnemy?.damageTaken).toBe(8); // flat 8-strength attack, no class power doubling it
-    // No class power triggered: the discard pile is untouched (no Hearts heal), and the pre-claim hand below is
-    // still exactly 1 card (no Diamonds draw either).
-    expect(state.discardPile).toEqual(untouchedDiscard);
     expect(state.currentEnemy?.immunityBroken).toBe(false); // one-shot only — NOT a permanent break like classic Regicide
 
-    // Bug-fix regression: the enemy survived and retaliates for its own attack (5) — the refill must NOT have
-    // happened yet, so p2's hand is still their pre-claim hand, intact, while they decide how to cover it.
-    expect(state.turnPhase).toBe('AWAIT_DEFEND');
-    expect(state.pendingDamage).toBe(5);
-    expect(state.players[1].hand).toEqual(oldHand);
-    expect(state.discardPile).toEqual(untouchedDiscard); // old hand not discarded yet either
+    // The enemy survived (100 health) and would normally retaliate for its own attack (5) — but the claimed
+    // Jester spares that counter-attack entirely: no Defend owed, the turn moves straight on to player 1.
+    expect(state.turnPhase).not.toBe('AWAIT_DEFEND');
+    expect(state.pendingDamage).toBe(0);
+    expect(state.currentPlayerIndex).toBe(0);
 
-    // Defending with the OLD hand's exact card would fail with "not in your hand" if the refill had already
-    // silently replaced it — which is exactly the bug this test exists to catch.
-    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: p2.id, cardIds: [oldHand[0].id] }));
-    state = res.state;
-    expect(state.phase).toBe('IN_PROGRESS'); // exactly covered — not lethal
-    // The base game's own printed Jester power refreshes the claimant's hand — but only now, after the defend.
+    // The base game's own printed Jester power still refreshes the claimant's hand — immediately, since there's
+    // no Defend left to defer it past.
     expect(state.players[1].hand.length).toBe(state.maxHandSize);
-    expect(state.discardPile.some((c) => c.id === oldHand[0].id)).toBe(true); // the defended card lands in the discard pile
+    expect(state.players[1].hand.some((c) => c.id === oldHand[0].id)).toBe(false);
+    expect(state.discardPile.some((c) => c.id === oldHand[0].id)).toBe(true);
   });
 
   it('rejects PLAY_JESTER/CLAIM_JESTER outside Regicide Legacy', () => {
@@ -528,10 +517,9 @@ describe('legacy: jester claim', () => {
     expect(state.currentEnemy?.blockedSpadesShield).toBe(5);
     expect(state.currentEnemy?.spadesShield).toBe(0);
 
-    // Cover the claimed attack's own counterattack so play passes back to player 1.
-    state = rig(state, [suited('D', '9')]);
-    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: p2.id, cardIds: [state.players[state.currentPlayerIndex].hand[0].id] }));
-    state = res.state;
+    // The claimed Jester also spares p2 the enemy's own counter-attack (5) entirely — no Defend owed, so play
+    // passes straight back to player 1.
+    expect(state.turnPhase).not.toBe('AWAIT_DEFEND');
     expect(state.currentPlayerIndex).toBe(0);
 
     // Proof this is a genuine dead end, not just a bookkeeping quirk: immunity is still fully live afterward — a
@@ -1200,16 +1188,15 @@ describe('legacy: mission 2 standing Jesters (unsourced house rule)', () => {
     expect(hand.length).toBe(res.state.maxHandSize);
   });
 
-  it('SOURCED FIX (live-play report): refills the hand immediately even when the standing Jester attack leaves a Defend owed, so an empty hand is never stuck facing a Defend with nothing to discard', () => {
-    let state = startStandingJesterMission(1, 5); // enemy survives 8 dmg (100 health) and counters for 5
+  it("John's house rule: a standing Jester spares the caller the enemy's counter-attack entirely, even against a survivor that would otherwise strike back — so an empty hand is never left facing a Defend at all", () => {
+    let state = startStandingJesterMission(1, 5); // enemy survives 8 dmg (100 health) and would otherwise counter for 5
     state = rig(state, []); // hand already empty before calling the standing Jester
     const player = state.players[state.currentPlayerIndex];
     const res = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: player.id }));
 
-    expect(res.state.turnPhase).toBe('AWAIT_DEFEND'); // still owes a defend against the counter-attack
-    expect(res.state.pendingDamage).toBe(5);
-    expect(res.state.pendingJesterRefill).toBeNull(); // topUp never defers — already refilled
-    expect(res.state.players[0].hand.length).toBe(res.state.maxHandSize); // refilled BEFORE the defend, not after
+    expect(res.state.turnPhase).not.toBe('AWAIT_DEFEND'); // no counter-attack to answer
+    expect(res.state.pendingDamage).toBe(0);
+    expect(res.state.players[0].hand.length).toBe(res.state.maxHandSize); // still refilled, same as always
   });
 
   it('rejects using a standing Jester once none remain', () => {
@@ -5062,11 +5049,12 @@ describe('legacy: Mercenary Camp catalog & coin formula', () => {
     expect(total).toBe(14);
   });
 
-  it('mercenaryCoinsForLosses grows linearly, one coin per loss (confirmed by a real session\'s numbers: 5 losses = 5 coins)', () => {
-    expect(mercenaryCoinsForLosses(1)).toBe(1);
-    expect(mercenaryCoinsForLosses(2)).toBe(2);
-    expect(mercenaryCoinsForLosses(3)).toBe(3);
-    expect(mercenaryCoinsForLosses(5)).toBe(5);
+  it('mercenaryCoinsForLosses grows linearly, one coin per loss, on top of John\'s +15 easy-mode bonus (sourced formula confirmed by a real session\'s numbers: 5 losses = 5 coins before the bonus)', () => {
+    expect(mercenaryCoinsForLosses(0)).toBe(15); // the bonus alone, even before any loss
+    expect(mercenaryCoinsForLosses(1)).toBe(16);
+    expect(mercenaryCoinsForLosses(2)).toBe(17);
+    expect(mercenaryCoinsForLosses(3)).toBe(18);
+    expect(mercenaryCoinsForLosses(5)).toBe(20);
   });
 
   it('buildMercenaryLoadout returns the concrete cards for a selection that fits the budget', () => {
