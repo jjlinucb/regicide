@@ -1659,6 +1659,16 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   // deck at all here, so none of this mission's economy math (hand deal, captured-pile sizing, etc.) should count
   // them as part of it — they're carved out into their own standing pool right after the deck is built instead.
   const deckJesterCount = action.standingJesters ? 0 : action.jesterCount;
+  // A Mercenary Camp "Jester" purchase (see mercenaries.ts's JESTER type) rides in through extraReserveCards as a
+  // literal jester-kind card. On a standingJesters mission (every Legacy mission today — see missions.ts), that
+  // card belongs in the standing pool alongside the mission's base jesterCount, not shuffled into the deck as an
+  // ordinary drawable card: buying one should read as "3 standing Jesters available", not leave a random Jester
+  // sitting in someone's hand outside the USE_STANDING_JESTER flow. Carved out here, before the deck is built, for
+  // the same reason deckJesterCount is — this mission's economy math shouldn't count it as reserve-deck material.
+  const extraReserveCardsInput = action.extraReserveCards ?? [];
+  const mercenaryJesterCards = action.standingJesters ? extraReserveCardsInput.filter((c) => c.kind === 'jester') : [];
+  const nonJesterExtraReserveCards =
+    mercenaryJesterCards.length > 0 ? extraReserveCardsInput.filter((c) => c.kind !== 'jester') : extraReserveCardsInput;
   const capturedPilesActive = action.capturedPilesActive ?? false;
   // Mission 9: 30 cards are split out of the party into 3 captured piles before anything is dealt — the reserve
   // deck for the mission is built from whatever's left of the party, plus any mission-only extras (e.g. a fresh
@@ -1689,16 +1699,16 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
     // `Math.min(10, 4 + 2*n)` cap, so a solo/2-player fight (already comfortably above the buffer) is unaffected.
     const MIN_STARTING_RESERVE = 10;
     const initialHandDeal = n * (MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5);
-    const extrasAndJesters = (action.extraReserveCards?.length ?? 0) + deckJesterCount;
+    const extrasAndJesters = nonJesterExtraReserveCards.length + deckJesterCount;
     const maxPileSizeForReserve = Math.floor(
       (partyForReserve.length + extrasAndJesters - initialHandDeal - MIN_STARTING_RESERVE) / 3,
     );
     const pileSize = Math.max(1, Math.min(10, 4 + 2 * n, maxPileSizeForReserve));
     const split = buildCapturedPiles(partyForReserve, buildRng, pileSize);
     capturedPiles = split.piles;
-    reserveDeck = buildLegacyReserveDeck([...split.leftoverParty, ...(action.extraReserveCards ?? [])], deckJesterCount, buildRng);
+    reserveDeck = buildLegacyReserveDeck([...split.leftoverParty, ...nonJesterExtraReserveCards], deckJesterCount, buildRng);
   } else {
-    reserveDeck = buildLegacyReserveDeck([...partyForReserve, ...(action.extraReserveCards ?? [])], deckJesterCount, buildRng);
+    reserveDeck = buildLegacyReserveDeck([...partyForReserve, ...nonJesterExtraReserveCards], deckJesterCount, buildRng);
   }
   const maxHandSize = MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5;
 
@@ -1751,7 +1761,9 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.banishPile = action.presetBanishPile ?? [];
   // See deckJesterCount above — when standingJesters is set, the mission's Jesters never enter the shuffled
   // reserve deck at all; they're built directly into this standing pool instead (see GameState.standingJesters).
-  state.standingJesters = action.standingJesters ? makeJesters(action.jesterCount) : [];
+  // Any Mercenary Camp Jester purchases (mercenaryJesterCards, carved out above) join the pool too, on top of the
+  // mission's own base jesterCount.
+  state.standingJesters = action.standingJesters ? [...makeJesters(action.jesterCount), ...mercenaryJesterCards] : [];
   state.discardTopBuffsAttack = action.discardTopBuffsAttack ?? false;
   state.exactKillToReserveDeck = action.exactKillToReserveDeck ?? false;
   state.discardCleanupLowToHigh = action.discardCleanupLowToHigh ?? false;
