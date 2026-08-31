@@ -37,7 +37,7 @@ export function CampaignLobbyPage({
   roomState: RoomStatePayload;
   legacyState: LegacyStatePayload;
   myPlayerId: string;
-  onStartMission: (missionId: number) => void;
+  onStartMission: (missionId: number, stopForPendingChoices?: boolean) => void;
   onSetMercenaryLoadout: (loadout: Partial<Record<MercenaryTypeId, number>>) => Promise<{ ok: true } | { ok: false; error: string }>;
   onSetBeastCompanionSelection: (cardId: string | null) => Promise<{ ok: true } | { ok: false; error: string }>;
   onChooseReaverSticker: (cardId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
@@ -56,6 +56,17 @@ export function CampaignLobbyPage({
   const currentMission = MISSIONS.find((m) => m.id === legacyState.currentMission);
   const [selectedMissionId, setSelectedMissionId] = useState(legacyState.currentMission);
   const selectedMission = MISSIONS.find((m) => m.id === selectedMissionId) ?? currentMission;
+  // Mirrors RoomManager.startLegacyMission's own crossing check, purely to word the "Jumping ahead" note — the
+  // server is the one that actually decides whether to stop (see its stopForPendingChoices handling).
+  const jumpIntroducesPendingChoice =
+    selectedMission != null &&
+    selectedMission.id > legacyState.currentMission &&
+    MISSIONS.some(
+      (m) =>
+        m.id >= legacyState.currentMission &&
+        m.id < selectedMission.id &&
+        (m.reward.recruits.some((r) => r.beast) || m.reward.reaverStickerChoice),
+    );
 
   return (
     <div className="centered-page">
@@ -129,10 +140,16 @@ export function CampaignLobbyPage({
               <p style={{ fontSize: '0.8rem', color: 'var(--ink-dim)' }}>
                 Jumping ahead — the rewards for mission{selectedMission.id - legacyState.currentMission > 1 ? 's' : ''}{' '}
                 {legacyState.currentMission}–{selectedMission.id - 1} will be granted automatically first.
+                {/* BUG FIX: a jump that crosses Mission 4 or 5's reward now stops right after granting instead of
+                    launching straight into the target mission, so the Beast Companion / Reaver sticker picker
+                    below actually gets a chance to render before gameplay begins — click again once you're ready
+                    (see RoomManager.startLegacyMission's stopForPendingChoices). */}
+                {jumpIntroducesPendingChoice &&
+                  ' This jump also grants a Beast Companion or Reaver sticker pick — clicking below will stop here first so you can choose, then click again to actually begin.'}
               </p>
             )}
             {isHost ? (
-              <button className="btn" onClick={() => onStartMission(selectedMission.id)}>
+              <button className="btn" onClick={() => onStartMission(selectedMission.id, true)}>
                 {selectedMission.id > legacyState.currentMission ? 'Jump to' : 'Begin'} Mission {selectedMission.id}
               </button>
             ) : (

@@ -31,6 +31,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     standingJesters: state.standingJesters,
     endlessLoop: state.endlessLoop,
     comboAssist: state.comboAssist,
+    scarletWhistleSoloChoice: state.scarletWhistleSoloChoice,
     relics: state.relics,
     kinfolkBankedThisTurn: state.kinfolkBankedThisTurn,
     azureEmblemWindow: state.azureEmblemWindow,

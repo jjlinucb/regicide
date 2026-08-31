@@ -273,7 +273,9 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * until it resolves, same shape as AWAIT_END_OF_TURN pausing there for Mission 9. AWAIT_MAGE_REVEAL is Mission 3+
  * only (see GameState.mageReveal) — opened by a Mage card in a play, resolved via CHOOSE_MAGE_REVEAL_CARD.
  * AWAIT_REAVER_REVEAL is Mission 5+ only (see GameState.reaverReveal) — opened by a Reaver card in a play,
- * resolved via CHOOSE_REAVER_REVEAL_CARD.
+ * resolved via CHOOSE_REAVER_REVEAL_CARD. AWAIT_SCARLET_WHISTLE_SOLO is Mission 4+ only, gated by the
+ * 'SCARLET_WHISTLE' relic (see GameState.scarletWhistleSoloChoice) — opened by a solo player's lone Companion
+ * play, resolved via CHOOSE_SCARLET_WHISTLE_DISCARD_CARD.
  */
 export type TurnPhase =
   | 'AWAIT_PLAY'
@@ -289,7 +291,8 @@ export type TurnPhase =
   | 'AWAIT_RESCUE_CHOICE'
   | 'AWAIT_BARD_SURRENDER'
   | 'AWAIT_MAGE_REVEAL'
-  | 'AWAIT_REAVER_REVEAL';
+  | 'AWAIT_REAVER_REVEAL'
+  | 'AWAIT_SCARLET_WHISTLE_SOLO';
 
 /**
  * Legacy-only (Mission 8): what engine.ts's resolveChant does once the last pending player finishes trimming
@@ -369,6 +372,17 @@ export interface GameState {
    * see PlayerState.kinfolkSlot / BANK_KINFOLK_CARD), so it no longer opens this window at all.
    */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
+  /**
+   * Legacy-only, gated by the 'SCARLET_WHISTLE' relic, John's house rule: the open solo variant of comboAssist —
+   * with nobody else at the table to silently slip a card into a lone Companion attack, the attacker instead picks
+   * ANY ONE card out of the whole discard pile (not just its top, unlike the original sourced auto-pull — see
+   * engine.ts's playCards/resolveScarletWhistleSoloChoice) to pair with the Companion, via
+   * CHOOSE_SCARLET_WHISTLE_DISCARD_CARD. Non-null only while a choice is pending; a no-op with no window opened at
+   * all if the discard pile holds no suited card when the Companion is played. `cards` is this play's own
+   * Companion card (already moved to the enemy's table by the time this opens), `forcedPlay` carries through to
+   * the eventual resolveCommittedPlay call the same way it does for mageReveal/reaverReveal.
+   */
+  scarletWhistleSoloChoice: { playerId: string; candidates: SuitedCard[]; cards: Card[]; forcedPlay: boolean } | null;
   /**
    * Legacy-only, gated by the 'KINFOLK_FLUTE' relic: true once the current player has already banked a card
    * onto their kinfolkSlot this turn (see BANK_KINFOLK_CARD) — at most one bank per turn, even if the slot was
@@ -936,6 +950,13 @@ export type GameAction =
    * numeric strength to the attack. Every revealed card, chosen or not, is banished for good.
    */
   | { type: 'CHOOSE_REAVER_REVEAL_CARD'; playerId: string; cardId: string }
+  /**
+   * Legacy-only (Mission 4+), gated by the 'SCARLET_WHISTLE' relic, John's house rule, from
+   * AWAIT_SCARLET_WHISTLE_SOLO: the solo attacker whose lone Companion play opened the window (see
+   * GameState.scarletWhistleSoloChoice) chooses `cardId`, any one card currently in the discard pile, to pair
+   * with the Companion.
+   */
+  | { type: 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD'; playerId: string; cardId: string }
   | { type: 'DEFEND'; playerId: string; cardIds: string[] }
   | { type: 'USE_SOLO_JESTER'; playerId: string }
   /**
@@ -1007,6 +1028,8 @@ export interface ClientGameState {
   endlessLoop: number;
   /** See GameState.comboAssist. */
   comboAssist: { attackerId: string; cardIds: string[] } | null;
+  /** See GameState.scarletWhistleSoloChoice. Public information, same as every other pending-choice window. */
+  scarletWhistleSoloChoice: { playerId: string; candidates: SuitedCard[]; cards: Card[]; forcedPlay: boolean } | null;
   /** Legacy-only: relic ids the campaign has earned (e.g. 'KINFOLK_FLUTE', 'SCARLET_WHISTLE'). Public information. */
   relics: string[];
   /** See GameState.kinfolkBankedThisTurn. */

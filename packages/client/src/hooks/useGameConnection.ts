@@ -161,9 +161,9 @@ export function useGameConnection() {
   }, []);
 
   const startLegacyMission = useCallback(
-    (missionId: number): void => {
+    (missionId: number, stopForPendingChoices?: boolean): void => {
       if (!session) return;
-      socketRef.current?.emit('legacy:startMission', { code: session.code, missionId }, (res) => {
+      socketRef.current?.emit('legacy:startMission', { code: session.code, missionId, stopForPendingChoices }, (res) => {
         if (!res.ok) setError(res.error);
       });
     },

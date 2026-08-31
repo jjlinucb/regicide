@@ -330,6 +330,52 @@ describe('legacy campaign integration', () => {
     client.close();
   });
 
+  it('stopForPendingChoices: jumping past a mission with an interactive reward pick stops for it instead of launching straight into the target mission', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Nadia' });
+
+    // BUG FIX regression test: without stopForPendingChoices, this single call used to grant Mission 4's Beast
+    // Companion pool AND launch straight into Mission 5's fight in the same atomic step — so the client (whose
+    // BeastCompanionPicker only ever renders on CampaignLobbyPage) never got a chance to show it before gameplay
+    // began. The pool was still there server-side, just unreachable until the party happened to return to the
+    // lobby later. `stopForPendingChoices: true` (only ever set by the live client UI — see
+    // CampaignLobbyPage.tsx's onStartMission call) fixes that by stopping right after the grant.
+    let result = rooms.startLegacyMission(created.code, created.playerId, 5, { stopForPendingChoices: true });
+    if ('error' in result) throw new Error(result.error);
+    expect(result.room.legacy?.currentMission).toBe(5);
+    expect(result.room.legacy?.beastCompanionPool.length).toBe(4);
+    // The mission was NOT actually started — the host still needs to make (or skip) the pick from the lobby.
+    expect(result.room.gameState.phase).toBe('LOBBY');
+
+    const chosen = result.room.legacy!.beastCompanionPool[0];
+    const selectResult = await rooms.setBeastCompanionSelection(created.code, created.playerId, chosen.id);
+    if ('error' in selectResult) throw new Error(selectResult.error);
+
+    // A second call, now that currentMission already caught up to 5, actually starts the mission — with the
+    // chosen companion folded into this attempt's reserve deck.
+    result = rooms.startLegacyMission(created.code, created.playerId, 5, { stopForPendingChoices: true });
+    if ('error' in result) throw new Error(result.error);
+    expect(result.room.gameState.phase).toBe('IN_PROGRESS');
+    const inPlay = [...result.room.gameState.tavernDeck, ...result.room.gameState.players.flatMap((p) => p.hand)];
+    expect(inPlay.some((c) => c.id === chosen.id)).toBe(true);
+
+    client.close();
+  });
+
+  it('omitting stopForPendingChoices preserves the original one-shot jump-and-start behavior (every existing caller relies on this)', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Omar' });
+
+    const result = rooms.startLegacyMission(created.code, created.playerId, 5);
+    if ('error' in result) throw new Error(result.error);
+    expect(result.room.legacy?.beastCompanionPool.length).toBe(4);
+    expect(result.room.gameState.phase).toBe('IN_PROGRESS');
+
+    client.close();
+  });
+
   it('Mission 11 pulls the WHOLE Beast Companion pool into play at once, overriding the "pick one" restriction', async () => {
     const client = ioClient(`http://localhost:${port}`);
     await waitFor(client, 'connect');
