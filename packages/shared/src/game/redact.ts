@@ -36,6 +36,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     kinfolkBankedThisTurn: state.kinfolkBankedThisTurn,
     azureEmblemWindow: state.azureEmblemWindow,
     mageReveal: state.mageReveal,
+    reaverRevealCountChoice: state.reaverRevealCountChoice,
     reaverReveal: state.reaverReveal,
     discardTopBuffsAttack: state.discardTopBuffsAttack,
     missionZone: state.missionZone,

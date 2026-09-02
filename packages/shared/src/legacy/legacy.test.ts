@@ -58,6 +58,19 @@ function ensureOk(res: EngineResult): Extract<EngineResult, { ok: true }> {
   return res;
 }
 
+/**
+ * Resolves an open AWAIT_REAVER_REVEAL_COUNT window (see GameState.reaverRevealCountChoice) by choosing the
+ * maximum count offered — the pre-existing behavior every reveal test below was written against, before players
+ * could choose to reveal fewer than the play's full combined value.
+ */
+function chooseMaxReaverRevealCount(state: GameState): GameState {
+  const window = state.reaverRevealCountChoice;
+  if (!window) throw new Error('No open Reaver reveal-count choice to resolve.');
+  return ensureOk(
+    applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_COUNT', playerId: window.playerId, count: window.maxCount }),
+  ).state;
+}
+
 describe('legacy: mission setup', () => {
   it('builds a mission state from a party + enemy list, ruleset legacy, named enemies', () => {
     const enemies: LegacyEnemySpec[] = [
@@ -1773,6 +1786,10 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
     let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
+    expect(state.reaverRevealCountChoice?.maxCount).toBe(4); // lone card, so total value = its own rank (4)
+    state = chooseMaxReaverRevealCount(state);
+
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
     expect(state.reaverReveal?.candidates.length).toBe(4); // lone card, so total value = its own rank (4)
     const chosen = state.reaverReveal!.candidates.find((c) => c.rank === '6')!;
@@ -1798,6 +1815,9 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
     let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
+    state = chooseMaxReaverRevealCount(state);
+
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
     res = ensureOk(applyAction(state, { type: 'DECLINE_REAVER_REVEAL', playerId: state.players[0].id }));
     state = res.state;
@@ -1820,6 +1840,9 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
 
     let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
+
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
+    state = chooseMaxReaverRevealCount(state);
 
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
     res = ensureOk(applyAction(state, { type: 'DECLINE_REAVER_REVEAL', playerId: state.players[0].id }));
@@ -1845,6 +1868,10 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
     );
     state = res.state;
 
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
+    expect(state.reaverRevealCountChoice?.maxCount).toBe(10);
+    state = chooseMaxReaverRevealCount(state);
+
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
     expect(state.reaverReveal?.candidates.length).toBe(10); // reveal count = the whole play's combined total (5 Clubs + 5 Reaver), not just the Reaver's own rank
     const chosen = state.reaverReveal!.candidates.find((c) => c.rank === '6')!;
@@ -1866,6 +1893,10 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
     );
     state = res.state;
 
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
+    expect(state.reaverRevealCountChoice?.maxCount).toBe(10);
+    state = chooseMaxReaverRevealCount(state);
+
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
     expect(state.reaverReveal?.candidates.length).toBe(10);
   });
@@ -1883,6 +1914,69 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
     // (3 + 0) * 2 (Reaver's own doubling still applies even with no bonus to add) = 6.
     expect(state.currentEnemy?.damageTaken).toBe(6);
     expect(state.turnPhase).not.toBe('AWAIT_REAVER_REVEAL'); // resolved immediately — no window opened
+  });
+
+  it("confirmed live (2026-09-02): the player chooses HOW MANY cards to reveal (1 up to the play's total value), not forced to reveal all of them", () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
+    let state = startCrimsonMission(1, [boss]);
+    state = structuredClone(state);
+    state.tavernDeck = [suited('C', '6'), suited('D', '2'), suited('D', '2'), suited('D', '2'), ...state.tavernDeck];
+    const reserveBefore = state.tavernDeck.length;
+    state = rig(state, [reaverCard('D', '4')]); // total value 4 — maxCount should be 4
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
+    expect(state.reaverRevealCountChoice?.maxCount).toBe(4);
+
+    // Choosing 2 (less than the max of 4) reveals only the top 2 cards, not all 4.
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_COUNT', playerId: state.players[0].id, count: 2 }));
+    state = res.state;
+
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    expect(state.reaverReveal?.allRevealed.length).toBe(2);
+    expect(state.reaverReveal?.candidates.length).toBe(2); // both revealed cards happen to be suited (D-2, D-2)
+    expect(state.tavernDeck.length).toBe(reserveBefore - 2); // only 2 cards pulled off the reserve deck, not 4
+
+    const chosen = state.reaverReveal!.candidates[0];
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
+    state = res.state;
+
+    // Only the 2 revealed cards are banished — the other 2 (that would have been pulled at count=4) stay untouched
+    // in the reserve deck, which is the whole point of choosing a smaller count.
+    expect(state.banishPile.length).toBe(2);
+    expect(state.tavernDeck.some((c) => c.kind === 'suited' && c.rank === '6')).toBe(true); // the Clubs 6 never got pulled
+  });
+
+  it("choosing a count of 1 is the safest play: the single revealed card is either the only candidate (auto-taken) or costs nothing but itself", () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
+    let state = startCrimsonMission(1, [boss]);
+    state = structuredClone(state);
+    state.tavernDeck = [suited('C', '9'), ...state.tavernDeck];
+    state = rig(state, [reaverCard('D', '5')]);
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_COUNT', playerId: state.players[0].id, count: 1 }));
+    state = res.state;
+
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    expect(state.reaverReveal?.candidates.length).toBe(1);
+    expect(state.reaverReveal?.candidates[0].rank).toBe('9');
+  });
+
+  it('rejects a chosen count outside [1, maxCount]', () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
+    let state = startCrimsonMission(1, [boss]);
+    state = rig(state, [reaverCard('D', '4')]);
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+
+    expect(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_COUNT', playerId: state.players[0].id, count: 0 }).ok).toBe(false);
+    expect(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_COUNT', playerId: state.players[0].id, count: 5 }).ok).toBe(false); // maxCount is 4
+    expect(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_COUNT', playerId: state.players[0].id, count: 1.5 }).ok).toBe(false);
   });
 
   it("the engine's generic presetMissionZone capability still seeds a fixed, static set of cards at mission start (no longer how Mission 5 itself uses Myla — see the mission-5 reward describe block below)", () => {
@@ -2009,6 +2103,9 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
 
     let step = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: ['hand-reaver'] }));
     state = step.state;
+
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
+    state = chooseMaxReaverRevealCount(state);
 
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
     const chosen = state.reaverReveal!.candidates.find((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6')!;
@@ -2538,7 +2635,10 @@ describe('legacy: bonus Reaver sticker (secondClassReaver — Mission 5\'s playe
     let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
-    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL'); // the bonus sticker triggers a real reveal, not just a suit power
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT'); // the bonus sticker triggers a real reveal, not just a suit power
+    state = chooseMaxReaverRevealCount(state);
+
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
     expect(state.reaverReveal?.candidates.length).toBe(6); // reveal count = the play's own total value (6), same as a pure Reaver
     const chosen = state.reaverReveal!.candidates.find((c) => c.rank === '9')!;
     res = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
@@ -4904,9 +5004,11 @@ describe('legacy: mission 12 restored-card redirect (can never land in the banis
     let res = ensureOk(
       applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
     );
-    expect(res.state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    expect(res.state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
+    const afterCountChoice = chooseMaxReaverRevealCount(res.state);
+    expect(afterCountChoice.turnPhase).toBe('AWAIT_REAVER_REVEAL');
     res = ensureOk(
-      applyAction(res.state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: toReveal.id }),
+      applyAction(afterCountChoice, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: toReveal.id }),
     );
 
     expect(res.state.banishPile.some((c) => c.id === toReveal.id)).toBe(false);
