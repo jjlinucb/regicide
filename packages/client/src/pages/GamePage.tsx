@@ -597,11 +597,16 @@ export function GamePage({
 
       {isMyScarletWhistleSoloWindow && (
         <div className="jester-picker">
-          <span>🎗️ Scarlet Whistle — choose any one card from the discard pile to pair with your Companion.</span>
+          <span>🎗️ Scarlet Whistle — choose any one card from the discard pile to pair with your Companion, or attack alone.</span>
           <EnemyCardPicker
             cards={state.scarletWhistleSoloChoice?.candidates ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD', playerId: myPlayerId, cardId })}
           />
+          <div className="jester-picker-choices">
+            <button className="btn-secondary btn" onClick={() => sendAction({ type: 'DECLINE_SCARLET_WHISTLE_SOLO', playerId: myPlayerId })}>
+              Attack alone — pair with nothing
+            </button>
+          </div>
         </div>
       )}
 
