@@ -1653,6 +1653,20 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
       ? corruptedEnemyBuild.enemies
       : orderedEnemies.map(makeLegacyEnemy);
   let partyForReserve = corruptedEnemyBuild ? corruptedEnemyBuild.leftoverParty : action.party;
+  // BUG FIX: a preset mission-zone/banish-pile companion (missions.ts's zoneCompanion/reaverCompanion, whose own
+  // doc comment promises the card is "never part of the reserve deck or party") can share a name with a card the
+  // player already permanently recruited via an earlier mission's reward — Mission 6's Myla, recruited at Mission
+  // 5, is exactly this case. Without this filter she'd exist twice: once locked into presetMissionZone, and once
+  // still sitting in the party, drawable and playable like any other card. Matched by name, the only stable
+  // identity these preset companions carry (see zoneCompanion's id being a derived slug, not a real card id).
+  const presetCompanionNames = new Set(
+    [...(action.presetMissionZone ?? []), ...(action.presetBanishPile ?? [])]
+      .map((c) => (c.kind === 'suited' ? c.name : undefined))
+      .filter((name): name is string => Boolean(name)),
+  );
+  if (presetCompanionNames.size > 0) {
+    partyForReserve = partyForReserve.filter((c) => !(c.kind === 'suited' && c.name && presetCompanionNames.has(c.name)));
+  }
   // Mission 11: every Beast Companion card (Mission 4's reward pool) is pulled out of the party and shuffled
   // into its own face-down deck sitting in the mission zone for this fight only — none of them are available to
   // draw or play this mission (see deck.ts's buildBeastDeck). Chained after the Mission 10 pull above so the two
@@ -1759,10 +1773,17 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.endOfTurnZoneFlip = action.endOfTurnZoneFlip ?? false;
   state.missionZone = action.presetMissionZone ?? [];
   // Mission 8's ascending zone never grants suit immunity — its cards only buff the enemy's attack while a
-  // gap-bridging card sits there (see rules.ts's ascendingZoneAttackBuff) — unlike Missions 3/5/6's zone modes.
-  state.zoneImmuneSuits = action.ascendingZone
-    ? []
-    : Array.from(new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))));
+  // gap-bridging card sits there (see rules.ts's ascendingZoneAttackBuff) — unlike Missions 3/5's zone modes.
+  // Mission 6 (zoneVengeanceOnKill, exclusive to it per missions.ts) is ALSO excluded here as of an unsourced
+  // balance call (John's ruling, 2026-09-02): its ever-growing mission zone used to feed zoneImmuneSuits the same
+  // way, which could stack a second or third suit of immunity onto every later boss on top of that boss's own
+  // printed suit — confusing in play and never how the physical rules card describes it. Every Mission 6 boss now
+  // stays immune to only its own suit, no matter how large the zone grows (see chooseZoneVengeanceSacrifice/
+  // chooseZoneReliefCard below, which no longer recompute zoneImmuneSuits either).
+  state.zoneImmuneSuits =
+    action.ascendingZone || action.zoneVengeanceOnKill
+      ? []
+      : Array.from(new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' ? cardSuits(c) : []))));
   state.banishPile = action.presetBanishPile ?? [];
   // See deckJesterCount above — when standingJesters is set, the mission's Jesters never enter the shuffled
   // reserve deck at all; they're built directly into this standing pool instead (see GameState.standingJesters).
@@ -3011,11 +3032,11 @@ function chooseZoneVengeanceSacrifice(
 
   const [sacrificed] = enemy.tableCards.splice(idx, 1);
   state.missionZone.push(sacrificed);
-  // A Mercenary "19" (see SuitedCard.noSuitPower) carries an inert placeholder suit and must never grant zone
-  // immunity, same as every other suit-immunity-bookkeeping site it's excluded from.
-  state.zoneImmuneSuits = Array.from(
-    new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' && !c.noSuitPower ? cardSuits(c) : []))),
-  );
+  // UNSOURCED BALANCE CALL (John's ruling, 2026-09-02): Mission 6's mission zone no longer grants suit immunity
+  // at all, no matter how large it grows — see startLegacyMission's zoneImmuneSuits setup, which now leaves it
+  // permanently empty for this mission (zoneVengeanceOnKill is exclusive to Mission 6). This used to recompute
+  // zoneImmuneSuits from the zone's card suits on every kill, which could stack a second or third suit of
+  // immunity onto whatever boss came next, on top of that boss's own printed suit.
   log(state, `${sacrificed.kind === 'suited' ? sacrificed.name ?? `the ${sacrificed.rank}` : 'the Jester'} is drawn permanently into the mission zone.`);
 
   state.zoneVengeanceChoice = null;
@@ -3042,10 +3063,8 @@ function chooseZoneReliefCard(state: GameState, action: Extract<GameAction, { ty
 
   const [discarded] = state.missionZone.splice(idx, 1);
   state.discardPile.push(discarded);
-  // Same suit-immunity bookkeeping as chooseZoneVengeanceSacrifice above, recomputed now that the zone shrank.
-  state.zoneImmuneSuits = Array.from(
-    new Set(state.missionZone.flatMap((c) => (c.kind === 'suited' && !c.noSuitPower ? cardSuits(c) : []))),
-  );
+  // See chooseZoneVengeanceSacrifice above: Mission 6's mission zone no longer grants suit immunity at all, so
+  // there's nothing to recompute here either.
   log(
     state,
     `${discarded.kind === 'suited' ? discarded.name ?? `the ${discarded.rank}` : 'the Jester'} is discarded out of the mission zone for good, sparing it from Myla's wrath.`,
