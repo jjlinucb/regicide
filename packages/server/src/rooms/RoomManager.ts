@@ -26,6 +26,26 @@ export interface RoomPlayer {
   connected: boolean;
 }
 
+/**
+ * Re-points `progress` at `missionId`, carrying the party's currently-selected mercenary loadout across rather
+ * than throwing it away. The loss STREAK never travels — a different mission means the old streak is over one way
+ * or another (won, jumped past, or abandoned), so lossCount resets to 0 and the budget drops back to
+ * mercenaryCoinsForLosses(0) — but the party's PICKS survive, as long as that fresh budget can still afford them.
+ *
+ * BUG FIX (2026-09-02, reported from live play): this used to clear `loadout` outright whenever the mission
+ * changed, which silently threw away a purchase made in the lobby immediately before jumping to another mission —
+ * CampaignLobbyPage renders the Mercenary Camp directly above the mission picker, and the camp's own copy
+ * promises the hires "ride along in the deck on your next attempt", so buying two Jesters and then jumping to
+ * Mission 5 read as 4 standing Jesters but delivered 2. Re-validating against the destination's own budget is
+ * what keeps this honest: a loadout bought under a long loss streak's inflated coins can't be smuggled into a
+ * fresh mission for free, it's simply dropped.
+ */
+function repointMercenaryProgress(progress: MercenaryProgress | null, missionId: number): MercenaryProgress {
+  const carried = progress?.loadout ?? {};
+  const affordable = buildMercenaryLoadout(carried, mercenaryCoinsForLosses(0));
+  return { missionId, lossCount: 0, loadout: Array.isArray(affordable) ? carried : {} };
+}
+
 /** A Legacy room's durable campaign data, mirrored from CampaignStore and kept in sync at mission boundaries. */
 export interface LegacyRoomData {
   campaignCode: string;
@@ -479,6 +499,12 @@ export class RoomManager {
         }
       }
       room.legacy.currentMission = missionId;
+      // Re-point the mercenary tracker at the destination as soon as currentMission moves, not later at the
+      // mission-start step below: CampaignLobbyPage only renders the Mercenary Camp while
+      // mercenaryProgress.missionId === currentMission, so leaving it on the old mission makes the camp vanish
+      // from the lobby for the whole stop-for-choices pause — exactly when the party is standing there deciding
+      // what to bring. Carries the equipped loadout across (see repointMercenaryProgress).
+      room.legacy.mercenaryProgress = repointMercenaryProgress(room.legacy.mercenaryProgress, missionId);
       if (opts.stopForPendingChoices && introducesInteractiveChoice) return { room };
     }
 
@@ -486,18 +512,17 @@ export class RoomManager {
     // was tracking means its loss streak is over one way or another (won, skipped past, or simply abandoned for
     // another mission) — coins never carry across missions, so clear it. Otherwise carry the equipped loadout
     // (already coin-budget-validated when it was set, see setMercenaryLoadout) into this attempt's deck.
-    let mercenaryCards: Card[] = [];
     if (room.legacy.mercenaryProgress?.missionId !== missionId) {
       // Easy-mode call (see createLegacyCampaign): a fresh 0-loss tracker for THIS mission, not null, so its
-      // +15-coin bonus is available right away instead of only after a loss.
-      room.legacy.mercenaryProgress = { missionId, lossCount: 0, loadout: {} };
-    } else {
-      const built = buildMercenaryLoadout(room.legacy.mercenaryProgress.loadout, mercenaryCoinsForLosses(room.legacy.mercenaryProgress.lossCount));
-      // A stored loadout was already validated when set — a re-validation failure here would mean the catalog
-      // itself changed underneath a persisted campaign, not a real user-facing error. Fall back to no mercenaries
-      // rather than blocking the mission from starting at all.
-      mercenaryCards = Array.isArray(built) ? built : [];
+      // +15-coin bonus is available right away instead of only after a loss. The equipped loadout rides across
+      // with it (see repointMercenaryProgress) instead of being silently discarded.
+      room.legacy.mercenaryProgress = repointMercenaryProgress(room.legacy.mercenaryProgress, missionId);
     }
+    const built = buildMercenaryLoadout(room.legacy.mercenaryProgress.loadout, mercenaryCoinsForLosses(room.legacy.mercenaryProgress.lossCount));
+    // A stored loadout was already validated when set — a re-validation failure here would mean the catalog
+    // itself changed underneath a persisted campaign, not a real user-facing error. Fall back to no mercenaries
+    // rather than blocking the mission from starting at all.
+    const mercenaryCards: Card[] = Array.isArray(built) ? built : [];
 
     // Mission-specific sideline: pull `sidelineCount` random members out of the reserve deck for this fight only
     // — the campaign's persisted roster (room.legacy.party) is untouched, so they're back next mission.
