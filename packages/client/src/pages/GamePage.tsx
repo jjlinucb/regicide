@@ -449,6 +449,7 @@ export function GamePage({
               !isAwaitRescueChoice)
           }
           enemy={state.currentEnemy}
+          zoneImmuneSuits={state.zoneImmuneSuits}
         />
       </div>
 

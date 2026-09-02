@@ -2203,6 +2203,49 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
 
     expect(state.missionZone.length).toBe(2); // Myla + the sacrificed 5, permanently
   });
+
+  it('UNSOURCED BALANCE FIX: the growing mission zone never grants suit immunity — a boss stays immune to only its own suit', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 5, attack: 1 };
+    const next: LegacyEnemySpec = { name: 'Next Statue', suit: 'C', health: 20, attack: 1 };
+    let state = startGardenMission(1, [boss, next], [myla]);
+    expect(state.zoneImmuneSuits).toEqual([]); // Myla (Hearts) is in the zone from the very start, but grants nothing
+
+    state = rig(state, [suited('H', '5')]); // exact kill
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseSacrifice(state, state.currentEnemy!.tableCards[0].id); // sacrifices the Hearts 5 into the zone
+
+    expect(state.missionZone.length).toBe(2); // Myla (H) + the sacrificed 5 (H) — zone now holds 2 Hearts cards
+    expect(state.zoneImmuneSuits).toEqual([]); // still grants no suit immunity, no matter how the zone grows
+    // The next boss (Clubs) is immune to its own suit only — never to Hearts, despite the zone being all-Hearts.
+    expect(state.currentEnemy?.suit).toBe('C');
+    expect(state.currentEnemy?.secondSuit).toBeUndefined();
+  });
+
+  it('BUG FIX: Myla is not duplicated between the mission zone and the party/reserve deck when she was already recruited (Mission 5)', () => {
+    // By the time Mission 6 starts, a real Myla card already lives permanently in the party (granted by Mission
+    // 5's own reward — see missions.ts's Mission 5 recruits). presetMissionZone seeds a SEPARATE freshly-built
+    // Myla card (zoneCompanion) straight into the mission zone; without filtering the party's copy out, both
+    // would exist at once — one locked in the zone, one still drawable and playable from the reserve deck/hand.
+    const recruitedMyla: Card = { id: 'party-myla', kind: 'suited', suit: 'H', rank: '7', name: 'Myla', noSuitPower: true };
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 8, attack: 1 };
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'myla-dup-test',
+      party: [...buildInitialParty(), recruitedMyla],
+      enemies: [boss],
+      jesterCount: 0,
+      presetMissionZone: [myla],
+      zoneVengeanceOnKill: true,
+    });
+    const state = ensureOk(res).state;
+
+    const allDealtAndDrawableCards = [...state.tavernDeck, ...state.players.flatMap((p) => p.hand)];
+    const mylaCopiesOutsideZone = allDealtAndDrawableCards.filter((c) => c.kind === 'suited' && c.name === 'Myla');
+    expect(mylaCopiesOutsideZone).toEqual([]);
+    expect(state.missionZone.filter((c) => c.kind === 'suited' && c.name === 'Myla').length).toBe(1);
+  });
 });
 
 describe('legacy: mission 6 setup, bug fix — Guardian cards seeded as fight setup, not just the eventual reward', () => {
