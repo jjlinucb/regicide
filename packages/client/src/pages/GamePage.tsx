@@ -23,6 +23,7 @@ import { VictoryCrest } from '../components/VictoryCrest';
 import { ZonePurgePicker } from '../components/ZonePurgePicker';
 import { CapturedPiles } from '../components/CapturedPiles';
 import { EnemyCardPicker } from '../components/EnemyCardPicker';
+import { ReaverRevealCountPicker } from '../components/ReaverRevealCountPicker';
 import { RelicsTray } from '../components/RelicsTray';
 
 const MEDAL_INFO: Record<'gold' | 'silver' | 'bronze', { emoji: string; label: string }> = {
@@ -161,6 +162,14 @@ export function GamePage({
   // card it pulls up (see engine.ts's resolveMageRevealChoice) — flagged here so the reveal prompt can call it out.
   const mageTriggerIsCursed = mageTrigger?.kind === 'suited' && Boolean(mageTrigger.corrupted);
 
+  // Mission 5+, John's ruling: opened by a Reaver card BEFORE anything is revealed — the player picks how many
+  // cards (1 up to the play's total value) the reveal should actually pull off the reserve deck.
+  const isReaverRevealCountWindow = state.turnPhase === 'AWAIT_REAVER_REVEAL_COUNT' && Boolean(state.reaverRevealCountChoice);
+  const reaverRevealCountPlayerId = state.reaverRevealCountChoice?.playerId;
+  const isMyReaverRevealCountWindow = isReaverRevealCountWindow && reaverRevealCountPlayerId === myPlayerId;
+  const reaverCountTrigger = state.reaverRevealCountChoice?.trigger;
+  const reaverCountTriggerLabel = reaverCountTrigger ? (reaverCountTrigger.name ?? `the ${reaverCountTrigger.rank}`) : 'The Reaver';
+
   // Mission 5+, John's ruling ("Reveal and Add"): the Reaver reveal window, opened whenever a Reaver card joins
   // an attack — only the player whose Reaver it is resolves it.
   const isReaverRevealWindow = state.turnPhase === 'AWAIT_REAVER_REVEAL' && Boolean(state.reaverReveal);
@@ -269,6 +278,10 @@ export function GamePage({
                   ? isMyMageRevealWindow
                     ? `${mageTriggerLabel}'s reveal${mageTriggerIsCursed ? ' (cursed — the chosen card will ignore immunity)' : ''} — choose one card to banish and add to the attack.${mageQueueRemaining > 0 ? ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)` : ''}`
                     : `${state.players.find((p) => p.id === mageRevealPlayerId)?.name} is choosing a card from ${mageTriggerLabel}'s reveal...`
+                  : isReaverRevealCountWindow
+                    ? isMyReaverRevealCountWindow
+                      ? `${reaverCountTriggerLabel} opens a reveal — choose how many cards to pull off the reserve deck (fewer is safer — every card revealed is banished either way).`
+                      : `${state.players.find((p) => p.id === reaverRevealCountPlayerId)?.name} is choosing how many cards to reveal from ${reaverCountTriggerLabel}...`
                   : isReaverRevealWindow
                     ? isMyReaverRevealWindow
                       ? `${reaverTriggerLabel}'s reveal — choose one card to add to the attack.`
@@ -577,6 +590,19 @@ export function GamePage({
           <EnemyCardPicker
             cards={state.mageReveal?.candidates ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: myPlayerId, cardId })}
+          />
+        </div>
+      )}
+
+      {isMyReaverRevealCountWindow && (
+        <div className="jester-picker">
+          <span>
+            🍄 {reaverCountTriggerLabel} opens a reveal — choose how many cards (1-{state.reaverRevealCountChoice?.maxCount}) to pull from
+            the reserve deck. Every card revealed is banished either way, so fewer is safer.
+          </span>
+          <ReaverRevealCountPicker
+            maxCount={state.reaverRevealCountChoice?.maxCount ?? 1}
+            onChoose={(count) => sendAction({ type: 'CHOOSE_REAVER_REVEAL_COUNT', playerId: myPlayerId, count })}
           />
         </div>
       )}

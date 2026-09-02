@@ -760,7 +760,14 @@ function revealForReaver(
   return ok(state);
 }
 
-/** Legacy-only, Mission 5+: opens a Reaver's reveal if this play includes one, otherwise resumes resolution immediately with no Reaver bonus. */
+/**
+ * Legacy-only, Mission 5+: opens a Reaver's reveal-count choice if this play includes a Reaver, otherwise resumes
+ * resolution immediately with no Reaver bonus. The count itself (1 up to the whole play's own combined total
+ * value, not just the Reaver's own printed rank — see revealForReaver's doc comment for why a combo reveals
+ * proportionally more) is picked by the player via CHOOSE_REAVER_REVEAL_COUNT / resolveReaverRevealCount, not
+ * forced outright — see GameState.reaverRevealCountChoice. Skipped straight to the reveal (with no real choice
+ * to make) if the reserve deck is already empty.
+ */
 function startReaverPhase(
   state: GameState,
   player: PlayerState,
@@ -774,12 +781,47 @@ function startReaverPhase(
 ): EngineResult {
   const reaverTrigger = state.ruleset === 'legacy' ? cards.find(isReaverCard) : undefined;
   if (reaverTrigger) {
-    // The reveal count is the whole play's own combined total value, not just the Reaver's own printed rank —
-    // see revealForReaver's doc comment for why (a Reaver combo'd with another same-rank card, including via the
-    // Kinfolk Flute, reveals proportionally more).
-    return revealForReaver(state, player.id, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, totalValue, reaverTrigger);
+    if (state.tavernDeck.length === 0) {
+      return revealForReaver(state, player.id, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, totalValue, reaverTrigger);
+    }
+    state.reaverRevealCountChoice = {
+      playerId: player.id,
+      cards,
+      claimedJester,
+      forcedPlay,
+      totalValue,
+      arcaneBonus,
+      arcaneSuits,
+      arcaneImmuneSuits,
+      trigger: reaverTrigger,
+      maxCount: totalValue,
+    };
+    state.turnPhase = 'AWAIT_REAVER_REVEAL_COUNT';
+    const triggerLabel = reaverTrigger.name ?? `the ${reaverTrigger.rank}`;
+    log(state, `${triggerLabel} opens a reveal — choose how many cards (1-${totalValue}) to pull from the reserve deck.`);
+    return ok(state);
   }
   return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, 0);
+}
+
+/**
+ * Resolves the AWAIT_REAVER_REVEAL_COUNT window opened by startReaverPhase (see GameState.reaverRevealCountChoice):
+ * validates the player's chosen count against [1, maxCount], then hands off to revealForReaver to actually pull
+ * that many cards and open the ordinary AWAIT_REAVER_REVEAL choice.
+ */
+function resolveReaverRevealCount(state: GameState, action: Extract<GameAction, { type: 'CHOOSE_REAVER_REVEAL_COUNT' }>): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_REAVER_REVEAL_COUNT');
+  if (err) return fail(err);
+  const window = state.reaverRevealCountChoice;
+  if (!window) return fail('There is no open Reaver reveal-count choice to resolve.');
+  if (!Number.isInteger(action.count) || action.count < 1 || action.count > window.maxCount) {
+    return fail(`Choose a count between 1 and ${window.maxCount}.`);
+  }
+
+  const { playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, trigger } = window;
+  state.reaverRevealCountChoice = null;
+  state.turnPhase = 'AWAIT_PLAY';
+  return revealForReaver(state, playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, action.count, trigger);
 }
 
 /** Resolves the AWAIT_REAVER_REVEAL window opened by revealForReaver (see GameState.reaverReveal). */
@@ -3106,6 +3148,7 @@ export function createLobbyState(): GameState {
     kinfolkBankedThisTurn: false,
     azureEmblemWindow: null,
     mageReveal: null,
+    reaverRevealCountChoice: null,
     reaverReveal: null,
     endOfTurnZoneFlip: false,
     missionZone: [],
@@ -3194,6 +3237,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return chooseZoneReliefCard(draft, action);
     case 'CHOOSE_MAGE_REVEAL_CARD':
       return resolveMageRevealChoice(draft, action);
+    case 'CHOOSE_REAVER_REVEAL_COUNT':
+      return resolveReaverRevealCount(draft, action);
     case 'CHOOSE_REAVER_REVEAL_CARD':
       return resolveReaverRevealChoice(draft, action);
     case 'DECLINE_REAVER_REVEAL':

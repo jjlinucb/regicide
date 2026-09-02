@@ -272,7 +272,9 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * is non-empty, resolved via SURRENDER_CARD_TO_ZONE; engine.ts's advanceToNextPlayer pauses mid-advance right here
  * until it resolves, same shape as AWAIT_END_OF_TURN pausing there for Mission 9. AWAIT_MAGE_REVEAL is Mission 3+
  * only (see GameState.mageReveal) — opened by a Mage card in a play, resolved via CHOOSE_MAGE_REVEAL_CARD.
- * AWAIT_REAVER_REVEAL is Mission 5+ only (see GameState.reaverReveal) — opened by a Reaver card in a play,
+ * AWAIT_REAVER_REVEAL_COUNT is Mission 5+ only (see GameState.reaverRevealCountChoice) — opened by a Reaver card
+ * in a play, BEFORE any card is revealed, resolved via CHOOSE_REAVER_REVEAL_COUNT into AWAIT_REAVER_REVEAL.
+ * AWAIT_REAVER_REVEAL is Mission 5+ only (see GameState.reaverReveal) — opened once the reveal count is chosen,
  * resolved via CHOOSE_REAVER_REVEAL_CARD or (declining any bonus) DECLINE_REAVER_REVEAL. AWAIT_SCARLET_WHISTLE_SOLO is Mission 4+ only, gated by the
  * 'SCARLET_WHISTLE' relic (see GameState.scarletWhistleSoloChoice) — opened by a solo player's lone Companion
  * play, resolved via CHOOSE_SCARLET_WHISTLE_DISCARD_CARD or (pairing with nothing) DECLINE_SCARLET_WHISTLE_SOLO.
@@ -291,6 +293,7 @@ export type TurnPhase =
   | 'AWAIT_RESCUE_CHOICE'
   | 'AWAIT_BARD_SURRENDER'
   | 'AWAIT_MAGE_REVEAL'
+  | 'AWAIT_REAVER_REVEAL_COUNT'
   | 'AWAIT_REAVER_REVEAL'
   | 'AWAIT_SCARLET_WHISTLE_SOLO';
 
@@ -439,16 +442,41 @@ export interface GameState {
     trigger: Card;
   } | null;
   /**
-   * Legacy-only (Mission 5+), John's ruling on the Reaver class ("Reveal and Add"): the open Reaver reveal window.
-   * Playing a Reaver card reveals cards off the top of the reserve deck — one per point of the WHOLE PLAY's own
-   * combined total value, not just the Reaver card's own printed rank (confirmed live 2026-08-30: a Reaver
-   * combo'd into a bigger same-rank play, including via the Kinfolk Flute, reveals proportionally more) — and
-   * lets `playerId` choose one of them via CHOOSE_REAVER_REVEAL_CARD to add its raw numeric strength (its class
-   * power, if any, is ignored) to the play's attack total — or decline entirely via DECLINE_REAVER_REVEAL (John's
-   * house rule) if no bonus is wanted, e.g. to avoid overkilling past an exact kill. EVERY card revealed this way —
-   * chosen or not, or even if the player declines outright — is banished for good, not discarded (see
-   * resolveReaverRevealChoice/declineReaverReveal's use of `allRevealed`, which includes candidates never offered
-   * as a choice, like Jesters/corrupted cards). A Reaver's own class power
+   * Legacy-only (Mission 5+), John's ruling: the open window for choosing HOW MANY cards a Reaver's reveal pulls,
+   * opened by a Reaver card in a play BEFORE any card is actually revealed. `playerId` picks any count from 1 up
+   * to `maxCount` (the whole play's own combined total value — the same number revealForReaver always revealed
+   * outright before this choice existed) via CHOOSE_REAVER_REVEAL_COUNT, resolved by resolveReaverRevealCount into
+   * the ordinary AWAIT_REAVER_REVEAL window below. Since every card revealed there is banished for good whether
+   * chosen or not, choosing a smaller count is strictly safer (fewer cards lost to the banish pile) at the cost of
+   * fewer candidates to pick from — choosing 1 either takes that single card automatically (it's the only
+   * candidate) or, if it's a Jester/corrupted card, costs nothing but that one card for no bonus. Confirmed live
+   * (2026-09-02): the shipped version always forced the full reveal, with no way to reveal fewer than the play's
+   * total value. `trigger` names the Reaver card that opened this, same as reaverReveal.trigger below.
+   */
+  reaverRevealCountChoice: {
+    playerId: string;
+    cards: Card[];
+    claimedJester: Card | null;
+    forcedPlay: boolean;
+    totalValue: number;
+    arcaneBonus: number;
+    arcaneSuits: Suit[];
+    arcaneImmuneSuits: Suit[];
+    trigger: SuitedCard;
+    maxCount: number;
+  } | null;
+  /**
+   * Legacy-only (Mission 5+), John's ruling on the Reaver class ("Reveal and Add"): the open Reaver reveal window,
+   * opened once reaverRevealCountChoice above is resolved. Playing a Reaver card reveals cards off the top of the
+   * reserve deck — up to one per point of the WHOLE PLAY's own combined total value, not just the Reaver card's
+   * own printed rank (confirmed live 2026-08-30: a Reaver combo'd into a bigger same-rank play, including via the
+   * Kinfolk Flute, reveals proportionally more), but never more than the player chose via
+   * CHOOSE_REAVER_REVEAL_COUNT — and lets `playerId` choose one of them via CHOOSE_REAVER_REVEAL_CARD to add its
+   * raw numeric strength (its class power, if any, is ignored) to the play's attack total — or decline entirely
+   * via DECLINE_REAVER_REVEAL (John's house rule) if no bonus is wanted, e.g. to avoid overkilling past an exact
+   * kill. EVERY card revealed this way — chosen or not, or even if the player declines outright — is banished for
+   * good, not discarded (see resolveReaverRevealChoice/declineReaverReveal's use of `allRevealed`, which includes
+   * candidates never offered as a choice, like Jesters/corrupted cards). A Reaver's own class power
    * always doubles the play's total damage on top of this — see continueResolveCommittedPlay's reaverMultiplier —
    * so combining a Reaver with a Warrior (Clubs) card in the same play compounds into quadruple damage.
    * `trigger` is the Reaver card that opened this reveal, so the UI can name it instead of a generic banner.
@@ -933,6 +961,14 @@ export type GameAction =
    */
   | { type: 'CHOOSE_MAGE_REVEAL_CARD'; playerId: string; cardId: string }
   /**
+   * Legacy-only (Mission 5+), John's ruling, from AWAIT_REAVER_REVEAL_COUNT: the player whose Reaver card opened
+   * the window (see GameState.reaverRevealCountChoice) picks `count`, from 1 up to the window's own `maxCount`,
+   * for how many cards the reveal should actually pull off the reserve deck — resolved by
+   * resolveReaverRevealCount, which then opens the ordinary AWAIT_REAVER_REVEAL window with exactly that many
+   * cards revealed.
+   */
+  | { type: 'CHOOSE_REAVER_REVEAL_COUNT'; playerId: string; count: number }
+  /**
    * Legacy-only (Mission 5+), from AWAIT_REAVER_REVEAL: the player whose Reaver card opened the reveal (see
    * GameState.reaverReveal) chooses `cardId`, from the cards just revealed off the reserve deck, to add its
    * numeric strength to the attack. Every revealed card, chosen or not, is banished for good.
@@ -1054,6 +1090,19 @@ export interface ClientGameState {
     arcaneSuits: Suit[];
     arcaneImmuneSuits: Suit[];
     trigger: Card;
+  } | null;
+  /** See GameState.reaverRevealCountChoice. Public information, same as every other pending-choice window. */
+  reaverRevealCountChoice: {
+    playerId: string;
+    cards: Card[];
+    claimedJester: Card | null;
+    forcedPlay: boolean;
+    totalValue: number;
+    arcaneBonus: number;
+    arcaneSuits: Suit[];
+    arcaneImmuneSuits: Suit[];
+    trigger: SuitedCard;
+    maxCount: number;
   } | null;
   /** See GameState.reaverReveal. Public information, same as every other pending-choice window. */
   reaverReveal: {
