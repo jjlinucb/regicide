@@ -2278,7 +2278,9 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
   // tutorial_vids/summaries/mission-4.md), reworked into a real choice (John's house rule — the sourced version
   // only ever auto-pulled the discard pile's TOP card): with nobody else at the table to slip in a card, the lone
   // attacker instead picks ANY ONE suited card out of the whole discard pile to pair with the Companion, via
-  // CHOOSE_SCARLET_WHISTLE_DISCARD_CARD (see resolveScarletWhistleSoloChoice). A no-op (resolves the Companion
+  // CHOOSE_SCARLET_WHISTLE_DISCARD_CARD (see resolveScarletWhistleSoloChoice) — or takes nothing and attacks
+  // alone, via DECLINE_SCARLET_WHISTLE_SOLO (see declineScarletWhistleSoloChoice; John's ruling, confirmed live
+  // 2026-09-02 — the pairing is always optional). A no-op (resolves the Companion
   // alone, as before, no window opened) if the discard pile holds no suited card at all — a claimed Jester can
   // leave one sitting there, but a Jester can never join a normal combo, per validatePlayShape.
   const soloDiscardCandidates = state.discardPile.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited');
@@ -2293,7 +2295,7 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
   if (canOpenSoloDiscardChoice) {
     state.scarletWhistleSoloChoice = { playerId: player.id, candidates: soloDiscardCandidates, cards: shapeCards, forcedPlay };
     state.turnPhase = 'AWAIT_SCARLET_WHISTLE_SOLO';
-    log(state, `${player.name} attacks alone with a Companion card — the Scarlet Whistle lets them pull any one card from the discard pile to help.`);
+    log(state, `${player.name} attacks alone with a Companion card — the Scarlet Whistle lets them pull any one card from the discard pile to help, or wave it off and attack alone.`);
     return ok(state);
   }
 
@@ -2323,6 +2325,31 @@ function resolveScarletWhistleSoloChoice(
   state.turnPhase = 'AWAIT_PLAY';
   const player = state.players.find((p) => p.id === playerId)!;
   return resolveCommittedPlay(state, player, [...cards, chosen], null, forcedPlay);
+}
+
+/**
+ * Resolves the AWAIT_SCARLET_WHISTLE_SOLO window via DECLINE_SCARLET_WHISTLE_SOLO (John's ruling, confirmed live
+ * 2026-09-02): the pairing is optional, so the Companion attacks alone and the discard pile is left untouched —
+ * e.g. to land an exact kill the extra card would overshoot, or to keep a card sitting in the discard pile where
+ * a later mechanic can still reach it. Unlike declineReaverReveal, there's no cost still to be paid on the way
+ * out: the window costs nothing to open, so declining resolves exactly as if it had never opened at all (the same
+ * path playCards takes when the discard pile holds no suited card).
+ */
+function declineScarletWhistleSoloChoice(
+  state: GameState,
+  action: Extract<GameAction, { type: 'DECLINE_SCARLET_WHISTLE_SOLO' }>,
+): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_SCARLET_WHISTLE_SOLO');
+  if (err) return fail(err);
+  const window = state.scarletWhistleSoloChoice;
+  if (!window) return fail('There is no open Scarlet Whistle discard choice to resolve.');
+
+  const { playerId, cards, forcedPlay } = window;
+  state.scarletWhistleSoloChoice = null;
+  state.turnPhase = 'AWAIT_PLAY';
+  const player = state.players.find((p) => p.id === playerId)!;
+  log(state, `${player.name} waves off the Scarlet Whistle — the Companion attacks alone.`);
+  return resolveCommittedPlay(state, player, cards, null, forcedPlay);
 }
 
 /**
@@ -3154,6 +3181,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return declineReaverReveal(draft, action);
     case 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD':
       return resolveScarletWhistleSoloChoice(draft, action);
+    case 'DECLINE_SCARLET_WHISTLE_SOLO':
+      return declineScarletWhistleSoloChoice(draft, action);
     case 'SURRENDER_CARD_TO_ZONE':
       return surrenderCardToZone(draft, action);
     case 'START_ENDLESS_ROUND':

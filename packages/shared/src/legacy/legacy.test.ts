@@ -1655,6 +1655,36 @@ describe('legacy: mission 4 Beast Companions (strength-copying pair) + Scarlet W
     expect(state.currentEnemy?.spadesShield).toBe(18);
   });
 
+  it("solo variant, John's ruling: the pairing is optional — declining attacks with the Companion alone and leaves the discard pile untouched", () => {
+    let state = startBeastMissionSolo();
+    const beast: SuitedCard = { ...suited('S', 'A'), beast: true };
+    state = rig(state, [beast]);
+    const bottomCard = suited('S', '9');
+    const topCard = suited('S', '6');
+    state.discardPile = [bottomCard, topCard];
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [beast.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_SCARLET_WHISTLE_SOLO');
+
+    res = ensureOk(applyAction(state, { type: 'DECLINE_SCARLET_WHISTLE_SOLO', playerId: state.players[0].id }));
+    state = res.state;
+
+    expect(state.turnPhase).not.toBe('AWAIT_SCARLET_WHISTLE_SOLO');
+    expect(state.scarletWhistleSoloChoice).toBeNull();
+    // Nothing was taken: both candidates are still sitting in the discard pile.
+    expect(state.discardPile.some((c) => c.id === bottomCard.id)).toBe(true);
+    expect(state.discardPile.some((c) => c.id === topCard.id)).toBe(true);
+    // The Companion resolved alone — a Beast with no partner to copy contributes only its own Spades-A value of 1.
+    expect(state.currentEnemy?.spadesShield).toBe(1);
+  });
+
+  it('solo variant: declining is rejected when no Scarlet Whistle window is open', () => {
+    const state = startBeastMissionSolo();
+    const res = applyAction(state, { type: 'DECLINE_SCARLET_WHISTLE_SOLO', playerId: state.players[0].id });
+    expect(res.ok).toBe(false);
+  });
+
   it('solo variant: still offers a choice among the discard pile\'s suited cards even when a Jester sits on top (the Jester itself is never offered)', () => {
     let state = startBeastMissionSolo();
     const beast: SuitedCard = { ...suited('S', 'A'), beast: true };

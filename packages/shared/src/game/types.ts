@@ -275,7 +275,7 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * AWAIT_REAVER_REVEAL is Mission 5+ only (see GameState.reaverReveal) — opened by a Reaver card in a play,
  * resolved via CHOOSE_REAVER_REVEAL_CARD or (declining any bonus) DECLINE_REAVER_REVEAL. AWAIT_SCARLET_WHISTLE_SOLO is Mission 4+ only, gated by the
  * 'SCARLET_WHISTLE' relic (see GameState.scarletWhistleSoloChoice) — opened by a solo player's lone Companion
- * play, resolved via CHOOSE_SCARLET_WHISTLE_DISCARD_CARD.
+ * play, resolved via CHOOSE_SCARLET_WHISTLE_DISCARD_CARD or (pairing with nothing) DECLINE_SCARLET_WHISTLE_SOLO.
  */
 export type TurnPhase =
   | 'AWAIT_PLAY'
@@ -377,8 +377,10 @@ export interface GameState {
    * with nobody else at the table to silently slip a card into a lone Companion attack, the attacker instead picks
    * ANY ONE card out of the whole discard pile (not just its top, unlike the original sourced auto-pull — see
    * engine.ts's playCards/resolveScarletWhistleSoloChoice) to pair with the Companion, via
-   * CHOOSE_SCARLET_WHISTLE_DISCARD_CARD. Non-null only while a choice is pending; a no-op with no window opened at
-   * all if the discard pile holds no suited card when the Companion is played. `cards` is this play's own
+   * CHOOSE_SCARLET_WHISTLE_DISCARD_CARD — or take none at all and let the Companion attack alone, via
+   * DECLINE_SCARLET_WHISTLE_SOLO (John's ruling, confirmed live 2026-09-02: the pairing is always optional, the
+   * whistle never forces a card out of the discard pile). Non-null only while a choice is pending; a no-op with
+   * no window opened at all if the discard pile holds no suited card when the Companion is played. `cards` is this play's own
    * Companion card (already moved to the enemy's table by the time this opens), `forcedPlay` carries through to
    * the eventual resolveCommittedPlay call the same way it does for mageReveal/reaverReveal.
    */
@@ -951,6 +953,15 @@ export type GameAction =
    * with the Companion.
    */
   | { type: 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD'; playerId: string; cardId: string }
+  /**
+   * Legacy-only (Mission 4+), gated by the 'SCARLET_WHISTLE' relic, John's ruling (confirmed live 2026-09-02),
+   * from AWAIT_SCARLET_WHISTLE_SOLO: the solo attacker takes NO card from the discard pile and lets the Companion
+   * attack alone. The pairing has always been optional at the table — the whistle offers a card, it never forces
+   * one — so this resolves exactly as if the window had never opened (see engine.ts's
+   * declineScarletWhistleSoloChoice), leaving the discard pile untouched. Mirrors DECLINE_REAVER_REVEAL's shape,
+   * except that declining here has no cost to skip: nothing was spent to open the window.
+   */
+  | { type: 'DECLINE_SCARLET_WHISTLE_SOLO'; playerId: string }
   | { type: 'DEFEND'; playerId: string; cardIds: string[] }
   | { type: 'USE_SOLO_JESTER'; playerId: string }
   /**
