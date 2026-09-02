@@ -158,6 +158,48 @@ describe('legacy campaign integration', () => {
     client.close();
   });
 
+  it('BUG FIX: a Mercenary Camp purchase made in the lobby survives a jump to another mission instead of being silently discarded', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'John' });
+
+    // Shop in the lobby while the tracker is still pointed at mission 1 — 2 Jesters, 10 of the 15 easy-mode coins.
+    const set = await rooms.setMercenaryLoadout(created.code, created.playerId, { JESTER: 2 });
+    if ('error' in set) throw new Error(set.error);
+    expect(rooms.getRoom(created.code)!.legacy!.mercenaryProgress).toEqual({ missionId: 1, lossCount: 0, loadout: { JESTER: 2 } });
+
+    // Then jump ahead to mission 5. The loss streak doesn't travel, but the picks do — and the tracker re-points
+    // immediately so CampaignLobbyPage keeps rendering the camp through the stop-for-choices pause.
+    const jumped = rooms.startLegacyMission(created.code, created.playerId, 5, { stopForPendingChoices: true });
+    if ('error' in jumped) throw new Error(jumped.error);
+    expect(jumped.room.legacy!.mercenaryProgress).toEqual({ missionId: 5, lossCount: 0, loadout: { JESTER: 2 } });
+
+    const started = rooms.startLegacyMission(created.code, created.playerId, 5);
+    if ('error' in started) throw new Error(started.error);
+    // Mission 5's own 2 standing Jesters plus the 2 bought ones (see engine.ts's START_LEGACY_MISSION handling:
+    // a Mercenary Camp Jester joins the standing pool, it isn't shuffled into the reserve deck).
+    expect(started.room.gameState.standingJesters.length).toBe(4);
+    client.close();
+  });
+
+  it("a loadout the destination mission's own budget can't cover is dropped on the way across, not smuggled in for free", async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'John' });
+
+    // Fake a long loss streak on mission 1 so its budget (losses + 15) can afford far more than a fresh mission's.
+    const room = rooms.getRoom(created.code)!;
+    room.legacy!.mercenaryProgress = { missionId: 1, lossCount: 10, loadout: {} };
+    const set = await rooms.setMercenaryLoadout(created.code, created.playerId, { JESTER: 2, NINETEEN: 2, WILD_ACE: 2 }); // 22 coins of 25
+    if ('error' in set) throw new Error(set.error);
+
+    // Mission 5 resets the streak, so only 15 coins — 22 doesn't fit, and the whole loadout is dropped.
+    const jumped = rooms.startLegacyMission(created.code, created.playerId, 5, { stopForPendingChoices: true });
+    if ('error' in jumped) throw new Error(jumped.error);
+    expect(jumped.room.legacy!.mercenaryProgress).toEqual({ missionId: 5, lossCount: 0, loadout: {} });
+    client.close();
+  });
+
   it('a solo (1-player) Legacy mission still gets both Jesters, unlike classic Regicide\'s player-count-scaled table', async () => {
     const client = ioClient(`http://localhost:${port}`);
     await waitFor(client, 'connect');
