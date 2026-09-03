@@ -297,11 +297,20 @@ export function applyCorruptAnotherCard(
  * its own, and not already stickered with this same bonus. Any suit qualifies (unlike Mission 5's Reaver sticker,
  * which excludes Warrior — no such exclusion is sourced here). Exported so both RoomManager's server-side
  * validation and the client's picker UI (CampaignLobbyPage) filter on the exact same rule.
+ *
+ * Goran is excluded by name (confirmed by John 2026-09-03, after the picker offered him): he's the campaign's one
+ * rank-8 story recruit, and his class identity is handed to him on a scripted timeline by mission rewards rather
+ * than being his own — recruited inert at Mission 4, granted Clubs/Warrior at Mission 5, Spades/Paladin at
+ * Mission 6, then upgraded to Evergreen at Mission 9 (see missions.ts's Missions 4-6/9). `evergreen` below would
+ * exclude him on its own from Mission 9 onward, but this sticker is picked at Mission 6, three missions before
+ * that flag is ever set. Matched by name for the same reason MissionReward.upgradeEvergreenCard and
+ * secondSuitByName do: his suit+rank is always already claimed by one of the original 40 starting cards.
  */
 export function guardianStickerEligible(card: Card): card is Extract<Card, { kind: 'suited' }> {
   return (
     card.kind === 'suited' &&
     card.rank === '8' &&
+    card.name !== 'Goran' &&
     !card.arcane &&
     !card.reaver &&
     !card.guardian &&
