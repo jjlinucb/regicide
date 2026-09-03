@@ -2871,14 +2871,17 @@ describe('legacy: Guardian class power (absolute shield, one attack at a time)',
 });
 
 describe('legacy: mission 7 setup (Tales of Rebirth Pilgrim hand-trap)', () => {
-  it('is a 12-enemy 3-wave gauntlet with 8 Pilgrim cards seeded via extraReserveCards, gated by pilgrimMechanic', () => {
+  it('is a 12-enemy 3-wave gauntlet with 8 Pilgrim cards and 4 Druid companions seeded via extraReserveCards, gated by pilgrimMechanic', () => {
     const mission7 = getMission(7)!;
     expect(mission7.enemies.length).toBe(12);
     expect(mission7.pilgrimMechanic).toBe(true);
     // Sourced rework: Pilgrims are ordinary reserve-deck cards now, not a separate face-down deck/zone.
     expect(mission7.pilgrimCards).toBeUndefined();
-    expect(mission7.extraReserveCards?.length).toBe(8);
-    expect(mission7.extraReserveCards?.every((c) => c.kind === 'suited' && c.pilgrim)).toBe(true);
+    expect(mission7.extraReserveCards?.length).toBe(12);
+    const pilgrims = mission7.extraReserveCards?.filter((c) => c.kind === 'suited' && c.pilgrim) ?? [];
+    const druids = mission7.extraReserveCards?.filter((c) => c.kind === 'suited' && c.druid) ?? [];
+    expect(pilgrims.length).toBe(8);
+    expect(druids.length).toBe(4);
   });
 
   it('shuffles the 8 Pilgrim cards into the reserve deck alongside the party at mission start (no separate deck/zone populated)', () => {
@@ -2900,8 +2903,8 @@ describe('legacy: mission 7 setup (Tales of Rebirth Pilgrim hand-trap)', () => {
     expect(state.pilgrimZone.length).toBe(0);
     expect(state.pilgrimDeck.length).toBe(0);
     const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
-    // 40 party + 8 Pilgrims = 48 total in circulation (hands + reserve deck).
-    expect(handCount + state.tavernDeck.length).toBe(48);
+    // 40 party + 8 Pilgrims + 4 Druids = 52 total in circulation (hands + reserve deck).
+    expect(handCount + state.tavernDeck.length).toBe(52);
   });
 });
 
