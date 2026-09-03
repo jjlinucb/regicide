@@ -240,6 +240,15 @@ export interface EnemyState {
   /** Legacy-only: a second class this enemy is also immune to (e.g. a two-headed hydra). Absent for single-class enemies. */
   secondSuit?: Suit;
   rank: 'J' | 'Q' | 'K';
+  /**
+   * Legacy-only: the letter printed on this enemy's card face, overriding `rank` for display only. Legacy
+   * missions don't fight J/Q/K royals, so `rank` above is a placeholder ('J') that exists purely to satisfy this
+   * shape — this is what the player actually sees. Missions set it per tier or per creature type: Mission 7's
+   * three escalating tiers are the campaign's J/Q/K equivalents, Mission 2's brood are all H for hydra, and
+   * Mission 8 fields T for its trolls and D for its (dragon-kin) wyverns. Nothing mechanical reads it; an enemy
+   * without one falls back to `rank`.
+   */
+  rankLabel?: string;
   /** Legacy-only: a named mission enemy (e.g. "Letholdus the Justicar") shown instead of rank-of-suit. */
   name?: string;
   maxHealth: number;
@@ -279,6 +288,8 @@ export interface LegacyEnemySpec {
   secondSuit?: Suit;
   health: number;
   attack: number;
+  /** See EnemyState.rankLabel. */
+  rankLabel?: string;
 }
 
 export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';

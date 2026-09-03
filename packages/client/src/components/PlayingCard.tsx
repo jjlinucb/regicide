@@ -73,6 +73,7 @@ export function PlayingCard({
   onClick,
   small,
   blocked,
+  rankLabelOverride,
 }: {
   card: Card;
   selected?: boolean;
@@ -80,6 +81,13 @@ export function PlayingCard({
   small?: boolean;
   /** True when this card's suit power currently has no effect on the boss (immune, unbroken). */
   blocked?: boolean;
+  /**
+   * Replaces the computed rank label on the card face. Used for Legacy mission enemies, whose real `rank` is an
+   * inert 'J' placeholder and whose printed letter comes from the mission data instead (see
+   * EnemyState.rankLabel) — e.g. J/Q/K for Mission 7's tiers, H for Mission 2's hydra brood, T and D for
+   * Mission 8's trolls and wyverns.
+   */
+  rankLabelOverride?: string;
 }) {
   if (card.kind === 'jester') {
     return (
@@ -98,7 +106,7 @@ export function PlayingCard({
   }
   const legacy = isLegacyCard(card);
   const red = !legacy && RED_SUITS.has(card.suit);
-  const rankLabel = tieredRankLabel(card);
+  const rankLabel = rankLabelOverride ?? tieredRankLabel(card);
   const classInfo = legacy ? classForCard(card) : null;
   // An unresolved Mercenary any-suit Ace (see SuitedCard.wildSuit) still carries its inert placeholder suit ('H')
   // in-hand — classForCard would otherwise render it as a plain Cleric card, misleadingly hiding that it needs a

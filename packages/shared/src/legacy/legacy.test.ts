@@ -3666,6 +3666,67 @@ describe('legacy: mission 8 placement gating (zoneOpenForPlacement)', () => {
   });
 });
 
+describe('legacy: enemy card-face letters (EnemyState.rankLabel)', () => {
+  /** The letter each enemy shows, in fight order. */
+  function letters(missionId: number): (string | undefined)[] {
+    return getMission(missionId)!.enemies.map((e) => e.rankLabel);
+  }
+
+  it("letters Mission 7's three tiers J, Q, K — the campaign's royal equivalents", () => {
+    expect(letters(7)).toEqual(['J', 'J', 'J', 'J', 'Q', 'Q', 'Q', 'Q', 'K', 'K', 'K', 'K']);
+    // The letter tracks the tier's stats, so it can't drift from the escalation it's meant to represent.
+    const m7 = getMission(7)!.enemies;
+    expect(m7.filter((e) => e.rankLabel === 'J').every((e) => e.health === 20)).toBe(true);
+    expect(m7.filter((e) => e.rankLabel === 'Q').every((e) => e.health === 30)).toBe(true);
+    expect(m7.filter((e) => e.rankLabel === 'K').every((e) => e.health === 40)).toBe(true);
+  });
+
+  it("letters Mission 2's whole hydra brood H", () => {
+    expect(letters(2)).toEqual(['H', 'H', 'H', 'H', 'H', 'H']);
+  });
+
+  it("letters Mission 8's trolls T and its wyverns D", () => {
+    expect(letters(8)).toEqual(['T', 'T', 'T', 'T', 'T', 'T', 'D', 'D', 'D', 'D', 'D', 'D']);
+    const m8 = getMission(8)!.enemies;
+    expect(m8.filter((e) => e.rankLabel === 'T').every((e) => e.name !== undefined && e.health === 20)).toBe(true);
+    expect(m8.filter((e) => e.rankLabel === 'D').every((e) => /Wyvern|Stormrend|Skytallon/.test(e.name))).toBe(true);
+  });
+
+  it('carries the letter through to the live enemy, and leaves unlettered missions on the placeholder', () => {
+    const mission7 = getMission(7)!;
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'rank-label-test',
+      party: buildInitialParty(),
+      enemies: missionEnemiesToSpecs(mission7.enemies),
+      jesterCount: 0,
+    });
+    const state = ensureOk(res).state;
+    expect(state.currentEnemy?.rankLabel).toBe('J'); // first Schole-tier enemy
+    expect(state.currentEnemy?.rank).toBe('J'); // the inert placeholder is untouched
+
+    // A mission with no letters assigned yet still starts fine — rankLabel is simply absent, and the card face
+    // falls back to the placeholder. (Mission 1 isn't a valid case to check: it sets standardCastle, so it
+    // fights the real J/Q/K royal court and already shows those letters natively.)
+    const mission5 = getMission(5)!;
+    const plain = ensureOk(
+      applyAction(createLobbyState(), {
+        type: 'START_LEGACY_MISSION',
+        playerIds: ['p0'],
+        playerNames: ['Player 0'],
+        seed: 'rank-label-absent',
+        party: buildInitialParty(),
+        enemies: missionEnemiesToSpecs(mission5.enemies),
+        jesterCount: 0,
+      }),
+    ).state;
+    expect(mission5.enemies.every((e) => e.rankLabel === undefined)).toBe(true);
+    expect(plain.currentEnemy?.rankLabel).toBeUndefined();
+  });
+});
+
 describe('legacy: mission 8 ascending run — several placements can share one window', () => {
   it("places 2, 3 and 4 in a single window from one enemy's accumulated table pile", () => {
     // Confirmed correct by John (2026-09-03). The placement window stays open until the turn actually moves on,
