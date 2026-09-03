@@ -468,9 +468,13 @@ export const MISSIONS: Mission[] = [
     // mission's own reward comment, and party.ts's upgradeEvergreenCard doc for how Mission 9 later upgrades him
     // by name regardless of which mission actually recruits him). This playthrough is a direct, in-context
     // confirmation rather than a compendium paraphrase, so he now joins HERE instead, matching the source; Mission
-    // 8 no longer recruits him. Suit/class (Spades/Paladin) carries over unchanged from the old Mission 8 entry —
-    // still an unsourced judgment call (no source pins one for his actual first recruitment either way), kept as-is
-    // to avoid re-litigating an arbitrary choice nothing here contradicts.
+    // 8 no longer recruits him.
+    // SOURCED CORRECTION (2026-09-02 live-play confirmation): "no suit/class revealed on-screen" above is literal
+    // — he's recruited fully inert (RecruitSpec.noSuitPower), a plain rank-8 that does nothing when played. His
+    // placeholder suit (Spades) never resolves while inert, so its value is bookkeeping-only, same as Myla's
+    // placeholder Hearts elsewhere. Mission 5's own reward switches his class power on for the first time (Clubs/
+    // Warrior — see MissionReward.suitByName), and Mission 6's reward adds Spades/Paladin as a real second suit
+    // on top of that (see MissionReward.secondSuitByName).
     // "Dr. Darkness" story card (a campaign-book pack-opening event, per John's photo): "some in the Syndicate
     // grow attached to their newfound power" — corrupts one random existing party member. Reuses the same
     // corruptAnotherCard reward step Missions 1/5/8 already use (see party.ts's applyCorruptAnotherCard):
@@ -481,7 +485,7 @@ export const MISSIONS: Mission[] = [
         beastRecruit('Cressida', 'BARD', 'B', 'D'),
         beastRecruit('Orwick', 'CLERIC', 'B', 'H'),
         beastRecruit('Sabrielle', 'PALADIN', 'B', 'S'),
-        recruit('Goran', 'PALADIN', '8', 'S'),
+        { name: 'Goran', class: 'PALADIN', rank: '8', suit: 'S', noSuitPower: true },
       ],
       relics: ['SCARLET_WHISTLE'],
       corruptAnotherCard: true,
@@ -577,9 +581,10 @@ export const MISSIONS: Mission[] = [
     // carries the Hearts suit for identity/immunity-bookkeeping continuity with her Mission 5/6 zone appearances,
     // it just never resolves when she's played.
     //
-    // Goran (recruited back at Mission 4, rank 8/Spades/Paladin, no special ability) permanently gains Clubs
-    // (Warrior) as a second suit here (`secondSuitByName`), confirmed live — both suit powers now trigger
-    // whenever he's played, the same "second class" shape Dual-class Stickers grant randomly elsewhere, just
+    // Goran (recruited back at Mission 4 as an inert rank-8 card, no working suit — see that mission's reward
+    // comment) has his class power switched on for the first time here, with Clubs (Warrior) as the suit that
+    // resolves (`suitByName`), confirmed live — Mission 6's reward later adds Spades (Paladin) as a real second
+    // suit on top of this, the same "second class" shape Dual-class Stickers grant randomly elsewhere, just
     // targeted: Goran is rank 8, outside the "Lucky 4" 3/5/7/9 ranks that generic mechanic targets, so he'd never
     // be reachable by it otherwise.
     //
@@ -595,7 +600,7 @@ export const MISSIONS: Mission[] = [
       recruits: [recruit('Haror', 'REAVER', '5', 'S'), { name: 'Myla', class: 'CLERIC', rank: '7', suit: 'H', noSuitPower: true }],
       dualClassStickers: 4,
       corruptAnotherCard: true,
-      secondSuitByName: { name: 'Goran', suit: 'C' },
+      suitByName: { name: 'Goran', suit: 'C' },
       reaverStickerChoice: true,
     },
   },
@@ -654,12 +659,19 @@ export const MISSIONS: Mission[] = [
     // player choice, like Mission 5's Reaver sticker, not an automatic random pick), and the Azure Emblem relic —
     // sourced fix: whenever a Mage joins an attack from here on, the Mage's OWN player gets one chance to bank
     // one of that play's Mage card(s) onto the reserve deck instead of losing it to the discard pile.
+    // SOURCED CORRECTION (2026-09-02 live-play confirmation): this mission's reward also grants Goran (Clubs/
+    // Warrior switched on by Mission 5's own reward, see that mission's comment) Spades (Paladin) as a real
+    // second suit (`secondSuitByName`) — an earlier reading had this granted a mission early, at Mission 5 —
+    // plus another round of the sourced-but-previously-missing "corrupt another card" effect (see party.ts's
+    // applyCorruptAnotherCard), same as Missions 1/5/8.
     standingJesters: true,
     sidelineHighArcana: true,
     reward: {
       recruits: [recruit('Ferro', 'GUARDIAN', '3', 'S')],
       relics: ['AZURE_EMBLEM'],
       guardianStickerChoice: true,
+      secondSuitByName: { name: 'Goran', suit: 'S' },
+      corruptAnotherCard: true,
     },
   },
   {

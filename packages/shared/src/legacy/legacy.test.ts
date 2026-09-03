@@ -2467,18 +2467,25 @@ describe('legacy: mission 5 reward (rank-5 Reaver kept, Myla joins with no abili
     expect(corrupted[0].name).not.toBe('Haror');
   });
 
-  it('gives Goran (recruited back at Mission 4) Clubs as a permanent second suit, confirmed live', () => {
+  it('recruits Goran inert at Mission 4, then switches on Clubs/Warrior as his real suit at Mission 5, confirmed live', () => {
     const mission4 = getMission(4)!;
     const mission5 = getMission(5)!;
-    expect(mission5.reward.secondSuitByName).toEqual({ name: 'Goran', suit: 'C' });
+    expect(mission5.reward.suitByName).toEqual({ name: 'Goran', suit: 'C' });
 
     let party = applyReward(buildInitialParty(), mission4.reward);
+    const goranAfterM4 = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
+    expect(goranAfterM4).toBeDefined();
+    if (goranAfterM4?.kind === 'suited') {
+      expect(goranAfterM4.noSuitPower).toBe(true); // inert until Mission 5
+
+    }
+
     party = applyReward(party, mission5.reward);
     const goran = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
     expect(goran).toBeDefined();
     if (goran?.kind === 'suited') {
-      expect(goran.suit).toBe('S'); // his original Spades/Paladin identity is untouched
-      expect(goran.secondSuit).toBe('C'); // Clubs/Warrior added on top
+      expect(goran.noSuitPower).toBeFalsy(); // class power now live
+      expect(goran.suit).toBe('C'); // Clubs/Warrior is now his working suit
     }
   });
 
@@ -2590,6 +2597,28 @@ describe('legacy: mission 6 reward, sourced fix (only the rank-3 Guardian kept, 
   it('also grants the Azure Emblem relic', () => {
     const mission6 = getMission(6)!;
     expect(mission6.reward.relics).toEqual(['AZURE_EMBLEM']);
+  });
+
+  it('gives Goran (switched on with Clubs/Warrior by Mission 5) Spades/Paladin as a real second suit, confirmed live 2026-09-02', () => {
+    const mission4 = getMission(4)!;
+    const mission5 = getMission(5)!;
+    const mission6 = getMission(6)!;
+    expect(mission6.reward.secondSuitByName).toEqual({ name: 'Goran', suit: 'S' });
+
+    let party = applyReward(buildInitialParty(), mission4.reward);
+    party = applyReward(party, mission5.reward);
+    party = applyReward(party, mission6.reward);
+    const goran = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
+    expect(goran).toBeDefined();
+    if (goran?.kind === 'suited') {
+      expect(goran.suit).toBe('C'); // Clubs/Warrior, live since Mission 5
+      expect(goran.secondSuit).toBe('S'); // Spades/Paladin added here
+    }
+  });
+
+  it('also carries the sourced-but-previously-missing "corrupt another card" effect', () => {
+    const mission6 = getMission(6)!;
+    expect(mission6.reward.corruptAnotherCard).toBe(true);
   });
 });
 

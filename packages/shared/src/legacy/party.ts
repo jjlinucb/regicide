@@ -170,13 +170,24 @@ export interface MissionReward {
    */
   upgradeEvergreenCard?: string;
   /**
-   * Mission 5's reward, sourced fix: gives the existing party member matching this NAME a specific second suit
+   * Mission 6's reward, sourced fix: gives the existing party member matching this NAME a specific second suit
    * (see applySecondSuitByName) — the same SuitedCard.secondSuit Dual-class Stickers grant randomly, but targeted
-   * and deterministic. Used for Goran (recruited by Mission 4's own reward, rank 8 — outside the "Lucky 4"
-   * 3/5/7/9 ranks Dual-class Stickers target, so he'd otherwise never be reachable by that generic mechanic):
-   * this mission adds Clubs (Warrior) on top of his existing Spades (Paladin), matching live gameplay footage.
+   * and deterministic. Used for Goran (recruited inert by Mission 4, switched on with Clubs/Warrior by Mission
+   * 5's own reward — see MissionReward.suitByName — since he's rank 8, outside the "Lucky 4" 3/5/7/9 ranks Dual-
+   * class Stickers target, so he'd otherwise never be reachable by that generic mechanic): this mission adds
+   * Spades (Paladin) on top of his now-live Clubs (Warrior), matching live gameplay footage.
    */
   secondSuitByName?: { name: string; suit: Suit };
+  /**
+   * Mission 5's reward, sourced correction (live playthrough, 2026-09-02): Goran (recruited by Mission 4's own
+   * reward as an inert rank-8 card — see RecruitSpec.noSuitPower and this mission's own recruit entry) has his
+   * class power switched ON here for the first time, with Clubs (Warrior) as the suit that resolves — NOT granted
+   * as a `secondSuit` on top of an already-working Spades/Paladin power, since Spades never actually worked before
+   * this point. Sets SuitedCard.suit to `target.suit` and clears `noSuitPower` on the named card (see
+   * applySuitByName). Mission 6's reward then adds Paladin (Spades) as his real `secondSuit` via
+   * `secondSuitByName` once this base suit is already live.
+   */
+  suitByName?: { name: string; suit: Suit };
   /**
    * Mission 5's reward, sourced fix (confirmed live 2026-08-30): after the mission, the player picks ONE of
    * their existing eligible rank-6 Bard/Cleric/or Paladin party members (never Warrior) to permanently gain a
@@ -365,6 +376,26 @@ export function applySecondSuitByName(party: Card[], target?: { name: string; su
 }
 
 /**
+ * Mission 5's reward (see MissionReward.suitByName's doc): finds the existing party member matching `target.name`
+ * and switches its class power ON for the first time — sets SuitedCard.suit to `target.suit` and clears
+ * `noSuitPower`. Used for Goran, recruited inert by Mission 4. Unlike applySecondSuitByName, this replaces the
+ * card's PRIMARY suit rather than adding a second one, since `noSuitPower` gates cardSuits() entirely regardless
+ * of any `secondSuit` already present — an inert card's placeholder suit never resolves either way. A no-op
+ * (same reference) if `target` is unset or no matching card is found.
+ */
+export function applySuitByName(party: Card[], target?: { name: string; suit: Suit }): Card[] {
+  if (!target) return party;
+  let upgraded = false;
+  const next = party.map((c) => {
+    if (upgraded || c.kind !== 'suited' || c.name !== target.name) return c;
+    upgraded = true;
+    const { noSuitPower: _drop, ...rest } = c;
+    return { ...rest, suit: target.suit };
+  });
+  return upgraded ? next : party;
+}
+
+/**
  * Mission 5's reward, sourced fix (see MissionReward.reaverStickerChoice's doc): whether `card` is a legal
  * target for the player's post-mission Reaver-sticker pick — rank 6, one of the Bard/Cleric/Paladin classes
  * (Warrior is explicitly excluded, per the source), not already carrying a special class of its own, and not
@@ -422,6 +453,7 @@ export function applyReward(party: Card[], reward: MissionReward, rng: () => num
   if (reward.upgradeSidelinedCard) next = applyEvergreenUpgrade(next, reward.upgradeSidelinedCard);
   if (reward.upgradeEvergreenCard) next = applyEvergreenUpgradeByName(next, reward.upgradeEvergreenCard);
   if (reward.secondSuitByName) next = applySecondSuitByName(next, reward.secondSuitByName);
+  if (reward.suitByName) next = applySuitByName(next, reward.suitByName);
   return next;
 }
 
