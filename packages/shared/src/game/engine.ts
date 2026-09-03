@@ -309,17 +309,39 @@ function flipPilgrimCard(state: GameState): void {
 }
 
 /**
- * Mission 7 only: an attack whose total played value exactly matches a Pilgrim currently sitting in the zone
- * banishes them — permanently removed from the zone (and the kill-time burn total), not sent to the discard
- * pile. Uses the play's raw totalValue (the cards' own printed sum), before any class-power multiplier or bonus.
+ * Mission 7 only: matches the cards being played against the Pilgrims sitting in the zone — EACH played card
+ * whose own printed value exactly equals a waiting Pilgrim's banishes that Pilgrim, permanently removed from the
+ * zone and from the kill-time burn total (not sent to the discard pile).
+ *
+ * BUG FIX (John's live play, 2026-09-03): this used to compare the play's single combined totalValue against the
+ * zone, which got both halves of the rule wrong — a combo of two 3s totals 6, so it matched no 3-Pilgrim at all,
+ * and even on a match it could only ever clear ONE Pilgrim per play. The source is explicit that it's the
+ * individual card's strength that matters ("whenever you play a card... if the attack card's strength exactly
+ * matches the strength of a Pilgrim card sitting in the Mission Zone"), so two 3s now banish two 3-Pilgrims.
+ * Each played card can only account for one Pilgrim, so duplicates pair up one-for-one rather than a single 3
+ * wiping every 3 in the zone.
+ *
+ * `cards` is whatever was actually committed to the attack, which already includes a Kinfolk Flute card pulled
+ * out of storage and a Scarlet Whistle assist card (see playCards' shapeCards / assistCombo) — both count, per
+ * John's ruling. A Mage's revealed card does NOT: it's never played from a hand into the attack, it only buffs
+ * the play's total (see revealForMage).
  */
-function checkPilgrimRescue(state: GameState, totalValue: number): void {
-  if (!state.pilgrimMechanic) return;
-  const idx = state.pilgrimZone.findIndex((c) => cardValue(c) === totalValue);
-  if (idx === -1) return;
-  const [rescued] = state.pilgrimZone.splice(idx, 1);
-  banishCards(state, [rescued]);
-  log(state, `${rescued.kind === 'suited' ? rescued.name ?? `the ${rescued.rank}` : 'A Jester'} is banished from the mission zone for good.`);
+function checkPilgrimRescue(state: GameState, cards: Card[]): void {
+  if (!state.pilgrimMechanic || state.pilgrimZone.length === 0) return;
+  const banished: Card[] = [];
+  for (const played of cards) {
+    const idx = state.pilgrimZone.findIndex((c) => cardValue(c) === cardValue(played));
+    if (idx === -1) continue;
+    banished.push(...state.pilgrimZone.splice(idx, 1));
+  }
+  if (banished.length === 0) return;
+  banishCards(state, banished);
+  log(
+    state,
+    banished.length === 1
+      ? `A matching card carries ${banished[0].kind === 'suited' ? banished[0].name ?? `the ${banished[0].rank}` : 'a Jester'} clear — banished from the mission zone for good.`
+      : `Matching cards carry ${banished.length} Pilgrims clear — banished from the mission zone for good.`,
+  );
 }
 
 /**
@@ -2222,7 +2244,7 @@ function continueResolveCommittedPlay(
     state,
     `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${damage}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
   );
-  if (state.ruleset === 'legacy') checkPilgrimRescue(state, totalValue);
+  if (state.ruleset === 'legacy') checkPilgrimRescue(state, cards);
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
   // Mission 6, sourced fix: a winning attack that includes a Guardian cancels Myla's zoneVengeanceOnKill
