@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Server } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import type { Card, ClientGameState, ClientToServerEvents, LegacyStatePayload, ServerToClientEvents } from '@regicide/shared';
-import { reaverStickerEligible } from '@regicide/shared';
+import { guardianStickerEligible, reaverStickerEligible } from '@regicide/shared';
 import { RoomManager } from './rooms/RoomManager.js';
 import { registerSocketHandlers } from './socket/handlers.js';
 import { InMemoryCampaignStore } from './db/campaigns.js';
@@ -508,6 +508,38 @@ describe('legacy campaign integration', () => {
     // One-time only — a second eligible card is rejected once the sticker's already been used.
     if (eligible.length > 1) {
       const again = await rooms.chooseReaverSticker(created.code, created.playerId, eligible[1].id);
+      expect('error' in again).toBe(true);
+    }
+
+    client.close();
+  });
+
+  it("Mission 6's Guardian-sticker reward is a one-time player choice: rejects a non-host, an ineligible card, and reusing it a second time", async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Priya' });
+
+    // Jump past mission 6 (auto-grants missions 1-6's rewards, including Mission 6's Guardian-sticker choice).
+    const result = rooms.startLegacyMission(created.code, created.playerId, 7);
+    if ('error' in result) throw new Error(result.error);
+    expect(result.room.legacy?.party.some((c) => c.kind === 'suited' && c.secondClassGuardian)).toBe(false);
+    const eligible = result.room.legacy!.party.filter(guardianStickerEligible);
+    expect(eligible.length).toBeGreaterThan(0);
+
+    const notHost = await rooms.chooseGuardianSticker(created.code, 'not-the-host', eligible[0].id);
+    expect('error' in notHost).toBe(true);
+
+    const badCard = await rooms.chooseGuardianSticker(created.code, created.playerId, 'not-a-real-card');
+    expect('error' in badCard).toBe(true);
+
+    const applied = await rooms.chooseGuardianSticker(created.code, created.playerId, eligible[0].id);
+    if ('error' in applied) throw new Error(applied.error);
+    const stickered = applied.room.legacy?.party.find((c) => c.id === eligible[0].id);
+    expect(stickered?.kind === 'suited' && stickered.secondClassGuardian).toBe(true);
+
+    // One-time only — a second eligible card is rejected once the sticker's already been used.
+    if (eligible.length > 1) {
+      const again = await rooms.chooseGuardianSticker(created.code, created.playerId, eligible[1].id);
       expect('error' in again).toBe(true);
     }
 

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { applyAction, createLobbyState, ENDLESS_MODE_MAX_LOOP } from '@regicide/shared';
 import type { Card, GameAction, GameState, LegacySavePayload, MercenaryProgress, MercenaryTypeId, SuitedCard } from '@regicide/shared';
 import {
+  applyGuardianStickerChoice,
   applyReaverStickerChoice,
   applyRestoredPartyCards,
   applyReward,
@@ -9,6 +10,7 @@ import {
   buildMercenaryLoadout,
   buildRecruitCard,
   getMission,
+  guardianStickerEligible,
   LEGACY_JESTER_COUNT,
   mercenaryCoinsForLosses,
   missionEnemiesToSpecs,
@@ -475,8 +477,9 @@ export class RoomManager {
     // full strength.
     if (missionId > room.legacy.currentMission) {
       // BUG FIX: a skipped mission can grant an interactive reward choice — Mission 4's Beast Companion pool
-      // pick (BeastCompanionPicker) or Mission 5's Reaver sticker pick (ReaverStickerPicker) — both of which only
-      // ever render on CampaignLobbyPage. Granting the reward and starting the target mission in this same call
+      // pick (BeastCompanionPicker), Mission 5's Reaver sticker pick (ReaverStickerPicker), or Mission 6's
+      // Guardian sticker pick (GuardianStickerPicker) — all of which only ever render on CampaignLobbyPage.
+      // Granting the reward and starting the target mission in this same call
       // used to fuse those two steps atomically, so the client never got routed back through the lobby screen to
       // show the picker before gameplay began (the pool/choice was still there server-side, just unreachable
       // until the party happened to return to the lobby after finishing the jumped-to mission).
@@ -495,7 +498,8 @@ export class RoomManager {
         const skipped = getMission(id);
         if (skipped) {
           this.grantMissionReward(room.legacy, skipped);
-          if (skipped.reward.recruits.some((r) => r.beast) || skipped.reward.reaverStickerChoice) introducesInteractiveChoice = true;
+          if (skipped.reward.recruits.some((r) => r.beast) || skipped.reward.reaverStickerChoice || skipped.reward.guardianStickerChoice)
+            introducesInteractiveChoice = true;
         }
       }
       room.legacy.currentMission = missionId;
@@ -690,6 +694,28 @@ export class RoomManager {
       return { error: 'That card is not eligible for the Reaver sticker.' };
     }
     room.legacy.party = applyReaverStickerChoice(room.legacy.party, cardId);
+    await this.campaignStore.save(toRecord(room));
+    return { room };
+  }
+
+  /**
+   * Resolves Mission 6's player-chosen Guardian-sticker reward (see MissionReward.guardianStickerChoice's doc):
+   * permanently gives `cardId` a bonus Guardian sticker. Mirrors chooseReaverSticker exactly, just for rank-8
+   * cards and `secondClassGuardian` instead of rank-6/`secondClassReaver` — see that method's own doc comment for
+   * why there's no dedicated pending-state field here either.
+   */
+  async chooseGuardianSticker(code: string, requestingPlayerId: string, cardId: string): Promise<{ room: Room } | { error: string }> {
+    const room = this.getRoom(code);
+    if (!room || !room.legacy) return { error: 'Campaign not found.' };
+    if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can choose the Guardian sticker.' };
+    if (room.legacy.party.some((c) => c.kind === 'suited' && c.secondClassGuardian)) {
+      return { error: 'The Guardian sticker has already been used.' };
+    }
+    const target = room.legacy.party.find((c) => c.id === cardId);
+    if (!target || !guardianStickerEligible(target)) {
+      return { error: 'That card is not eligible for the Guardian sticker.' };
+    }
+    room.legacy.party = applyGuardianStickerChoice(room.legacy.party, cardId);
     await this.campaignStore.save(toRecord(room));
     return { room };
   }

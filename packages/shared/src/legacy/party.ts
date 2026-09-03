@@ -136,12 +136,18 @@ export interface MissionReward {
    */
   corruptAnotherCard?: boolean;
   /**
-   * Mission 6's sourced bonus (see legacy-missions-transcript-mismatches.md): gives one random eligible existing
-   * rank-8 party member a bonus Guardian sticker (see applyGuardianSticker) — replaces the shipped version's
-   * over-grant of all 4 Guardian recruits kept permanently; sourced material keeps only the rank-3 Guardian
-   * (`recruits` below carries just that one) and grants this bonus instead.
+   * Mission 6's reward, confirmed live (2026-09-02): after the mission, the player picks ONE of their existing
+   * eligible rank-8 party members to permanently gain a bonus Guardian sticker (SuitedCard.secondClassGuardian —
+   * see guardianStickerEligible/applyGuardianStickerChoice below) on top of its own class power, the same "keeps
+   * its own suit power AND gets the bonus mechanic" shape as applyMageSticker. Like Mission 5's
+   * reaverStickerChoice, this is a PLAYER CHOICE, not an automatic random pick (an earlier reading had this
+   * auto-applied at random — see RoomManager's chooseGuardianSticker/CampaignLobbyPage's picker for the corrected
+   * version). Deliberately NOT auto-applied by applyReward below (there is no card to target yet without the
+   * player's own input) — replaces the shipped version's over-grant of all 4 Guardian recruits kept permanently;
+   * sourced material keeps only the rank-3 Guardian (`recruits` below carries just that one) and grants this
+   * bonus instead.
    */
-  guardianSticker?: boolean;
+  guardianStickerChoice?: boolean;
   /**
    * Mission 11's reward ("Descent into Darkness"): the sidelined party member matching this identity (see
    * missions.ts's Mission 11 `sidelineIdentity` — the same identity, kept in sync) permanently gains
@@ -264,30 +270,44 @@ export function applyCorruptAnotherCard(
 }
 
 /**
- * Mission 6's sourced bonus (see legacy-missions-transcript-mismatches.md, replacing the shipped over-grant of
- * all 4 Guardian recruits): picks one random eligible existing rank-8 party member and gives it a bonus Guardian
- * sticker — unlike a pure Guardian recruit's `guardian` flag (which replaces suit-power resolution entirely),
- * the card keeps resolving its own suit power AND raises the Guardian's absolute shield when played (see
- * SuitedCard.secondClassGuardian, engine.ts's resolveCommittedPlay's guardianCards handling). Mirrors
- * applyMageSticker's eligibility/selection shape, narrowed to rank 8 per the sourced reward. `rng` defaults to
- * Math.random; see applyDualClassStickers's doc for why/when to pass a seeded one.
+ * Mission 6's reward, confirmed live (see MissionReward.guardianStickerChoice's doc): whether `card` is a legal
+ * target for the player's post-mission Guardian-sticker pick — rank 8, not already carrying a special class of
+ * its own, and not already stickered with this same bonus. Any suit qualifies (unlike Mission 5's Reaver sticker,
+ * which excludes Warrior — no such exclusion is sourced here). Exported so both RoomManager's server-side
+ * validation and the client's picker UI (CampaignLobbyPage) filter on the exact same rule.
  */
-export function applyGuardianSticker(party: Card[], rng: () => number = Math.random): Card[] {
-  const eligible = party.filter(
-    (c) =>
-      c.kind === 'suited' &&
-      c.rank === '8' &&
-      !c.arcane &&
-      !c.reaver &&
-      !c.guardian &&
-      !c.druid &&
-      !c.chanter &&
-      !c.evergreen &&
-      !c.secondClassGuardian,
+export function guardianStickerEligible(card: Card): card is Extract<Card, { kind: 'suited' }> {
+  return (
+    card.kind === 'suited' &&
+    card.rank === '8' &&
+    !card.arcane &&
+    !card.reaver &&
+    !card.guardian &&
+    !card.druid &&
+    !card.chanter &&
+    !card.evergreen &&
+    !card.secondClassGuardian
   );
-  if (eligible.length === 0) return party;
-  const pick = eligible[Math.floor(rng() * eligible.length)];
-  return party.map((c) => (c.id === pick.id ? { ...c, secondClassGuardian: true } : c));
+}
+
+/**
+ * Applies the player's chosen target (see guardianStickerEligible) for Mission 6's Guardian-sticker reward —
+ * permanently gives that one card SuitedCard.secondClassGuardian, mirroring applyReaverStickerChoice's "keeps its
+ * own suit power AND gets the bonus mechanic" shape, but for a player-picked `cardId` instead of an `rng` pick —
+ * unlike a pure Guardian recruit's `guardian` flag (which replaces suit-power resolution entirely), the card
+ * keeps resolving its own suit power AND raises the Guardian's absolute shield when played (see engine.ts's
+ * resolveCommittedPlay's guardianCards handling). A no-op (same reference) if `cardId` doesn't match an eligible
+ * card — callers should validate with guardianStickerEligible first and surface an error rather than rely on
+ * this silently doing nothing.
+ */
+export function applyGuardianStickerChoice(party: Card[], cardId: string): Card[] {
+  let applied = false;
+  const next = party.map((c) => {
+    if (applied || c.id !== cardId || !guardianStickerEligible(c)) return c;
+    applied = true;
+    return { ...c, secondClassGuardian: true };
+  });
+  return applied ? next : party;
 }
 
 /**
@@ -385,9 +405,9 @@ export function applyReaverStickerChoice(party: Card[], cardId: string): Card[] 
 
 /**
  * Adds a mission's reward — recruits, any Dual-class Stickers, any Mage sticker, any corrupt-another-card effect,
- * any Guardian sticker, any sidelined-card or existing-card evergreen upgrade, and any targeted second suit — to
- * the campaign's permanent party roster. Relics are tracked separately (see RoomManager's permanentRules).
- * `reaverStickerChoice` is deliberately NOT applied here — see its own doc comment.
+ * any sidelined-card or existing-card evergreen upgrade, and any targeted second suit — to the campaign's
+ * permanent party roster. Relics are tracked separately (see RoomManager's permanentRules).
+ * `reaverStickerChoice`/`guardianStickerChoice` are deliberately NOT applied here — see their own doc comments.
  *
  * `rng` defaults to Math.random, matching every live call site (mission rewards don't need to be reproducible
  * in actual play) — pass a seeded source (e.g. deck.ts's `makeRng`) from a campaign simulation/test that needs
@@ -399,7 +419,6 @@ export function applyReward(party: Card[], reward: MissionReward, rng: () => num
   if (reward.dualClassStickers) next = applyDualClassStickers(next, reward.dualClassStickers, rng);
   if (reward.mageSticker) next = applyMageSticker(next, rng);
   if (reward.corruptAnotherCard) next = applyCorruptAnotherCard(next, new Set(newRecruits.map((c) => c.id)), rng);
-  if (reward.guardianSticker) next = applyGuardianSticker(next, rng);
   if (reward.upgradeSidelinedCard) next = applyEvergreenUpgrade(next, reward.upgradeSidelinedCard);
   if (reward.upgradeEvergreenCard) next = applyEvergreenUpgradeByName(next, reward.upgradeEvergreenCard);
   if (reward.secondSuitByName) next = applySecondSuitByName(next, reward.secondSuitByName);

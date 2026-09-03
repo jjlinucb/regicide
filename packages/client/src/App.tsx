@@ -46,6 +46,7 @@ export function App() {
     setMercenaryLoadout,
     setBeastCompanionSelection,
     chooseReaverSticker,
+    chooseGuardianSticker,
     loadEndlessSave,
   } = useGameConnection();
 
@@ -125,6 +126,7 @@ export function App() {
           onSetMercenaryLoadout={setMercenaryLoadout}
           onSetBeastCompanionSelection={setBeastCompanionSelection}
           onChooseReaverSticker={chooseReaverSticker}
+          onChooseGuardianSticker={chooseGuardianSticker}
           onLeave={handleLeave}
         />
       );

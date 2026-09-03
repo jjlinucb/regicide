@@ -10,7 +10,7 @@ import {
   applyCorruptAnotherCard,
   applyDualClassStickers,
   applyEvergreenUpgrade,
-  applyGuardianSticker,
+  applyGuardianStickerChoice,
   applyMageSticker,
   applyReaverStickerChoice,
   applyReward,
@@ -18,6 +18,7 @@ import {
   applySecondSuitByName,
   buildInitialParty,
   buildRecruitCard,
+  guardianStickerEligible,
   reaverStickerEligible,
 } from './party.js';
 
@@ -907,11 +908,12 @@ describe('legacy: Dual-class Stickers reward (mission 2)', () => {
 });
 
 describe('legacy: party.ts reward randomness accepts a seeded rng (determinism)', () => {
-  // These four functions used to call Math.random() directly, breaking reproducibility for any seeded campaign
+  // These functions used to call Math.random() directly, breaking reproducibility for any seeded campaign
   // simulation/test from the point a mission grants one of these rewards onward. They now take an optional
   // `rng: () => number` (defaulting to Math.random so every existing call site is unaffected) — this locks in
   // that a shared seed reproduces the exact same pick, and a different seed can (not must, just in general)
-  // diverge.
+  // diverge. The Guardian sticker isn't covered here anymore — it's a player choice now (see
+  // applyGuardianStickerChoice below), not an rng-driven pick.
   it('applyDualClassStickers is reproducible under the same seed', () => {
     const party = buildInitialParty();
     const a = applyDualClassStickers(party, 4, makeRng('sticker-seed'));
@@ -923,13 +925,6 @@ describe('legacy: party.ts reward randomness accepts a seeded rng (determinism)'
     const party = buildInitialParty();
     const a = applyMageSticker(party, makeRng('mage-seed'));
     const b = applyMageSticker(party, makeRng('mage-seed'));
-    expect(a).toEqual(b);
-  });
-
-  it('applyGuardianSticker is reproducible under the same seed', () => {
-    const party = buildInitialParty();
-    const a = applyGuardianSticker(party, makeRng('guardian-seed'));
-    const b = applyGuardianSticker(party, makeRng('guardian-seed'));
     expect(a).toEqual(b);
   });
 
@@ -2565,7 +2560,7 @@ describe('legacy: applyCorruptAnotherCard (mixed-bag reward primitive)', () => {
   });
 });
 
-describe('legacy: mission 6 reward, sourced fix (only the rank-3 Guardian kept, plus a Guardian sticker)', () => {
+describe('legacy: mission 6 reward, sourced fix (only the rank-3 Guardian kept, plus a player-chosen Guardian sticker)', () => {
   it('keeps only the rank-3 Guardian (Ferro) as a permanent recruit — ranks 5/7/9 are not granted', () => {
     const mission6 = getMission(6)!;
     expect(mission6.reward.recruits.length).toBe(1);
@@ -2577,14 +2572,13 @@ describe('legacy: mission 6 reward, sourced fix (only the rank-3 Guardian kept, 
     expect(guardians[0].kind === 'suited' && guardians[0].name).toBe('Ferro');
   });
 
-  it('grants a bonus Guardian sticker to one existing rank-8 party card instead of the other 3 Guardian recruits', () => {
+  it('flags a player-chosen (not automatic) Guardian sticker as this mission\'s reward, confirmed live 2026-09-02', () => {
     const mission6 = getMission(6)!;
-    expect(mission6.reward.guardianSticker).toBe(true);
-
+    expect(mission6.reward.guardianStickerChoice).toBe(true);
+    // Deliberately not auto-applied by applyReward — no party card should ever come out of a Mission 6 reward
+    // already carrying the sticker without the player having picked a target.
     const party = applyReward(buildInitialParty(), mission6.reward);
-    const stickered = party.filter((c) => c.kind === 'suited' && c.secondClassGuardian);
-    expect(stickered.length).toBe(1);
-    expect(stickered[0].kind === 'suited' && stickered[0].rank).toBe('8');
+    expect(party.some((c) => c.kind === 'suited' && c.secondClassGuardian)).toBe(false);
   });
 
   it('a Guardian recruit takes its explicit suit (Guardian has none of its own) and is flagged guardian', () => {
@@ -2599,7 +2593,7 @@ describe('legacy: mission 6 reward, sourced fix (only the rank-3 Guardian kept, 
   });
 });
 
-describe('legacy: bonus Guardian sticker (secondClassGuardian — keeps its own suit power AND raises the shield)', () => {
+describe('legacy: bonus Guardian sticker (secondClassGuardian — Mission 6\'s player-chosen reward, keeps its own suit power AND raises the shield)', () => {
   it('resolves both its printed suit power and the Guardian shield when played', () => {
     const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 20 };
     let state = startMission(1, [boss]);
@@ -2612,12 +2606,27 @@ describe('legacy: bonus Guardian sticker (secondClassGuardian — keeps its own 
     expect(res.state.turnPhase).toBe('AWAIT_PLAY'); // the shield blocked the enemy's attack — no damage suffered
   });
 
-  it('applyGuardianSticker gives one random eligible rank-8 party member secondClassGuardian', () => {
-    const party = buildInitialParty();
-    const next = applyGuardianSticker(party);
-    const stickered = next.filter((c) => c.kind === 'suited' && c.secondClassGuardian);
-    expect(stickered.length).toBe(1);
-    expect(stickered[0].kind === 'suited' && stickered[0].rank).toBe('8');
+  it('guardianStickerEligible restricts to rank 8, excluding anything already special or already stickered — any suit qualifies', () => {
+    expect(guardianStickerEligible(suited('S', '8'))).toBe(true); // Paladin
+    expect(guardianStickerEligible(suited('C', '8'))).toBe(true); // Warrior — unlike the Reaver sticker, not excluded
+    expect(guardianStickerEligible(suited('D', '8'))).toBe(true); // Bard
+    expect(guardianStickerEligible(suited('H', '8'))).toBe(true); // Cleric
+    expect(guardianStickerEligible(suited('S', '7'))).toBe(false); // wrong rank
+    expect(guardianStickerEligible({ ...suited('S', '8'), guardian: true })).toBe(false); // already a primary special class
+    expect(guardianStickerEligible({ ...suited('S', '8'), secondClassGuardian: true })).toBe(false); // already stickered
+  });
+
+  it('applyGuardianStickerChoice applies the sticker to exactly the chosen card, and is a no-op for an ineligible id', () => {
+    const target = suited('S', '8');
+    const party = [target, suited('C', '8'), suited('H', '3')];
+
+    const next = applyGuardianStickerChoice(party, target.id);
+    const stickered = next.find((c) => c.id === target.id);
+    expect(stickered?.kind === 'suited' && stickered.secondClassGuardian).toBe(true);
+    expect(next.filter((c) => c.kind === 'suited' && c.secondClassGuardian).length).toBe(1);
+
+    const unchanged = applyGuardianStickerChoice(party, 'not-a-real-id');
+    expect(unchanged).toBe(party); // same reference — no-op
   });
 });
 

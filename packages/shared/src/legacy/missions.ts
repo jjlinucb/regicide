@@ -648,16 +648,18 @@ export const MISSIONS: Mission[] = [
     // Reward, sourced fix (legacy-missions-transcript-mismatches.md): the Guardian faction, but only Ferro
     // (rank 3) is kept as a permanent new recruit — the shipped version over-granted all 4 (Kesh, Ambrey, and
     // Dorna's special Aegis are dropped). Playing a Guardian card raises an absolute shield, blocking the
-    // enemy's very next attack entirely (spent instantly). Plus a bonus Guardian sticker on one random existing
-    // rank-8 party card (see party.ts's applyGuardianSticker), and the Azure Emblem relic — sourced fix: whenever
-    // a Mage joins an attack from here on, the Mage's OWN player gets one chance to bank one of that play's Mage
-    // card(s) onto the reserve deck instead of losing it to the discard pile.
+    // enemy's very next attack entirely (spent instantly). Plus a bonus Guardian sticker the player picks for one
+    // of their existing rank-8 party cards (confirmed live 2026-09-02 — see party.ts's
+    // guardianStickerEligible/applyGuardianStickerChoice, CampaignLobbyPage's GuardianStickerPicker; a genuine
+    // player choice, like Mission 5's Reaver sticker, not an automatic random pick), and the Azure Emblem relic —
+    // sourced fix: whenever a Mage joins an attack from here on, the Mage's OWN player gets one chance to bank
+    // one of that play's Mage card(s) onto the reserve deck instead of losing it to the discard pile.
     standingJesters: true,
     sidelineHighArcana: true,
     reward: {
       recruits: [recruit('Ferro', 'GUARDIAN', '3', 'S')],
       relics: ['AZURE_EMBLEM'],
-      guardianSticker: true,
+      guardianStickerChoice: true,
     },
   },
   {
