@@ -5,8 +5,9 @@ import { PlayingCard } from './PlayingCard';
 /**
  * Mission 6's reward, confirmed live 2026-09-02 (see legacy/party.ts's MissionReward.guardianStickerChoice doc):
  * a one-time, permanent, player-chosen pick — like Mission 5's Reaver sticker, not auto-applied at random.
- * `eligible` is already filtered to guardianStickerEligible cards (rank 8, no existing special class or sticker)
- * by CampaignLobbyPage. Disappears once resolved (a party card now carries secondClassGuardian).
+ * `eligible` is already filtered to guardianStickerEligible cards (rank 8, not a Paladin, no existing special
+ * class or sticker) by CampaignLobbyPage. Disappears once resolved (a party card now carries
+ * secondClassGuardian).
  */
 export function GuardianStickerPicker({
   eligible,
@@ -30,10 +31,10 @@ export function GuardianStickerPicker({
 
   return (
     <div className="panel legacy-panel mercenary-camp">
-      <h3>🛡 Guardian Sticker</h3>
+      <h3>🪨 Guardian Sticker</h3>
       <p style={{ fontSize: '0.85rem', color: 'var(--ink-dim)', margin: 0 }}>
-        Pick one rank-8 party member to permanently gain the Guardian's absolute shield — it keeps its own class power
-        too. This choice is final.
+        Pick one rank-8 Warrior, Bard, or Cleric to permanently gain the Guardian's absolute shield — it keeps its
+        own class power too. This choice is final.
       </p>
 
       <div className="hand-scroll">

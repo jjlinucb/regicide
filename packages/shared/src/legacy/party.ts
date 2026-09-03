@@ -302,10 +302,18 @@ export function applyCorruptAnotherCard(
 
 /**
  * Mission 6's reward, confirmed live (see MissionReward.guardianStickerChoice's doc): whether `card` is a legal
- * target for the player's post-mission Guardian-sticker pick — rank 8, not already carrying a special class of
- * its own, and not already stickered with this same bonus. Any suit qualifies (unlike Mission 5's Reaver sticker,
- * which excludes Warrior — no such exclusion is sourced here). Exported so both RoomManager's server-side
- * validation and the client's picker UI (CampaignLobbyPage) filter on the exact same rule.
+ * target for the player's post-mission Guardian-sticker pick — rank 8, not a Paladin, not already carrying a
+ * special class of its own, and not already stickered with this same bonus. Exported so both RoomManager's
+ * server-side validation and the client's picker UI (CampaignLobbyPage) filter on the exact same rule.
+ *
+ * SOURCED CORRECTION (John, from live play 2026-09-03, after the picker offered him a Paladin): Paladins are
+ * excluded, which puts this in line with the rule the other two stickers already followed — each bonus class
+ * can't be stickered onto the base class it shares a colour family with (see CLASS_THEME's family note):
+ *   Reaver  is black → excludes Warrior  (reaverStickerEligible)
+ *   Guardian is grey → excludes Paladin  (here — the one that was missing it)
+ *   Druid   is red  → excludes Cleric    (druidStickerEligible, via its D/C/S allowlist)
+ * The old comment here explicitly claimed no such exclusion was sourced for the Guardian; that reading is what
+ * this corrects.
  *
  * Goran is excluded by name (confirmed by John 2026-09-03, after the picker offered him): he's the campaign's one
  * rank-8 story recruit, and his class identity is handed to him on a scripted timeline by mission rewards rather
@@ -319,6 +327,7 @@ export function guardianStickerEligible(card: Card): card is Extract<Card, { kin
   return (
     card.kind === 'suited' &&
     card.rank === '8' &&
+    ['WARRIOR', 'BARD', 'CLERIC'].includes(SUIT_TO_CLASS[card.suit].id) && // never a Paladin — see the doc above
     card.name !== 'Goran' &&
     !card.arcane &&
     !card.reaver &&
