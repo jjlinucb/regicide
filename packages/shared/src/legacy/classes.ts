@@ -43,6 +43,19 @@ export interface ClassTheme {
   specialText?: string;
 }
 
+/**
+ * `color` follows the physical game's own colour families, so several classes deliberately SHARE an exact value
+ * — that duplication is the point, not an oversight to be tidied away (confirmed by John 2026-09-03):
+ *  - black  (#1f2328): Warrior, Reaver
+ *  - grey   (#64748b): Paladin, Guardian
+ *  - red    (#b8434a): Cleric, Druid
+ *  - gold   (#c99a3a): Bard
+ *  - green  (#2f6b3f): Evergreen (Gøran) — his alone
+ * Mage (purple), Chanter (teal), and Mercenary (warm taupe) have no family of their own. Sharing a colour is
+ * safe for enemy immunity chips (see EnemyDisplay): every mission's enemies are one of the 4 base classes only,
+ * so a chip can never be ambiguous between, say, Warrior and Reaver. The glyph is what separates classes within
+ * a family on a card face.
+ */
 export const CLASS_THEME: Record<ClassId, ClassTheme> = {
   WARRIOR: {
     id: 'WARRIOR',
@@ -50,7 +63,7 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     name: 'Warrior',
     tag: 'Double Damage',
     glyph: '⚔',
-    color: '#8a3b3b',
+    color: '#1f2328',
     specialAbility: 'CLEAVE',
     specialName: 'Cleave',
     specialText: 'Cleave: triples this play\'s damage instead of doubling it.',
@@ -83,7 +96,7 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     name: 'Paladin',
     tag: 'Reduce Strength',
     glyph: '🛡',
-    color: '#3f4f6b',
+    color: '#64748b',
     specialAbility: 'BULWARK',
     specialName: 'Bulwark',
     specialText: 'Bulwark: reduces the enemy\'s attack to 0 for the rest of the fight.',
@@ -103,14 +116,14 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     name: 'Reaver',
     tag: 'Reveal and Add',
     glyph: '🍄',
-    color: '#5c6b2f',
+    color: '#1f2328',
   },
   GUARDIAN: {
     id: 'GUARDIAN',
     name: 'Guardian',
     tag: 'Absolute Shield',
     glyph: '⛨',
-    color: '#4a6b5c',
+    color: '#64748b',
     specialAbility: 'AEGIS',
     specialName: 'Aegis',
     specialText: 'Aegis: the shield holds permanently, reducing the enemy\'s attack to 0 for the rest of the fight.',
@@ -124,10 +137,10 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     // physical card does.
     glyph: '🪶',
     // Red, per the same source as the feather glyph above: "the feather is red... similar to the potion power,
-    // which is red" (the potion power being the Cleric's heal). That puts three classes in the red family, so
-    // this scarlet is picked to stay separable from the Warrior's brown-tinted brick (#8a3b3b) and the Cleric's
-    // rose-tinted crimson (#b8434a) — it's the warmest and brightest of the three.
-    color: '#c0392b',
+    // which is red" (the potion power being the Cleric's heal) — and exactly the Cleric's own red, not a near
+    // miss, since classes that share a colour in the physical game share it here too (see the colour-family note
+    // at the top of CLASS_THEME).
+    color: '#b8434a',
     specialAbility: 'WELLSPRING',
     specialName: 'Wellspring',
     // Currently unreachable: Mission 7's sourced reward keeps only the plain rank-7 Druid, so nothing in the
