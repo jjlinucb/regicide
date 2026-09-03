@@ -188,6 +188,15 @@ export function registerSocketHandlers(io: IOServer, socket: IOSocket, rooms: Ro
     broadcastRoom(io, result.room);
   });
 
+  socket.on('legacy:chooseGuardianSticker', async ({ code, cardId }, cb) => {
+    const found = rooms.findPlayerBySocket(socket.id);
+    if (!found) return cb({ ok: false, error: 'Not in a room.' });
+    const result = await rooms.chooseGuardianSticker(code, found.player.id, cardId);
+    if ('error' in result) return cb({ ok: false, error: result.error });
+    cb({ ok: true });
+    broadcastRoom(io, result.room);
+  });
+
   socket.on('disconnect', () => {
     const found = rooms.findPlayerBySocket(socket.id);
     if (!found) return;
