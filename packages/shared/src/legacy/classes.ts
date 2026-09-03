@@ -123,7 +123,11 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     // exactly that ("the feather power, officially called druid"), so the card face should read the way the
     // physical card does.
     glyph: '🪶',
-    color: '#4a7c3f',
+    // Red, per the same source as the feather glyph above: "the feather is red... similar to the potion power,
+    // which is red" (the potion power being the Cleric's heal). That puts three classes in the red family, so
+    // this scarlet is picked to stay separable from the Warrior's brown-tinted brick (#8a3b3b) and the Cleric's
+    // rose-tinted crimson (#b8434a) — it's the warmest and brightest of the three.
+    color: '#c0392b',
     specialAbility: 'WELLSPRING',
     specialName: 'Wellspring',
     // Currently unreachable: Mission 7's sourced reward keeps only the plain rank-7 Druid, so nothing in the
