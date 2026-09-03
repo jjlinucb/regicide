@@ -208,6 +208,19 @@ function guardianCompanion(name: string, suit: Suit, rank: Rank): Card {
 }
 
 /**
+ * Mission 7's own reward faction (Druids), seeded into its extraReserveCards so all 4 are drawable and playable
+ * DURING the fight, same non-persistent "mission-only" shape every other class's companion helper above already
+ * has (Reavers at Mission 5, Guardians at Mission 6, Chanters at Mission 8) — confirmed live 2026-09-03: the
+ * Druids should be reachable in the fight itself, not just handed over cold as a post-mission reward. Ranks/suits
+ * match the permanent recruits this mission's reward grants (see recruit('Tolman', ...) etc. below) for narrative
+ * continuity — the fight-only card and the eventual permanent recruit are still two separate Card instances
+ * (buildRecruitCard mints a fresh id), same as Mission 6's Ferro/Mission 8's Bram.
+ */
+function druidCompanion(name: string, suit: Suit, rank: Rank): Card {
+  return { id: `druid-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, druid: true };
+}
+
+/**
  * Mission 12's own flavor pair, seeded into its extraReserveCards: heroes the antagonist's corruption reached
  * along the campaign's road. `restoredHero` carries SuitedCard.restored — the relic upgrade's beneficiaries,
  * healing the banish pile back into the game whenever they're played (see engine.ts's applyRestoredHeal).
@@ -713,6 +726,12 @@ export const MISSIONS: Mission[] = [
       pilgrim('Harlan Reedy', 'D', '7'),
       pilgrim('Widow Corrin', 'C', '8'),
       pilgrim('Young Thistle', 'S', '9'),
+      // Confirmed live 2026-09-03: the 4 Druids are drawable and playable during this fight too, not just handed
+      // over cold as the post-mission reward below — see druidCompanion's own doc comment.
+      druidCompanion('Tolman', 'H', '3'),
+      druidCompanion('Maya', 'D', '5'),
+      druidCompanion('Alanta', 'C', '7'),
+      druidCompanion('Zolgar', 'S', '9'),
     ],
     // Reward: the Druid faction — 4 permanent new recruits, survivors themselves once, who learned something
     // from the Well before the party pulled them out. Playing one activates Regrowth: salvage cards back out of
