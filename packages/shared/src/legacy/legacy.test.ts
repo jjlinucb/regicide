@@ -3694,7 +3694,7 @@ describe('legacy: enemy card-face letters (EnemyState.rankLabel)', () => {
     expect(map).toEqual([
       [1, ''], // standardCastle — no explicit enemies
       [2, 'H'], // hydra brood
-      [3, '-'], // academy staff/familiars — no letter chosen yet
+      [3, 'M'], // the whole mage academy
       [4, 'S'], // Specimens, all three tiers
       [5, 'SG'], // Sporelings, Gloom Spores
       [6, 'SG'], // Statues, Graven
@@ -3736,11 +3736,9 @@ describe('legacy: enemy card-face letters (EnemyState.rankLabel)', () => {
     expect(state.currentEnemy?.rankLabel).toBe('J'); // first Schole-tier enemy
     expect(state.currentEnemy?.rank).toBe('J'); // the inert placeholder is untouched
 
-    // A mission with no letters assigned still starts fine — rankLabel is simply absent and the card face falls
-    // back to the placeholder. Mission 3 is the only such mission left (its academy staff/familiars have no
-    // agreed letter yet); Mission 1 isn't a valid case, since standardCastle means it fights the real J/Q/K
-    // royal court and already shows those letters natively.
-    const mission3 = getMission(3)!;
+    // An enemy with no letter still starts fine — rankLabel is simply absent and the card face falls back to
+    // the placeholder. Built by hand rather than taken from a mission: every mission now assigns letters, so
+    // there's no unlettered mission left to borrow (and this is the more direct thing to assert anyway).
     const plain = ensureOk(
       applyAction(createLobbyState(), {
         type: 'START_LEGACY_MISSION',
@@ -3748,12 +3746,12 @@ describe('legacy: enemy card-face letters (EnemyState.rankLabel)', () => {
         playerNames: ['Player 0'],
         seed: 'rank-label-absent',
         party: buildInitialParty(),
-        enemies: missionEnemiesToSpecs(mission3.enemies),
+        enemies: [{ name: 'Unlettered Thing', suit: 'S', health: 20, attack: 10 }],
         jesterCount: 0,
       }),
     ).state;
-    expect(mission3.enemies.every((e) => e.rankLabel === undefined)).toBe(true);
     expect(plain.currentEnemy?.rankLabel).toBeUndefined();
+    expect(plain.currentEnemy?.rank).toBe('J'); // the placeholder still there to fall back on
   });
 });
 
