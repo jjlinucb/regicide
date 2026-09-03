@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
 import { makeRng } from '../game/deck.js';
-import { missionZoneValueSum } from '../game/rules.js';
+import { cardSuits, missionZoneValueSum } from '../game/rules.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
@@ -9,6 +9,7 @@ import { getMission, MISSIONS, missionEnemiesToSpecs, type MissionEnemySpec } fr
 import {
   applyCorruptAnotherCard,
   applyDruidStickerChoice,
+  applyExtraSuitByName,
   applyDualClassStickers,
   applyEvergreenUpgrade,
   applyGuardianStickerChoice,
@@ -3119,6 +3120,43 @@ describe('legacy: mission 7 reward (Druid faction)', () => {
     expect(druids.length).toBe(1);
     expect(druids[0].kind === 'suited' && druids[0].name).toBe('Alanta');
     expect(party.some((c) => c.kind === 'suited' && c.special === 'WELLSPRING')).toBe(false);
+  });
+
+  it("gives Goran Hearts as a THIRD suit, keeping Mission 5's Clubs and Mission 6's Spades", () => {
+    const mission7 = getMission(7)!;
+    expect(mission7.reward.extraSuitByName).toEqual({ name: 'Goran', suit: 'H' });
+
+    // Walk the real timeline: recruited inert at 4, Clubs at 5, Spades at 6, Hearts here.
+    let party = buildInitialParty();
+    for (const id of [4, 5, 6, 7]) party = applyReward(party, getMission(id)!.reward);
+    const goran = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
+    expect(goran).toBeDefined();
+    if (goran?.kind !== 'suited') throw new Error('expected a suited card');
+
+    expect(goran.suit).toBe('C'); // Mission 5
+    expect(goran.secondSuit).toBe('S'); // Mission 6 — NOT overwritten by this mission's grant
+    expect(goran.extraSuits).toEqual(['H']); // Mission 7
+    // All three resolve together when he's played.
+    expect([...cardSuits(goran)].sort()).toEqual(['C', 'H', 'S']);
+  });
+
+  it('never stacks a duplicate suit, and is a no-op for an unknown name', () => {
+    let party = buildInitialParty();
+    for (const id of [4, 5, 6, 7]) party = applyReward(party, getMission(id)!.reward);
+
+    // Hearts again — already resolving, so nothing changes.
+    expect(applyExtraSuitByName(party, { name: 'Goran', suit: 'H' })).toBe(party);
+    // Clubs is his printed suit, not in extraSuits — still must not be added twice.
+    expect(applyExtraSuitByName(party, { name: 'Goran', suit: 'C' })).toBe(party);
+    // Spades sits in secondSuit — same.
+    expect(applyExtraSuitByName(party, { name: 'Goran', suit: 'S' })).toBe(party);
+    expect(applyExtraSuitByName(party, { name: 'Nobody At All', suit: 'D' })).toBe(party);
+
+    // A genuinely new suit does append (this is Mission 8's unimplemented Diamonds step).
+    const withD = applyExtraSuitByName(party, { name: 'Goran', suit: 'D' });
+    const goran = withD.find((c) => c.kind === 'suited' && c.name === 'Goran')!;
+    expect(goran.kind === 'suited' && goran.extraSuits).toEqual(['H', 'D']);
+    expect(goran.kind === 'suited' && [...cardSuits(goran)].sort()).toEqual(['C', 'D', 'H', 'S']);
   });
 
   it('grants a player-chosen Druid sticker (4 of Diamonds/Clubs/Spades only) plus a corrupt-another-card step', () => {

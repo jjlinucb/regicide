@@ -53,6 +53,15 @@ export interface SuitedCard {
    */
   secondSuit?: Suit;
   /**
+   * Legacy-only: further class icons beyond `secondSuit`, all of which resolve alongside it (see rules.ts's
+   * cardSuits). Exists because Gøran's suits arrive one mission at a time rather than as a single dual-class
+   * sticker — Clubs at Mission 5, Spades at Mission 6, Hearts at Mission 7, and (still unimplemented) Diamonds
+   * at Mission 8, ending with all four before Mission 9 makes him Evergreen. A list rather than a `thirdSuit`
+   * field precisely so that last step doesn't need a `fourthSuit` too. Nothing else populates it: Dual-class
+   * Stickers grant exactly one extra icon and keep using `secondSuit`.
+   */
+  extraSuits?: Suit[];
+  /**
    * Legacy-only: a corrupted card. Its class power(s) always ignore enemy immunity (including mission-zone
    * immunity), but the instant it's played, the top card of the reserve deck is banished as the cost (see
    * engine.ts's resolveCommittedPlay) — permanently shrinking the party's deck for the rest of the mission.

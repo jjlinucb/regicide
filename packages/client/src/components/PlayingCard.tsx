@@ -33,8 +33,10 @@ export function cardLabel(card: Card): string {
   if (card.kind === 'jester') return 'Jester';
   const rankLabel = tieredRankLabel(card);
   if (isLegacyCard(card)) {
-    const secondGlyph = card.secondSuit ? SUIT_TO_CLASS[card.secondSuit].glyph : '';
-    return `${rankLabel} ${classForCard(card).glyph}${secondGlyph}`;
+    const extraGlyphs = [...(card.secondSuit ? [card.secondSuit] : []), ...(card.extraSuits ?? [])]
+      .map((s) => SUIT_TO_CLASS[s].glyph)
+      .join('');
+    return `${rankLabel} ${classForCard(card).glyph}${extraGlyphs}`;
   }
   return `${rankLabel}${SUIT_GLYPH[card.suit]}`;
 }
@@ -47,6 +49,11 @@ export function cardAbilityText(card: Card): string {
     const cls = classForCard(card);
     const specialSuffix = card.special ? ` ${cls.specialText}` : '';
     const dualSuffix = card.secondSuit ? ` Also a ${SUIT_TO_CLASS[card.secondSuit].name} (Dual-class Sticker).` : '';
+    // Icons picked up one mission at a time (Gøran) rather than from a sticker — named separately so the text
+    // doesn't credit them to a Dual-class Sticker.
+    const extraSuffix = card.extraSuits?.length
+      ? ` Also ${card.extraSuits.map((s) => SUIT_TO_CLASS[s].name).join(' and ')}.`
+      : '';
     const flexSuffix = card.flexibleComboRank ? ` Combos as a ${card.flexibleComboRank} too.` : '';
     const wildSuffix = card.wildSuit ? ' Choose a suit for it when you play it.' : '';
     const corruptedSuffix = card.corrupted ? ' Cursed: ignores enemy immunity, but burns the top card of the reserve deck when played.' : '';
@@ -54,7 +61,7 @@ export function cardAbilityText(card: Card): string {
       ? " Reveals cards off the reserve deck equal to this attack's total value (including anything combo'd with it), then choose one to add its strength to the attack — every revealed card is banished. Always doubles the play's total damage."
       : '';
     const displayName = card.name ?? (card.wildSuit ? 'Any-Suit Ace' : 'Mercenary');
-    return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${flexSuffix}${wildSuffix}${corruptedSuffix}${reaverSuffix}`;
+    return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${extraSuffix}${flexSuffix}${wildSuffix}${corruptedSuffix}${reaverSuffix}`;
   }
   const tierSuffix = card.tier ? ` (upgraded ${card.tier} tier${card.tier > 1 ? 's' : ''} past King, from an Endless Mode win)` : '';
   return `${rankLabel} of ${SUIT_NAME[card.suit]} — value ${cardValue(card)}${tierSuffix}. ${SUIT_ABILITY_TEXT[card.suit]}`;
@@ -116,9 +123,17 @@ export function PlayingCard({
       {card.corrupted && !small && <span className="corrupted-badge" aria-hidden="true">🥀</span>}
       <span className="rank">{rankLabel}</span>
       <span className="glyph">{glyph}</span>
-      {legacy && card.secondSuit && !small && (
-        <span className="glyph second-class-glyph" style={{ color: SUIT_TO_CLASS[card.secondSuit].color }}>
-          {SUIT_TO_CLASS[card.secondSuit].glyph}
+      {/* Every class icon beyond the printed suit — `secondSuit` from a Dual-class Sticker, plus any
+          `extraSuits` a card has accumulated mission by mission (Gøran, see SuitedCard.extraSuits). Wrapped in a
+          stack rather than positioned individually: the glyphs used to be absolutely placed at one fixed
+          top/right, so a card carrying more than one extra icon drew them all on the same spot. */}
+      {legacy && !small && (card.secondSuit || card.extraSuits?.length) && (
+        <span className="second-class-stack">
+          {[...(card.secondSuit ? [card.secondSuit] : []), ...(card.extraSuits ?? [])].map((s) => (
+            <span key={s} className="glyph second-class-glyph" style={{ color: SUIT_TO_CLASS[s].color }}>
+              {SUIT_TO_CLASS[s].glyph}
+            </span>
+          ))}
         </span>
       )}
       {legacy && !small && (
