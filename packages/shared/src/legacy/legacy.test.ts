@@ -2590,6 +2590,25 @@ describe('legacy: mission 6 reward, sourced fix (only the rank-3 Guardian kept, 
     expect(party.some((c) => c.kind === 'suited' && c.secondClassGuardian)).toBe(false);
   });
 
+  it('never offers Goran as a Guardian-sticker target, even though he is rank 8 and not yet Evergreen', () => {
+    // Walk the real reward timeline up to the point the sticker is actually picked: Goran joins at Mission 4 and
+    // is still an ordinary (non-Evergreen) rank-8 card here — Mission 9 is what sets `evergreen` on him — so
+    // nothing else in guardianStickerEligible would have excluded him.
+    let party = buildInitialParty();
+    for (const id of [4, 5, 6]) party = applyReward(party, getMission(id)!.reward);
+    const goran = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
+    expect(goran).toBeDefined();
+    expect(goran?.kind === 'suited' && goran.rank).toBe('8');
+    expect(goran?.kind === 'suited' && goran.evergreen).toBeFalsy();
+
+    const eligible = party.filter(guardianStickerEligible);
+    expect(eligible.length).toBeGreaterThan(0); // the ordinary rank-8s are still offered
+    expect(eligible.some((c) => c.name === 'Goran')).toBe(false);
+
+    // And the apply path refuses him too, not just the picker's filter.
+    expect(applyGuardianStickerChoice(party, goran!.id)).toBe(party);
+  });
+
   it('a Guardian recruit takes its explicit suit (Guardian has none of its own) and is flagged guardian', () => {
     const card = buildRecruitCard({ name: 'Test Guardian', class: 'GUARDIAN', rank: '5', suit: 'D' });
     expect(card.kind === 'suited' && card.guardian).toBe(true);
