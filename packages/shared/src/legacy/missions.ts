@@ -801,17 +801,24 @@ export const MISSIONS: Mission[] = [
     //
     // COMMENT CORRECTION (22-agent playtest cross-check, 2026-08-28 — see mission-playtest-cross-check-2026-08-28
     // memory): an earlier version of this very comment framed "finish the chain, and its purge, before this wave
-    // drops" as the mission's real goal. That's mathematically impossible as tuned: the chain needs 9 placements
-    // after the preseeded Ace (see presetMissionZone/extraReserveCards below), and placement only opens right
-    // after a kill (see engine.ts's zoneOpenForPlacement) — so Wave 1's 6 Trolls can open at most 6 of those 9
-    // windows. Re-checked against the same CAMPAIGN_RULES.md fan-reimplementation doc already cited throughout
+    // drops" as the mission's real goal, with nothing sourcing the deadline. The chain needs 9 placements after
+    // the preseeded Ace (see presetMissionZone/extraReserveCards below), and a placement window opens only right
+    // after a kill (see engine.ts's zoneOpenForPlacement), so Wave 1's 6 Trolls open just 6 windows.
+    // A SECOND CORRECTION (2026-09-03): this comment used to call a Wave-1 finish "mathematically impossible" on
+    // that basis, which is wrong — windows aren't 1:1 with placements. A window stays open until the turn moves
+    // on, and its pool is the defeated enemy's whole table pile, so several cards can go in per kill (confirmed
+    // correct by John; see legacy.test.ts's "several placements can share one window"). 6 windows can therefore
+    // host all 9 placements given the right values. A Wave-1 finish is merely unlikely, not impossible — what
+    // actually rules out the deadline is the source below stating no deadline at all, not an arithmetic bound.
+    // Re-checked against the same CAMPAIGN_RULES.md fan-reimplementation doc already cited throughout
     // this mission's other corrections: its actual text is "during cleanup, the player may optionally move
     // cards from the play area to the mission zone... at no extra cost" — "optionally," no deadline, no mention
     // of Wave 2 at all. Wave 2's own 6 Wyvern kills open the identical placement window (ascendingZone /
     // zoneOpenForPlacement is not wave-scoped), so the whole mission's 12 kills open up to 11 usable placement
     // windows (the very last kill's window never opens — the mission ends in that same engine call, see
-    // finishEnemyDefeatTail's castleDeck.length === 0 branch) for the 9 the chain actually needs — comfortably
-    // achievable as a whole-mission project, just never a hard Wave-1-only cutoff. No mechanical change was
+    // finishEnemyDefeatTail's castleDeck.length === 0 branch), each able to host more than one placement, for
+    // the 9 the chain actually needs — comfortably achievable as a whole-mission project, just never a hard
+    // Wave-1-only cutoff. No mechanical change was
     // needed here, only removing this comment's own unsourced deadline framing (nothing player-facing — story
     // text, UI copy — ever stated the deadline either; it only lived in this comment). See legacy.test.ts's
     // "mission 8 chain-vs-wave math" tests for the regression coverage locking in these numbers.
