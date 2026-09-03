@@ -55,7 +55,10 @@ export function EnemyDisplay({
   return (
     <div className="enemy-card">
       <div className="boss-playing-card">
-        <PlayingCard card={{ id: 'boss', kind: 'suited', suit: enemy.suit, rank: enemy.rank, name: enemy.name }} />
+        <PlayingCard
+          card={{ id: 'boss', kind: 'suited', suit: enemy.suit, rank: enemy.rank, name: enemy.name }}
+          rankLabelOverride={enemy.rankLabel}
+        />
       </div>
       <div className={`enemy-title${red ? ' red' : ''}`}>
         {isLegacy ? enemy.name : `${RANK_NAME[enemy.rank]} of ${SUIT_GLYPH[enemy.suit]}`}

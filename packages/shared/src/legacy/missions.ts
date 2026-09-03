@@ -10,6 +10,8 @@ export interface MissionEnemySpec {
   secondClass?: ClassId;
   health: number;
   attack: number;
+  /** See EnemyState.rankLabel — the letter shown on this enemy's card face. Set via rankLabel() below. */
+  rankLabel?: string;
 }
 
 export interface Mission {
@@ -100,6 +102,16 @@ export interface Mission {
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
   return { name, class: cls, secondClass: secondCls, health, attack };
+}
+
+/**
+ * Stamps the same card-face letter onto a whole group of enemies (see EnemyState.rankLabel) — a tier, or one
+ * creature type. Applied to the group rather than passed into every enemy() call so the mission data reads as
+ * "this block is the Jack tier", and so adding a letter never has to thread `undefined` past enemy()'s optional
+ * secondClass argument.
+ */
+function rankLabel(label: string, enemies: MissionEnemySpec[]): MissionEnemySpec[] {
+  return enemies.map((e) => ({ ...e, rankLabel: label }));
 }
 
 function recruit(name: string, cls: ClassId, rank: RecruitSpec['rank'], suit?: Suit): RecruitSpec {
@@ -275,6 +287,7 @@ export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemyS
     secondSuit: e.secondClass ? CLASS_THEME[e.secondClass].suit : undefined,
     health: e.health,
     attack: e.attack,
+    rankLabel: e.rankLabel,
   }));
 }
 
@@ -345,12 +358,15 @@ export const MISSIONS: Mission[] = [
     // All six heads share the same stat line (20 health / 10 attack) — the challenge is entirely the dual
     // immunity + exact-kill combination, not a difficulty ramp across the brood.
     enemies: [
-      enemy('Coilfang Broodling', 'CLERIC', 20, 10, 'BARD'),
-      enemy('Ashmaw Broodling', 'CLERIC', 20, 10, 'WARRIOR'),
-      enemy('Duskscale Broodling', 'CLERIC', 20, 10, 'PALADIN'),
-      enemy('Bramble-Throat Broodling', 'BARD', 20, 10, 'WARRIOR'),
-      enemy('Grey Fen Broodling', 'BARD', 20, 10, 'PALADIN'),
-      enemy('The Nine-Coiled Matriarch', 'WARRIOR', 20, 10, 'PALADIN'),
+      // Card faces: every head of the brood is lettered H for hydra (John's call — see EnemyState.rankLabel).
+      ...rankLabel('H', [
+        enemy('Coilfang Broodling', 'CLERIC', 20, 10, 'BARD'),
+        enemy('Ashmaw Broodling', 'CLERIC', 20, 10, 'WARRIOR'),
+        enemy('Duskscale Broodling', 'CLERIC', 20, 10, 'PALADIN'),
+        enemy('Bramble-Throat Broodling', 'BARD', 20, 10, 'WARRIOR'),
+        enemy('Grey Fen Broodling', 'BARD', 20, 10, 'PALADIN'),
+        enemy('The Nine-Coiled Matriarch', 'WARRIOR', 20, 10, 'PALADIN'),
+      ]),
     ],
     exactKillOnly: true,
     // UNSOURCED HOUSE RULE (John's own call from the physical game, not the tutorial videos): this mission's 2
@@ -726,19 +742,27 @@ export const MISSIONS: Mission[] = [
       "by one as the fight drags on — waterlogged, terrified, and no help to anyone until they're pulled clear.",
     // 4-4-4 escalating lineup — Schole (10/20), Deep (15/30), Abyssal (20/40) — one of each base class per tier,
     // same structural pattern as Mission 4's Specimens.
+    // Card faces: this mission's three escalating tiers ARE the campaign's Jack/Queen/King equivalents (John's
+    // call), so they're lettered J, Q, K rather than all sharing the placeholder (see EnemyState.rankLabel).
     enemies: [
-      enemy('Schole: Glimmerfin', 'WARRIOR', 20, 10),
-      enemy('Schole: Murkgill', 'BARD', 20, 10),
-      enemy('Schole: Tideclaw', 'CLERIC', 20, 10),
-      enemy('Schole: Brackenshell', 'PALADIN', 20, 10),
-      enemy('Deep: Waterlogged', 'WARRIOR', 30, 15),
-      enemy('Deep: Silttongue', 'BARD', 30, 15),
-      enemy('Deep: Chorus-Eel', 'CLERIC', 30, 15),
-      enemy('Deep: Ironscale', 'PALADIN', 30, 15),
-      enemy('Abyssal: Wormvein', 'WARRIOR', 40, 20),
-      enemy('Abyssal: Drownsong', 'BARD', 40, 20),
-      enemy('Abyssal: Hollowfang', 'CLERIC', 40, 20),
-      enemy('Abyssal: Leadmaw', 'PALADIN', 40, 20),
+      ...rankLabel('J', [
+        enemy('Schole: Glimmerfin', 'WARRIOR', 20, 10),
+        enemy('Schole: Murkgill', 'BARD', 20, 10),
+        enemy('Schole: Tideclaw', 'CLERIC', 20, 10),
+        enemy('Schole: Brackenshell', 'PALADIN', 20, 10),
+      ]),
+      ...rankLabel('Q', [
+        enemy('Deep: Waterlogged', 'WARRIOR', 30, 15),
+        enemy('Deep: Silttongue', 'BARD', 30, 15),
+        enemy('Deep: Chorus-Eel', 'CLERIC', 30, 15),
+        enemy('Deep: Ironscale', 'PALADIN', 30, 15),
+      ]),
+      ...rankLabel('K', [
+        enemy('Abyssal: Wormvein', 'WARRIOR', 40, 20),
+        enemy('Abyssal: Drownsong', 'BARD', 40, 20),
+        enemy('Abyssal: Hollowfang', 'CLERIC', 40, 20),
+        enemy('Abyssal: Leadmaw', 'PALADIN', 40, 20),
+      ]),
     ],
     // The Pilgrim mechanic (see GameState.pilgrimMechanic for the full rule and the revision history behind it):
     // a separate face-down 24-card deck (see pilgrimDeck above) that never touches the reserve deck. One flips
@@ -840,18 +864,24 @@ export const MISSIONS: Mission[] = [
     // pattern doesn't apply and wasn't added — the caution about not copy-pasting it blind (Mission 12 tried and
     // reverted exactly that) is moot here because the two missions' immunity sources aren't the same shape at all.
     enemies: [
-      enemy('Grael Stonejaw', 'CLERIC', 20, 10, 'BARD'),
-      enemy('Mossen Foghide', 'CLERIC', 20, 10, 'WARRIOR'),
-      enemy('Rimtusk the Wet', 'CLERIC', 20, 10, 'PALADIN'),
-      enemy('Cragfoot', 'BARD', 20, 10, 'WARRIOR'),
-      enemy('Windbroken Skarn', 'BARD', 20, 10, 'PALADIN'),
-      enemy('The Last Bridgekeeper', 'WARRIOR', 20, 10, 'PALADIN'),
-      enemy('Wyvern of the First Veil', 'CLERIC', 50, 25, 'BARD'),
-      enemy('Wyvern of the Second Veil', 'CLERIC', 50, 25, 'WARRIOR'),
-      enemy('Wyvern of the Third Veil', 'CLERIC', 50, 25, 'PALADIN'),
-      enemy('Wyvern of the Fourth Veil', 'BARD', 50, 25, 'WARRIOR'),
-      enemy('Stormrend, Elder Wyvern', 'BARD', 50, 25, 'PALADIN'),
-      enemy("Skytallon, Warden of Heaven's Edge", 'WARRIOR', 50, 25, 'PALADIN'),
+      // Card faces: T for the trolls, D for the wyverns — dragon-kin, so D rather than W (John's call — see
+      // EnemyState.rankLabel).
+      ...rankLabel('T', [
+        enemy('Grael Stonejaw', 'CLERIC', 20, 10, 'BARD'),
+        enemy('Mossen Foghide', 'CLERIC', 20, 10, 'WARRIOR'),
+        enemy('Rimtusk the Wet', 'CLERIC', 20, 10, 'PALADIN'),
+        enemy('Cragfoot', 'BARD', 20, 10, 'WARRIOR'),
+        enemy('Windbroken Skarn', 'BARD', 20, 10, 'PALADIN'),
+        enemy('The Last Bridgekeeper', 'WARRIOR', 20, 10, 'PALADIN'),
+      ]),
+      ...rankLabel('D', [
+        enemy('Wyvern of the First Veil', 'CLERIC', 50, 25, 'BARD'),
+        enemy('Wyvern of the Second Veil', 'CLERIC', 50, 25, 'WARRIOR'),
+        enemy('Wyvern of the Third Veil', 'CLERIC', 50, 25, 'PALADIN'),
+        enemy('Wyvern of the Fourth Veil', 'BARD', 50, 25, 'WARRIOR'),
+        enemy('Stormrend, Elder Wyvern', 'BARD', 50, 25, 'PALADIN'),
+        enemy("Skytallon, Warden of Heaven's Edge", 'WARRIOR', 50, 25, 'PALADIN'),
+      ]),
     ],
     // The mission zone builds an ascending 1-through-10 chain instead of any prior mission's zone mode. Pilgrim
     // cards are ordinary cards here — no hand-trap restriction, playable or discardable like any other — but
