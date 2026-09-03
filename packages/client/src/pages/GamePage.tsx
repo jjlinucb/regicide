@@ -608,7 +608,7 @@ export function GamePage({
       {isMyReaverRevealCountWindow && (
         <div className="jester-picker">
           <span>
-            🍄 {reaverCountTriggerLabel} opens a reveal — choose how many cards (1-{state.reaverRevealCountChoice?.maxCount}) to pull from
+            🔨 {reaverCountTriggerLabel} opens a reveal — choose how many cards (1-{state.reaverRevealCountChoice?.maxCount}) to pull from
             the reserve deck. Every card revealed is banished either way, so fewer is safer.
           </span>
           <ReaverRevealCountPicker
@@ -620,7 +620,7 @@ export function GamePage({
 
       {isMyReaverRevealWindow && (
         <div className="jester-picker">
-          <span>🍄 {reaverTriggerLabel}'s reveal turns up these cards — choose one to add to the attack, or decline.</span>
+          <span>🔨 {reaverTriggerLabel}'s reveal turns up these cards — choose one to add to the attack, or decline.</span>
           <EnemyCardPicker
             cards={state.reaverReveal?.candidates ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: myPlayerId, cardId })}
