@@ -420,14 +420,18 @@ export const MISSIONS: Mission[] = [
     // specific interaction) — see engine.ts's flipMissionZoneCard for the fix (the zone now never pushes an
     // enemy's immunity past however many classes it already had on its own) and the simulated before/after numbers
     // that justified it.
-    enemies: [
+    // Card faces: M for Mage across the whole academy (John's call) — the familiars, the Senior Instructors and
+    // The Grand Mage are all mages, so they share one letter rather than splitting by tier (see
+    // EnemyState.rankLabel). Note the boss keeps M too, unlike Missions 9/11/12's named bosses, which take
+    // their own initial: his own name already ends in "Mage", so the tier letter IS his initial.
+    enemies: rankLabel('M', [
       enemy('Midnight the Cat', 'CLERIC', 30, 10),
       enemy('Japat', 'BARD', 30, 10),
       enemy('Blast', 'WARRIOR', 30, 10),
       enemy('Senior Instructor Vail', 'PALADIN', 40, 15),
       enemy('Senior Instructor Rowe', 'CLERIC', 40, 15),
       enemy('The Grand Mage', 'BARD', 60, 20),
-    ],
+    ]),
     // Only an exact-damage kill actually removes an enemy from the gauntlet — an overkill just recycles it to the
     // back of the line, wounds healed (same mechanic Mission 2 already uses; see GameState.exactKillOnly).
     exactKillOnly: true,
