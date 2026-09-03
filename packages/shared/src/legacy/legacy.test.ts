@@ -2983,6 +2983,57 @@ describe('legacy: mission 7 mechanics (Pilgrim zone burn)', () => {
     expect(state.pilgrimDeck.length).toBe(0);
   });
 
+  it('banishes two 3-Pilgrims when a combo of two 3s is played (per-card matching, not the combined total)', () => {
+    // Regression (John's live play): a combo of two 3s totals 6, so total-based matching cleared neither of the
+    // two waiting 3-Pilgrims and both then burned 6 cards off the reserve deck on the kill.
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 200, attack: 0 };
+    const p3a: Card = { id: 'p3a', kind: 'suited', suit: 'H', rank: '3', name: 'Pilgrim', pilgrim: true, noSuitPower: true };
+    const p3b: Card = { id: 'p3b', kind: 'suited', suit: 'D', rank: '3', name: 'Pilgrim', pilgrim: true, noSuitPower: true };
+    let state = startWellMission(1, [boss], [p3a, p3b]);
+    state = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id })).state;
+    expect(state.pilgrimZone.length).toBe(2); // both 3s waiting
+
+    state = rig(state, [suited('C', '3'), suited('S', '3')]);
+    state = ensureOk(
+      applyAction(state, {
+        type: 'PLAY_CARDS',
+        playerId: state.players[0].id,
+        cardIds: state.players[0].hand.slice(0, 2).map((c) => c.id),
+      }),
+    ).state;
+
+    expect(state.pilgrimZone.length).toBe(0); // both banished, one per matching card
+    expect(state.banishPile.filter((c) => c.id === 'p3a' || c.id === 'p3b').length).toBe(2);
+  });
+
+  it('pairs matching cards one-for-one — a single 3 clears only one of two waiting 3-Pilgrims', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 200, attack: 0 };
+    const p3a: Card = { id: 'p3a', kind: 'suited', suit: 'H', rank: '3', name: 'Pilgrim', pilgrim: true, noSuitPower: true };
+    const p3b: Card = { id: 'p3b', kind: 'suited', suit: 'D', rank: '3', name: 'Pilgrim', pilgrim: true, noSuitPower: true };
+    let state = startWellMission(1, [boss], [p3a, p3b]);
+    state = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id })).state;
+
+    state = rig(state, [suited('C', '3')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.pilgrimZone.length).toBe(1);
+    expect(state.banishPile.length).toBe(1);
+  });
+
+  it('does not match on the combined total of a combo whose individual cards match nothing', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 200, attack: 0 };
+    const p6: Card = { id: 'p6', kind: 'suited', suit: 'H', rank: '6', name: 'Pilgrim', pilgrim: true, noSuitPower: true };
+    let state = startWellMission(1, [boss], [p6]);
+    expect(state.pilgrimZone.length).toBe(1);
+
+    // Two 3s total 6, which the old total-based rule would have matched against the 6-Pilgrim. Per-card, a 3
+    // matches nothing in the zone, so the 6 stays put (combos are same-rank, so this is the realistic shape).
+    state = rig(state, [suited('C', '3'), suited('S', '3')]);
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.slice(0, 2).map((c) => c.id) }),
+    ).state;
+    expect(state.pilgrimZone.map((c) => c.id)).toEqual(['p6']);
+  });
+
   it('banishes a waiting Pilgrim when a play\'s printed value matches it exactly', () => {
     const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 200, attack: 0 };
     let state = startWellMission(1, [boss], [structuredClone(sae)]);
