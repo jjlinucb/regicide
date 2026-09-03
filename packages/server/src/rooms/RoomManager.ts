@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { applyAction, createLobbyState, ENDLESS_MODE_MAX_LOOP } from '@regicide/shared';
 import type { Card, GameAction, GameState, LegacySavePayload, MercenaryProgress, MercenaryTypeId, SuitedCard } from '@regicide/shared';
 import {
+  applyDruidStickerChoice,
   applyGuardianStickerChoice,
   applyReaverStickerChoice,
   applyRestoredPartyCards,
@@ -10,6 +11,7 @@ import {
   buildMercenaryLoadout,
   buildRecruitCard,
   getMission,
+  druidStickerEligible,
   guardianStickerEligible,
   LEGACY_JESTER_COUNT,
   mercenaryCoinsForLosses,
@@ -498,7 +500,12 @@ export class RoomManager {
         const skipped = getMission(id);
         if (skipped) {
           this.grantMissionReward(room.legacy, skipped);
-          if (skipped.reward.recruits.some((r) => r.beast) || skipped.reward.reaverStickerChoice || skipped.reward.guardianStickerChoice)
+          if (
+            skipped.reward.recruits.some((r) => r.beast) ||
+            skipped.reward.reaverStickerChoice ||
+            skipped.reward.guardianStickerChoice ||
+            skipped.reward.druidStickerChoice
+          )
             introducesInteractiveChoice = true;
         }
       }
@@ -716,6 +723,27 @@ export class RoomManager {
       return { error: 'That card is not eligible for the Guardian sticker.' };
     }
     room.legacy.party = applyGuardianStickerChoice(room.legacy.party, cardId);
+    await this.campaignStore.save(toRecord(room));
+    return { room };
+  }
+
+  /**
+   * Resolves Mission 7's player-chosen Druid-sticker reward (see MissionReward.druidStickerChoice's doc):
+   * permanently gives `cardId` a bonus Druid sticker. Mirrors chooseGuardianSticker exactly, just for the
+   * 4♦/4♣/4♠ and `secondClassDruid` instead of rank-8/`secondClassGuardian`.
+   */
+  async chooseDruidSticker(code: string, requestingPlayerId: string, cardId: string): Promise<{ room: Room } | { error: string }> {
+    const room = this.getRoom(code);
+    if (!room || !room.legacy) return { error: 'Campaign not found.' };
+    if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can choose the Druid sticker.' };
+    if (room.legacy.party.some((c) => c.kind === 'suited' && c.secondClassDruid)) {
+      return { error: 'The Druid sticker has already been used.' };
+    }
+    const target = room.legacy.party.find((c) => c.id === cardId);
+    if (!target || !druidStickerEligible(target)) {
+      return { error: 'That card is not eligible for the Druid sticker.' };
+    }
+    room.legacy.party = applyDruidStickerChoice(room.legacy.party, cardId);
     await this.campaignStore.save(toRecord(room));
     return { room };
   }

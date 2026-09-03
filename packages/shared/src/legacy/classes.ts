@@ -123,7 +123,10 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     color: '#4a7c3f',
     specialAbility: 'WELLSPRING',
     specialName: 'Wellspring',
-    specialText: 'Wellspring: Regrowth salvages 2 cards from the banish pile instead of 1.',
+    // Currently unreachable: Mission 7's sourced reward keeps only the plain rank-7 Druid, so nothing in the
+    // campaign grants WELLSPRING any more (see legacy/missions.ts's Mission 7 reward). Kept as theme data so the
+    // class table stays uniform, and because the physical game may yet turn out to grant it somewhere.
+    specialText: 'Wellspring: Regrowth deals out the discard pile and lets you keep a second card in hand.',
   },
   CHANTER: {
     id: 'CHANTER',

@@ -54,6 +54,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     zoneClosed: state.zoneClosed,
     zonePurge: state.zonePurge,
     chanterWindow: state.chanterWindow,
+    druidWindow: state.druidWindow,
     capturedPilesActive: state.capturedPilesActive,
     capturedPiles: state.capturedPiles.map((p) => ({ faceUp: p.faceUp, faceDownCount: p.faceDown.length })),
     zoneImmuneSuits: state.zoneImmuneSuits,

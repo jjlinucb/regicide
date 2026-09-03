@@ -17,10 +17,9 @@ function ZoneCardRow({ cards }: { cards: Card[] }) {
 /**
  * One visual home for every mission's "shared pile of cards sitting on the table doing something to the
  * fight" mechanic — missionZone (rolling buff, vengeance tally, ascending chain, banish-pile-fed zone, etc.)
- * and the beast deck (Mission 11) — replacing what used to be six different mission-specific prose banners with
- * one real, always-in-the-same-place card display, per the physical game's own dedicated "MISSION ZONE" area on
- * the playmat. Mission 7's Pilgrims no longer get their own panel here — they're a hand-trap now (see
- * GameState.pilgrimMechanic), sitting in the owning player's own hand rather than any shared zone.
+ * the separate pilgrimZone (Mission 7), and the beast deck (Mission 11) — replacing what used to be six
+ * different mission-specific prose banners with one real, always-in-the-same-place card display, per the physical
+ * game's own dedicated "MISSION ZONE" area on the playmat.
  */
 export function MissionZonePanel({ state }: { state: ClientGameState }) {
   // Mission 5's rolling zone (see GameState.rollingZoneCards) is a separate pile from the static missionZone every
@@ -58,7 +57,7 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
 
   return (
     <div className="mission-zone-panels">
-      {!showMissionZone && !state.beastDeckMechanic && (
+      {!showMissionZone && !state.beastDeckMechanic && !state.pilgrimMechanic && (
         <div className="mission-zone-panel empty">
           <div className="mission-zone-header">
             <span className="mission-zone-title">Mission Zone</span>
@@ -81,6 +80,19 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
             </div>
           )}
           {state.ascendingZone && state.zoneCommittedPlay.length > 0 && <ZoneCardRow cards={state.zoneCommittedPlay} />}
+        </div>
+      )}
+      {state.pilgrimMechanic && (state.pilgrimZone.length > 0 || state.pilgrimDeckCount > 0) && (
+        <div className="mission-zone-panel">
+          <div className="mission-zone-header">
+            <span className="mission-zone-title">🌊 Pilgrims</span>
+            <span className="mission-zone-caption">
+              {state.pilgrimZone.length > 0
+                ? `Combined strength ${state.pilgrimZone.reduce((sum, c) => sum + cardValue(c), 0)} — matching an exact play banishes one; the next kill burns that much off the reserve deck, then clears the zone.`
+                : `${state.pilgrimDeckCount} left in the pilgrim deck.`}
+            </span>
+          </div>
+          <ZoneCardRow cards={state.pilgrimZone} />
         </div>
       )}
       {state.beastDeckMechanic && (

@@ -72,6 +72,7 @@ export interface ClientToServerEvents {
   'legacy:chooseReaverSticker': (payload: { code: string; cardId: string }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   /** Mission 6's reward, confirmed live (see legacy/party.ts's MissionReward.guardianStickerChoice): permanently gives the named existing party card a bonus Guardian sticker — validated server-side against guardianStickerEligible, not trusted from the client. */
   'legacy:chooseGuardianSticker': (payload: { code: string; cardId: string }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
+  'legacy:chooseDruidSticker': (payload: { code: string; cardId: string }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   /** Loads a durable Endless Mode save by code, same shape as legacy:resume — joins the in-memory room if it's still in its post-load lobby, otherwise fetches it from storage and starts a fresh one. The host then fires room:start to actually deal into the next round (RESUME_ENDLESS_SAVE). */
   'endless:load': (payload: { code: string; name: string }, cb: (res: { ok: true; code: string; playerToken: string; playerId: string } | { ok: false; error: string }) => void) => void;
 }

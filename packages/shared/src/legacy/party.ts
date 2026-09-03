@@ -198,6 +198,17 @@ export interface MissionReward {
    * by applyReward below (there is no card to target yet without the player's own input).
    */
   reaverStickerChoice?: boolean;
+  /**
+   * Mission 7's reward, sourced (a fan reimplementation's rules doc, confirmed by John 2026-09-03): after the
+   * mission, the player picks ONE of the three eligible rank-4 cards — the 4 of Diamonds, Clubs, or Spades — to
+   * permanently gain a bonus Druid sticker (SuitedCard.secondClassDruid — see druidStickerEligible/
+   * applyDruidStickerChoice above). Like Mission 5's reaverStickerChoice and Mission 6's guardianStickerChoice,
+   * a PLAYER CHOICE, so deliberately NOT auto-applied by applyReward below (there is no card to target yet
+   * without the player's own input). Replaces the shipped version's over-grant of all 4 Druid recruits kept
+   * permanently — the source keeps only the rank-7 Druid (`recruits` carries just that one) and grants this
+   * bonus plus a corrupt-another-card step instead.
+   */
+  druidStickerChoice?: boolean;
 }
 
 /** The "Lucky 4" ranks Dual-class Stickers target — one sticker per rank, matching the physical game's 4-sticker sheets. */
@@ -317,6 +328,46 @@ export function applyGuardianStickerChoice(party: Card[], cardId: string): Card[
     if (applied || c.id !== cardId || !guardianStickerEligible(c)) return c;
     applied = true;
     return { ...c, secondClassGuardian: true };
+  });
+  return applied ? next : party;
+}
+
+/**
+ * Whether `card` is a legal target for Mission 7's post-mission Druid-sticker pick (see
+ * MissionReward.druidStickerChoice): one of the three rank-4 cards the source names — the 4 of Diamonds, Clubs,
+ * or Spades (the 4 of HEARTS is deliberately excluded, per the source) — not already carrying a special class of
+ * its own, and not already stickered with this same bonus. Exported so both RoomManager's server-side validation
+ * and the client's picker UI filter on the exact same rule.
+ */
+export function druidStickerEligible(card: Card): card is Extract<Card, { kind: 'suited' }> {
+  return (
+    card.kind === 'suited' &&
+    card.rank === '4' &&
+    ['D', 'C', 'S'].includes(card.suit) &&
+    !card.arcane &&
+    !card.reaver &&
+    !card.guardian &&
+    !card.druid &&
+    !card.chanter &&
+    !card.evergreen &&
+    !card.secondClassDruid
+  );
+}
+
+/**
+ * Applies the player's chosen target (see druidStickerEligible) for Mission 7's Druid-sticker reward —
+ * permanently gives that one card SuitedCard.secondClassDruid, the same "keeps its own suit power AND gets the
+ * bonus mechanic" shape as applyGuardianStickerChoice: the card keeps resolving its own suit power AND opens a
+ * Regrowth window when played (see engine.ts's resolveCommittedPlay's druidCards handling). A no-op (same
+ * reference) if `cardId` doesn't match an eligible card — callers should validate with druidStickerEligible
+ * first and surface an error rather than rely on this silently doing nothing.
+ */
+export function applyDruidStickerChoice(party: Card[], cardId: string): Card[] {
+  let applied = false;
+  const next = party.map((c) => {
+    if (applied || c.id !== cardId || !druidStickerEligible(c)) return c;
+    applied = true;
+    return { ...c, secondClassDruid: true };
   });
   return applied ? next : party;
 }

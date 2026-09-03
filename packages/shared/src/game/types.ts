@@ -14,8 +14,9 @@ export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '12' |
  * (instead of doubles) Clubs damage, INSPIRE draws 2 extra on Diamonds, REVIVE heals 2 extra on
  * Hearts, BULWARK reduces the enemy's attack to 0 for the fight instead of by the play's value,
  * ARCANE_SURGE doubles a Mage card's own arcane bolt, AEGIS makes a Guardian's shield hold permanently — reducing
- * the enemy's attack to 0 for the rest of the fight instead of blocking just its next attack, WELLSPRING salvages
- * 2 cards from the banish pile instead of 1 for a Druid's Regrowth, ENCORE doubles how many cards everyone
+ * the enemy's attack to 0 for the rest of the fight instead of blocking just its next attack, WELLSPRING is currently
+ * unreachable (Mission 7's sourced reward keeps only the plain rank-7 Druid, so nothing grants it — see
+ * legacy/missions.ts's Mission 7 reward and legacy/classes.ts's DRUID entry), ENCORE doubles how many cards everyone
  * draws in a Chanter's chant, and EVERGREEN is Gøran's own signature (see SuitedCard.evergreen) carried here
  * only for type-shape consistency with the other classes. Reaver has no signature ability of its own — its base
  * "Reveal and Add" (see engine.ts's startReaverPhase) already always doubles the play's damage, unconditionally.
@@ -76,8 +77,12 @@ export interface SuitedCard {
   /**
    * Legacy-only: marks a Druid card (Mission 7's new faction). Like a Mage, Reaver, or Guardian, it still
    * carries a suit for immunity bookkeeping, but its class power isn't the combined suit-power resolution —
-   * instead, playing it activates Regrowth: salvage cards back out of the banish pile and return them to the
-   * bottom of the reserve deck (see engine.ts's resolveCommittedPlay's druidCards handling).
+   * instead, playing it activates Regrowth: the WHOLE discard pile is dealt out round-robin across the table,
+   * and every player then assigns up to 4 of the cards dealt to them — one into their hand, one to the banish
+   * pile, one to the top of the reserve deck, one to the bottom — with everything unassigned returning to the
+   * discard pile (see GameState.druidWindow and engine.ts's beginRegrowth/resolveRegrowth). SOURCED (2026-09-03,
+   * a firsthand campaign playthrough report) over an earlier placeholder that just pulled the top card off the
+   * banish pile onto the bottom of the reserve deck.
    */
   druid?: boolean;
   /**
@@ -92,12 +97,13 @@ export interface SuitedCard {
    * Legacy-only: marks a Pilgrim survivor card. Two missions independently reused "Pilgrim" as flavor for
    * stranded survivors and share this one flag, each gated by its own separate GameState switch so the two never
    * collide (no mission sets both):
-   * - Mission 7 ("Tales of Rebirth"), gated by GameState.pilgrimMechanic: shuffled into the reserve deck as an
-   *   ordinary card (see Mission.extraReserveCards) and drawn normally, but the instant one lands in a hand it
-   *   becomes a permanent hand-trap for the rest of the mission — dead weight that can never be played or
-   *   discarded for any purpose, including covering defend damage or Feign Death (see engine.ts's PLAY_CARDS /
-   *   ASSIST_COMBO / DEFEND rejection checks) — until an exact-damage kill frees one for free (see
-   *   dealDamageAndCheckDefeat's exact-kill Pilgrim release).
+   * - Mission 7 ("Tales of Rebirth"), gated by GameState.pilgrimMechanic: lives in its own separate face-down
+   *   deck (GameState.pilgrimDeck), never shuffled into the reserve deck and never drawn into a hand. One flips
+   *   face-up into the shared GameState.pilgrimZone at the start of every turn (see engine.ts's flipPilgrimCard)
+   *   and piles up there until either a matching-value play banishes it for good (checkPilgrimRescue) or an
+   *   enemy dies — at which point every Pilgrim still in the zone burns that many cards off the top of the
+   *   reserve deck into the discard pile, and the whole zone is swept to the discard pile itself (see
+   *   dealDamageAndCheckDefeat's Mission 7 branch).
    * - Mission 8 ("Winds of Chaos"), gated by GameState.ascendingZone: an entirely ordinary card — playable and
    *   discardable like any other — except when placed into the ascending mission zone, where it never buffs the
    *   current enemy's attack the way a non-Pilgrim card bridging a gap does (see rules.ts's ascendingZoneAttackBuff).
@@ -125,6 +131,14 @@ export interface SuitedCard {
    * resolveCommittedPlay's guardianCards handling) — the same "second class" shape as secondClassArcane above.
    */
   secondClassGuardian?: boolean;
+  /**
+   * Legacy-only: marks a card that's picked up a bonus Druid sticker (Mission 7's sourced reward — see
+   * legacy/party.ts's applyDruidStickerChoice / legacy/missions.ts's Mission 7 entry) on top of an existing
+   * class. Unlike a pure Druid recruit's `druid` flag (which replaces suit-power resolution entirely), this
+   * card keeps resolving its normal suit power AND opens a Regrowth window when played (see engine.ts's
+   * resolveCommittedPlay's druidCards handling) — the same "second class" shape as secondClassGuardian above.
+   */
+  secondClassDruid?: boolean;
   /**
    * Legacy-only: marks a card that's picked up a bonus Reaver sticker (Mission 5's reward, a player-chosen pick —
    * see legacy/party.ts's applyReaverStickerChoice/reaverStickerEligible) on top of an existing class. Unlike a
@@ -263,6 +277,8 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
 /**
  * What the current player must do next. AWAIT_JESTER_CLAIM, AWAIT_COMBO_ASSIST, and AWAIT_AZURE_EMBLEM are
  * Legacy-only. AWAIT_ZONE_PURGE and AWAIT_CHANT_TRIM are Mission 8-only (see GameState.zonePurge / chanterWindow).
+ * AWAIT_REGROWTH is Mission 7+ only (see GameState.druidWindow) — opened by a Druid card in a play, resolved one
+ * player at a time via RESOLVE_REGROWTH.
  * AWAIT_END_OF_TURN and AWAIT_RESCUE_CHOICE are Mission 9's captured-piles mechanic only (see
  * GameState.capturedPilesActive). AWAIT_ZONE_VENGEANCE_CHOICE is Mission 6 only (see
  * GameState.zoneVengeanceChoice) — opened by a kill under zoneVengeanceOnKill, resolved via
@@ -289,6 +305,7 @@ export type TurnPhase =
   | 'AWAIT_ZONE_RELIEF_CHOICE'
   | 'AWAIT_ZONE_PURGE'
   | 'AWAIT_CHANT_TRIM'
+  | 'AWAIT_REGROWTH'
   | 'AWAIT_END_OF_TURN'
   | 'AWAIT_RESCUE_CHOICE'
   | 'AWAIT_BARD_SURRENDER'
@@ -298,8 +315,9 @@ export type TurnPhase =
   | 'AWAIT_SCARLET_WHISTLE_SOLO';
 
 /**
- * Legacy-only (Mission 8): what engine.ts's resolveChant does once the last pending player finishes trimming
- * their hand back down from an open chant window (see GameState.chanterWindow):
+ * Legacy-only: what engine.ts does once the last pending player finishes with a per-player window that deferred
+ * the rest of a play — Mission 8's chant trim (see GameState.chanterWindow / resolveChant) and Mission 7's
+ * Regrowth picks (see GameState.druidWindow / resolveRegrowth) both carry one of these:
  * - `deferredAttack` — the play that opened the chant did NOT defeat the enemy, so the play's own deferred
  *   enemy-attack-back tail (mirroring an ordinary play's resolution) still needs to run once trimming is done,
  *   honoring a Guardian shield (`blockNextAttack`) raised in the same play.
@@ -607,22 +625,32 @@ export interface GameState {
    */
   zoneReliefChoice: { attackIncludesGuardian: boolean; remaining: number } | null;
   /**
-   * Legacy-only (Mission 7): when true, gates the whole Pilgrim hand-trap rule — Pilgrim cards (see
-   * SuitedCard.pilgrim), shuffled into the reserve deck via Mission.extraReserveCards like any other card, can
-   * never be played (PLAY_CARDS, ASSIST_COMBO) or discarded (DEFEND, including Feign Death) once drawn into a
-   * hand — dead weight sitting there for the rest of the mission — and an exact-damage kill frees one for free
-   * (see dealDamageAndCheckDefeat).
+   * Legacy-only (Mission 7): when true, gates the whole Pilgrim mission-zone economy. Pilgrim cards (see
+   * SuitedCard.pilgrim) live in their own separate face-down `pilgrimDeck` below, never shuffled into the
+   * reserve deck and never drawn into a hand. At the start of every turn, the top card flips face-up into
+   * `pilgrimZone` (see engine.ts's flipPilgrimCard) and accumulates there. Two ways to fight back:
+   * - Playing a hand card whose printed value exactly matches a Pilgrim sitting in the zone permanently banishes
+   *   that Pilgrim (see checkPilgrimRescue), pulling it out of the burn total below for good.
+   * - Every enemy kill (exact or not) sums the value of every Pilgrim still in the zone and burns that many
+   *   cards off the top of the reserve deck into the discard pile, then sweeps the whole zone to the discard
+   *   pile itself, resetting the tally to zero (see dealDamageAndCheckDefeat's Mission 7 branch). An exact kill
+   *   additionally banishes the single highest-value Pilgrim in the zone first, shrinking the burn — an
+   *   unsourced judgment call (no source names a player choice here) rather than a player-chosen sacrifice,
+   *   mirroring Mission 6's own "exact kill spares the zone's highest-value card" precedent.
    *
-   * Sourced from the official compendium FAQ, replacing an earlier, unsourced shared-zone rescue/burn-on-kill
-   * economy that drained the same reserve-deck pool both hand-refill (Diamonds) and defense depend on — confirmed
-   * unwinnable in simulated play (see legacy-mission-playtest-findings). `pilgrimDeck`/`pilgrimZone` below are
-   * inert leftovers from that old economy, kept only for type/client compatibility — no mission populates them
-   * anymore, so both are always empty.
+   * REVISION (2026-09-03, live-play correction): an earlier pass replaced this with a hand-trap rule sourced
+   * from the official compendium FAQ, after this same economy (without the per-kill zone wipe below) was found
+   * to drain the reserve deck without bound and confirmed unwinnable in simulated play (see
+   * legacy-mission-playtest-findings). Fresh confirmation supersedes that FAQ reading: the zone wipe on every
+   * kill is the missing piece that bounds the burn (it can never exceed however many turns have passed since
+   * the last kill), so the mechanic is restored here in this corrected, bounded form. The hand-trap version's
+   * PLAY_CARDS/ASSIST_COMBO/DEFEND rejections and Feign-Death block are removed — Pilgrims can no longer reach a
+   * hand at all under this rule, so those checks would never fire.
    */
   pilgrimMechanic: boolean;
-  /** Vestigial (see GameState.pilgrimMechanic) — no mission populates this anymore; always empty. Kept only so GameAction's pilgrimCards / ClientGameState's pilgrimDeckCount stay type-compatible for any future mission. */
+  /** Legacy-only (Mission 7): the face-down Pilgrim deck — see GameState.pilgrimMechanic. */
   pilgrimDeck: Card[];
-  /** Vestigial (see GameState.pilgrimMechanic) — no mission populates this anymore; always empty. Kept only so ClientGameState's pilgrimZone stays type-compatible for any future mission. */
+  /** Legacy-only (Mission 7): the shared face-up Pilgrim zone — see GameState.pilgrimMechanic. */
   pilgrimZone: Card[];
   /**
    * Legacy-only (Mission 8): when true, the mission zone builds an ascending 1-through-10 chain instead of any
@@ -681,6 +709,16 @@ export interface GameState {
    * the queue first. `onResolved` — see ChanterResolution — carries what to do once the last trim resolves.
    */
   chanterWindow: { pendingPlayerIds: string[]; onResolved: ChanterResolution } | null;
+  /**
+   * Legacy-only (Mission 7+): the open Regrowth window, opened when a Druid card is played (see
+   * SuitedCard.druid). The whole discard pile has already been dealt out round-robin across the table into
+   * `dealt` (keyed by player id); `pendingPlayerIds` queues every player who still owes their picks via
+   * RESOLVE_REGROWTH, front of the queue first. Each player assigns up to 4 of their own dealt cards, one
+   * per destination — hand, banish pile, top of the reserve deck, bottom of the reserve deck — and whatever
+   * they don't assign returns to the discard pile. `onResolved` (see ChanterResolution) carries what to do
+   * once the last player's picks resolve, exactly as for `chanterWindow` above.
+   */
+  druidWindow: { pendingPlayerIds: string[]; dealt: Record<string, Card[]>; onResolved: ChanterResolution } | null;
   /**
    * Legacy-only (Mission 9): when true, gates the whole captured-piles deckbuilding mechanic — the 3
    * `capturedPiles`, the AWAIT_END_OF_TURN banish-to-rescue/decline choice at the end of every turn (skipped
@@ -837,7 +875,7 @@ export type GameAction =
       zoneVengeanceOnKill?: boolean;
       /** See GameState.pilgrimMechanic. */
       pilgrimMechanic?: boolean;
-      /** Vestigial (see GameState.pilgrimMechanic) — Pilgrim cards are seeded via extraReserveCards now, not this. No mission sets it anymore. */
+      /** The face-down Pilgrim deck's starting contents — see GameState.pilgrimMechanic/pilgrimDeck. */
       pilgrimCards?: Card[];
       /** See GameState.ascendingZone. */
       ascendingZone?: boolean;
@@ -903,6 +941,20 @@ export type GameAction =
    * over it.
    */
   | { type: 'RESOLVE_CHANT'; playerId: string; discardCardIds: string[] }
+  /**
+   * Legacy-only (Mission 7+): the front-of-queue player in an open Regrowth window (see GameState.druidWindow)
+   * assigns their dealt cards, at most one per destination. Every field is optional so a player dealt fewer than
+   * 4 cards can still resolve (they must assign exactly as many as they were dealt — see engine.ts's
+   * resolveRegrowth); every id given must be among that player's own dealt cards, and no card may be named twice.
+   */
+  | {
+      type: 'RESOLVE_REGROWTH';
+      playerId: string;
+      toHandCardId?: string;
+      toBanishCardId?: string;
+      toDeckTopCardId?: string;
+      toDeckBottomCardId?: string;
+    }
   | { type: 'ACTIVATE_JESTER'; playerId: string; cardId: string; nextPlayerId: string }
   /** Legacy-only equivalent of ACTIVATE_JESTER: plays the Jester into the open claim window instead of choosing who goes next. */
   | { type: 'PLAY_JESTER'; playerId: string; cardId: string }
@@ -1134,9 +1186,9 @@ export interface ClientGameState {
   zoneReliefChoice: { attackIncludesGuardian: boolean; remaining: number } | null;
   /** See GameState.pilgrimMechanic. */
   pilgrimMechanic: boolean;
-  /** Vestigial (see GameState.pilgrimMechanic) — always empty now; a Pilgrim card sits in the owning player's own (redacted) hand instead of any shared zone. */
+  /** See GameState.pilgrimZone. Public information — it's on the table. */
   pilgrimZone: Card[];
-  /** Vestigial (see GameState.pilgrimMechanic) — always 0 now. */
+  /** Count only — the face-down Pilgrim deck's remaining contents aren't public. */
   pilgrimDeckCount: number;
   /** See GameState.ascendingZone. */
   ascendingZone: boolean;
@@ -1150,6 +1202,8 @@ export interface ClientGameState {
   zonePurge: { playerId: string } | null;
   /** See GameState.chanterWindow. Public information — it's on the table. */
   chanterWindow: { pendingPlayerIds: string[]; onResolved: ChanterResolution } | null;
+  /** See GameState.druidWindow. Public information — the dealt cards are face-up on the table. */
+  druidWindow: { pendingPlayerIds: string[]; dealt: Record<string, Card[]>; onResolved: ChanterResolution } | null;
   /** See GameState.capturedPilesActive. */
   capturedPilesActive: boolean;
   /** See GameState.capturedPiles — each pile's face-down cards are redacted to a count, its face-up card is public. */
