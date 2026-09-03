@@ -472,7 +472,10 @@ export const MISSIONS: Mission[] = [
       'the party passes on the way in is already empty — mutated, fused, and waiting past the next door.',
     // Standard 4-4-4 escalating lineup (one of each class per tier), like the Castle deck's own J/Q/K structure,
     // but every enemy here is an "Experiment" first and a class-immunity second.
-    enemies: [
+    // Card faces: S for Specimen — every enemy here is one, across all three tiers (see EnemyState.rankLabel).
+    // Deliberately NOT J/Q/K despite the same 4/4/4 tier shape as Mission 7: these are lab specimens, and the
+    // tier is already spelled out in each one's own name (10-/15-/20-).
+    enemies: rankLabel('S', [
       enemy('Specimen 10-C: The Clawmass', 'WARRIOR', 20, 10),
       enemy('Specimen 10-D: The Featherwrong', 'BARD', 20, 10),
       enemy('Specimen 10-H: The Bloodbloom', 'CLERIC', 20, 10),
@@ -485,7 +488,7 @@ export const MISSIONS: Mission[] = [
       enemy('Specimen 20-D: The Discord Wing', 'BARD', 40, 20),
       enemy('Specimen 20-H: The Hollow Mercy', 'CLERIC', 40, 20),
       enemy('Specimen 20-S: The Cage-Breaker', 'PALADIN', 40, 20),
-    ],
+    ]),
     // The mission's key mechanic: whatever card currently sits on top of the discard pile adds its value
     // straight onto the active experiment's attack, recalculated live all the way through the turn — a Cleric
     // heal reshuffling the pile mid-turn can change the number before it's even resolved.
@@ -564,15 +567,21 @@ export const MISSIONS: Mission[] = [
     // Bard, Cleric, Paladin within each tier) is just this list's own fixed declaration order, not a sourced fight
     // order — randomizeEnemyTierOrder (below) reshuffles each tier's 4 classes independently every attempt, while
     // still guaranteeing all 4 weak-tier Sporelings fall before any strong-tier Gloom Spore (John's call).
+    // Card faces: S for the Sporelings, G for the Gloom Spores (see EnemyState.rankLabel) — one letter per tier,
+    // same shape as Mission 8's trolls-then-wyverns.
     enemies: [
-      enemy('Sporeling Choker', 'WARRIOR', 40, 10),
-      enemy('Sporeling Piper', 'BARD', 40, 10),
-      enemy('Sporeling Wailer', 'CLERIC', 40, 10),
-      enemy('Sporeling Bulwark', 'PALADIN', 40, 10),
-      enemy('Gloom Spore Choker', 'WARRIOR', 60, 15),
-      enemy('Gloom Spore Piper', 'BARD', 60, 15),
-      enemy('Gloom Spore Wailer', 'CLERIC', 60, 15),
-      enemy('Gloom Spore Bulwark', 'PALADIN', 60, 15),
+      ...rankLabel('S', [
+        enemy('Sporeling Choker', 'WARRIOR', 40, 10),
+        enemy('Sporeling Piper', 'BARD', 40, 10),
+        enemy('Sporeling Wailer', 'CLERIC', 40, 10),
+        enemy('Sporeling Bulwark', 'PALADIN', 40, 10),
+      ]),
+      ...rankLabel('G', [
+        enemy('Gloom Spore Choker', 'WARRIOR', 60, 15),
+        enemy('Gloom Spore Piper', 'BARD', 60, 15),
+        enemy('Gloom Spore Wailer', 'CLERIC', 60, 15),
+        enemy('Gloom Spore Bulwark', 'PALADIN', 60, 15),
+      ]),
     ],
     // Myla (value 7) starts this fight seeded into the BANISH pile, per the newer sourced transcript ("her 7
     // Strength card starts in the banish pile and immediately slides into the Mission Zone... a passive force
@@ -672,15 +681,20 @@ export const MISSIONS: Mission[] = [
       "feed something in her, and she does not forgive the debt quietly.",
     // 4-4 escalating lineup of animated statues, one tier heavier than Mission 5's — the mission's real danger
     // is Myla's ever-growing zone strike, not raw enemy stats.
+    // Card faces: S for the Statues, G for the Graven (see EnemyState.rankLabel) — one letter per tier.
     enemies: [
-      enemy('Statue Warden', 'WARRIOR', 30, 15),
-      enemy('Statue Cantor', 'BARD', 30, 15),
-      enemy('Statue Penitent', 'CLERIC', 30, 15),
-      enemy('Statue Sentinel', 'PALADIN', 30, 15),
-      enemy('Graven Warden', 'WARRIOR', 40, 20),
-      enemy('Graven Cantor', 'BARD', 40, 20),
-      enemy('Graven Penitent', 'CLERIC', 40, 20),
-      enemy('Graven Sentinel', 'PALADIN', 40, 20),
+      ...rankLabel('S', [
+        enemy('Statue Warden', 'WARRIOR', 30, 15),
+        enemy('Statue Cantor', 'BARD', 30, 15),
+        enemy('Statue Penitent', 'CLERIC', 30, 15),
+        enemy('Statue Sentinel', 'PALADIN', 30, 15),
+      ]),
+      ...rankLabel('G', [
+        enemy('Graven Warden', 'WARRIOR', 40, 20),
+        enemy('Graven Cantor', 'BARD', 40, 20),
+        enemy('Graven Penitent', 'CLERIC', 40, 20),
+        enemy('Graven Sentinel', 'PALADIN', 40, 20),
+      ]),
     ],
     // Myla (value 7) is stripped from the party and placed in the mission zone at the start — same static seed
     // as Mission 5's presetMissionZone, but this time nothing keeps the zone fixed: zoneVengeanceOnKill grows
@@ -978,16 +992,20 @@ export const MISSIONS: Mission[] = [
     // "Lorekeeper: Myla's Chosen" enemy the code's own prior comment admitted was invented as "a preview of the
     // boss to come" — removed. The other 9 enemies' names/stats (including Myla's own Bard+Paladin = Diamonds+
     // Spades immunity) were already correct and are unchanged.
+    // Card faces: L for both Lore tiers — Loreguard and Lorekeeper are the same order, so they share a letter
+    // rather than splitting onto two (see EnemyState.rankLabel). Myla, the named boss, takes M.
     enemies: [
-      enemy('Loreguard: Ember-Wrought', 'WARRIOR', 30, 15),
-      enemy('Loreguard: Cinder-Tongue', 'BARD', 30, 15),
-      enemy('Loreguard: Ashbound', 'CLERIC', 30, 15),
-      enemy('Loreguard: Soot-Ward', 'PALADIN', 30, 15),
-      enemy('Lorekeeper: Emberclaw', 'WARRIOR', 40, 20),
-      enemy('Lorekeeper: Smoke-Herald', 'BARD', 40, 20),
-      enemy('Lorekeeper: Pyre-Anointed', 'CLERIC', 40, 20),
-      enemy('Lorekeeper: Blaze-Warden', 'PALADIN', 40, 20),
-      enemy('Myla', 'BARD', 80, 20, 'PALADIN'),
+      ...rankLabel('L', [
+        enemy('Loreguard: Ember-Wrought', 'WARRIOR', 30, 15),
+        enemy('Loreguard: Cinder-Tongue', 'BARD', 30, 15),
+        enemy('Loreguard: Ashbound', 'CLERIC', 30, 15),
+        enemy('Loreguard: Soot-Ward', 'PALADIN', 30, 15),
+        enemy('Lorekeeper: Emberclaw', 'WARRIOR', 40, 20),
+        enemy('Lorekeeper: Smoke-Herald', 'BARD', 40, 20),
+        enemy('Lorekeeper: Pyre-Anointed', 'CLERIC', 40, 20),
+        enemy('Lorekeeper: Blaze-Warden', 'PALADIN', 40, 20),
+      ]),
+      ...rankLabel('M', [enemy('Myla', 'BARD', 80, 20, 'PALADIN')]),
     ],
     // The captured-piles deckbuilding mechanic: party cards are split into 3 face-down piles (top card revealed)
     // instead of joining the reserve deck. At the end of every turn (skipped entirely after a kill), banish a
@@ -1149,12 +1167,16 @@ export const MISSIONS: Mission[] = [
     // are) — one mook per base class (matching every other mission's own convention) and a single, non-dual-immune
     // class on the boss are both unsourced judgment calls, deliberately kept simple so the roster fix isn't
     // quietly undone by an invented immunity stack.
+    // Card faces: W for the Wardens, and G for Evil Goran — the same letter his own party card shows (see
+    // PlayingCard's tieredRankLabel), which reads as the point of the fight.
     enemies: [
-      enemy('Warden of the Depths: Ashclad', 'WARRIOR', 30, 10),
-      enemy('Warden of the Depths: Bellsong', 'BARD', 30, 10),
-      enemy('Warden of the Depths: Hollowmourn', 'CLERIC', 30, 10),
-      enemy('Warden of the Depths: Ironvow', 'PALADIN', 30, 10),
-      enemy('Evil Goran', 'PALADIN', 90, 20),
+      ...rankLabel('W', [
+        enemy('Warden of the Depths: Ashclad', 'WARRIOR', 30, 10),
+        enemy('Warden of the Depths: Bellsong', 'BARD', 30, 10),
+        enemy('Warden of the Depths: Hollowmourn', 'CLERIC', 30, 10),
+        enemy('Warden of the Depths: Ironvow', 'PALADIN', 30, 10),
+      ]),
+      ...rankLabel('G', [enemy('Evil Goran', 'PALADIN', 90, 20)]),
     ],
     // Sourced correction: the source names a specific card pulled from the party for this mission entirely — Esme,
     // the 6 of Clubs (see party.ts's STARTING_NAMES, renamed from the placeholder "Ulra Bloodfang" — a name never
@@ -1238,16 +1260,22 @@ export const MISSIONS: Mission[] = [
     // (see flipBanishPileZoneCard's own doc comment and test coverage) rather than just remove an unsourced
     // invention. If a future playtest pass finds Mission 12 needs the same treatment, add it then with real
     // numbers behind it, the same way Mission 3's second pass was justified.
+    // Card faces: the clearest case in the campaign — these enemies are literally named Queens and Kings, so
+    // they take Q and K, and the final boss takes H for Hierarch (see EnemyState.rankLabel).
     enemies: [
-      enemy('Queen of Ash', 'WARRIOR', 30, 15),
-      enemy('Queen of Silence', 'BARD', 30, 15),
-      enemy('Queen of Ruin', 'CLERIC', 30, 15),
-      enemy('Queen of Thorns', 'PALADIN', 30, 15),
-      enemy('King of Ash', 'WARRIOR', 40, 20),
-      enemy('King of Silence', 'BARD', 40, 20),
-      enemy('King of Ruin', 'CLERIC', 40, 20),
-      enemy('King of Thorns', 'PALADIN', 40, 20),
-      enemy('The Hierarch', 'CLERIC', 120, 30),
+      ...rankLabel('Q', [
+        enemy('Queen of Ash', 'WARRIOR', 30, 15),
+        enemy('Queen of Silence', 'BARD', 30, 15),
+        enemy('Queen of Ruin', 'CLERIC', 30, 15),
+        enemy('Queen of Thorns', 'PALADIN', 30, 15),
+      ]),
+      ...rankLabel('K', [
+        enemy('King of Ash', 'WARRIOR', 40, 20),
+        enemy('King of Silence', 'BARD', 40, 20),
+        enemy('King of Ruin', 'CLERIC', 40, 20),
+        enemy('King of Thorns', 'PALADIN', 40, 20),
+      ]),
+      ...rankLabel('H', [enemy('The Hierarch', 'CLERIC', 120, 30)]),
     ],
     // The mission's whole mechanic, gating the restored/corrupted-card bundle (see GameState.restoredCardMechanic):
     // a previous relic gets swapped for an upgraded version this mission — restored cards ignore enemy immunity
