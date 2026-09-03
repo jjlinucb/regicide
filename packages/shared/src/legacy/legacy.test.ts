@@ -3685,6 +3685,35 @@ describe('legacy: enemy card-face letters (EnemyState.rankLabel)', () => {
     expect(letters(2)).toEqual(['H', 'H', 'H', 'H', 'H', 'H']);
   });
 
+  it('pins the whole campaign\'s letter map, so a new mission has to make a deliberate choice', () => {
+    // Distinct letters per mission, in fight order. Two missions are deliberately absent: Mission 1 and Mission
+    // 10 field no explicit enemy() entries at all — Mission 1 sets standardCastle (the real J/Q/K royal court,
+    // already lettered natively), and Mission 10 builds its enemies from the party's own corrupted cards at
+    // runtime (see deck.ts's buildCorruptedPartyEnemies), so neither is reachable from mission data.
+    const map = MISSIONS.map((m) => [m.id, [...new Set(m.enemies.map((e) => e.rankLabel ?? '-'))].join('')]);
+    expect(map).toEqual([
+      [1, ''], // standardCastle — no explicit enemies
+      [2, 'H'], // hydra brood
+      [3, '-'], // academy staff/familiars — no letter chosen yet
+      [4, 'S'], // Specimens, all three tiers
+      [5, 'SG'], // Sporelings, Gloom Spores
+      [6, 'SG'], // Statues, Graven
+      [7, 'JQK'], // the campaign's royal equivalents
+      [8, 'TD'], // Trolls, (dragon-kin) wyverns
+      [9, 'LM'], // Loreguard/Lorekeeper, then Myla
+      [10, ''], // corrupted party enemies, built at runtime
+      [11, 'WG'], // Wardens, then Evil Goran
+      [12, 'QKH'], // literal Queens and Kings, then the Hierarch
+    ]);
+  });
+
+  it('letters each boss with its own initial rather than reusing its tier letter', () => {
+    const named = (id: number, name: string) => getMission(id)!.enemies.find((e) => e.name === name)?.rankLabel;
+    expect(named(9, 'Myla')).toBe('M');
+    expect(named(11, 'Evil Goran')).toBe('G'); // matches the letter his own party card shows
+    expect(named(12, 'The Hierarch')).toBe('H');
+  });
+
   it("letters Mission 8's trolls T and its wyverns D", () => {
     expect(letters(8)).toEqual(['T', 'T', 'T', 'T', 'T', 'T', 'D', 'D', 'D', 'D', 'D', 'D']);
     const m8 = getMission(8)!.enemies;
@@ -3707,10 +3736,11 @@ describe('legacy: enemy card-face letters (EnemyState.rankLabel)', () => {
     expect(state.currentEnemy?.rankLabel).toBe('J'); // first Schole-tier enemy
     expect(state.currentEnemy?.rank).toBe('J'); // the inert placeholder is untouched
 
-    // A mission with no letters assigned yet still starts fine — rankLabel is simply absent, and the card face
-    // falls back to the placeholder. (Mission 1 isn't a valid case to check: it sets standardCastle, so it
-    // fights the real J/Q/K royal court and already shows those letters natively.)
-    const mission5 = getMission(5)!;
+    // A mission with no letters assigned still starts fine — rankLabel is simply absent and the card face falls
+    // back to the placeholder. Mission 3 is the only such mission left (its academy staff/familiars have no
+    // agreed letter yet); Mission 1 isn't a valid case, since standardCastle means it fights the real J/Q/K
+    // royal court and already shows those letters natively.
+    const mission3 = getMission(3)!;
     const plain = ensureOk(
       applyAction(createLobbyState(), {
         type: 'START_LEGACY_MISSION',
@@ -3718,11 +3748,11 @@ describe('legacy: enemy card-face letters (EnemyState.rankLabel)', () => {
         playerNames: ['Player 0'],
         seed: 'rank-label-absent',
         party: buildInitialParty(),
-        enemies: missionEnemiesToSpecs(mission5.enemies),
+        enemies: missionEnemiesToSpecs(mission3.enemies),
         jesterCount: 0,
       }),
     ).state;
-    expect(mission5.enemies.every((e) => e.rankLabel === undefined)).toBe(true);
+    expect(mission3.enemies.every((e) => e.rankLabel === undefined)).toBe(true);
     expect(plain.currentEnemy?.rankLabel).toBeUndefined();
   });
 });
