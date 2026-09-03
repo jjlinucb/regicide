@@ -916,11 +916,26 @@ button {
   color: var(--heart);
 }
 
-.playing-card .second-class-glyph {
+/* Bonus class icons stack down the card's right edge. A card can carry more than one (see
+   SuitedCard.extraSuits — Gøran ends the campaign with three suits), so they're laid out in a flow container
+   instead of each being pinned to the same absolute top/right, which drew them on top of each other. */
+.playing-card .second-class-stack {
   position: absolute;
-  top: 6px;
-  right: 8px;
-  font-size: 1rem;
+  top: 5px;
+  right: 7px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  line-height: 1;
+}
+
+/* Selector is deliberately one level deeper than `.playing-card .glyph` so it also wins inside the wider-screen
+   media query below, which bumps that glyph to 2.1rem — the bonus icons were silently inheriting that size and
+   rendering as large as the card's own printed suit. Sized so a full stack of four still clears the card name. */
+.playing-card .second-class-stack .second-class-glyph {
+  font-size: 0.95rem;
+  line-height: 1;
 }
 
 .playing-card.blocked {

@@ -36,9 +36,14 @@ export function isCompanionCard(card: Card): boolean {
   return isAnimalCompanion(card) || isBeastCompanion(card);
 }
 
-/** A card's class suit(s) — two for a Dual-class Stickers card (see SuitedCard.secondSuit), one otherwise. */
+/**
+ * A card's class suit(s) — one normally, two for a Dual-class Stickers card (see SuitedCard.secondSuit), and
+ * more for a card accumulating icons mission by mission (see SuitedCard.extraSuits — Gøran is the only one).
+ * De-duplicated, so re-granting a suit the card already carries can never double-resolve its power.
+ */
 export function cardSuits(card: Extract<Card, { kind: 'suited' }>): Suit[] {
-  return card.secondSuit ? [card.suit, card.secondSuit] : [card.suit];
+  if (!card.secondSuit && !card.extraSuits?.length) return [card.suit];
+  return [...new Set([card.suit, ...(card.secondSuit ? [card.secondSuit] : []), ...(card.extraSuits ?? [])])];
 }
 
 /** Ranks a card can satisfy for combo-matching: its own printed rank, plus a Mercenary "2/5"'s flagged alternate (see SuitedCard.flexibleComboRank). */

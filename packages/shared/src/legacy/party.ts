@@ -1,4 +1,5 @@
 import { buildStandardPartyCards, shuffle } from '../game/deck.js';
+import { cardSuits } from '../game/rules.js';
 import type { Card, Rank, Suit } from '../game/types.js';
 import type { ClassId } from './classes.js';
 import { CLASS_THEME, SUIT_TO_CLASS } from './classes.js';
@@ -179,6 +180,14 @@ export interface MissionReward {
    */
   secondSuitByName?: { name: string; suit: Suit };
   /**
+   * Mission 7's reward (confirmed by John 2026-09-03, and matching the chain the Mission 8 entry already
+   * documents): appends a further class icon to the existing party member matching this NAME, on top of whatever
+   * it already carries (see applyExtraSuitByName / SuitedCard.extraSuits). Used for Gøran's third suit — Hearts
+   * (Cleric), after Clubs at Mission 5 and Spades at Mission 6. Distinct from `secondSuitByName` above, which
+   * SETS the single `secondSuit` slot and would overwrite Mission 6's grant rather than adding to it.
+   */
+  extraSuitByName?: { name: string; suit: Suit };
+  /**
    * Mission 5's reward, sourced correction (live playthrough, 2026-09-02): Goran (recruited by Mission 4's own
    * reward as an inert rank-8 card — see RecruitSpec.noSuitPower and this mission's own recruit entry) has his
    * class power switched ON here for the first time, with Clubs (Warrior) as the suit that resolves — NOT granted
@@ -337,6 +346,24 @@ export function applyGuardianStickerChoice(party: Card[], cardId: string): Card[
     if (applied || c.id !== cardId || !guardianStickerEligible(c)) return c;
     applied = true;
     return { ...c, secondClassGuardian: true };
+  });
+  return applied ? next : party;
+}
+
+/**
+ * Mission 7's reward (see MissionReward.extraSuitByName's doc): finds the existing party member matching
+ * `target.name` and appends `target.suit` to SuitedCard.extraSuits, keeping every icon it already carries. A
+ * no-op (same reference) if `target` is unset, no matching card is found, or that card already resolves this
+ * suit — so re-running a reward can't stack a duplicate.
+ */
+export function applyExtraSuitByName(party: Card[], target?: { name: string; suit: Suit }): Card[] {
+  if (!target) return party;
+  let applied = false;
+  const next = party.map((c) => {
+    if (applied || c.kind !== 'suited' || c.name !== target.name) return c;
+    if (cardSuits(c).includes(target.suit)) return c;
+    applied = true;
+    return { ...c, extraSuits: [...(c.extraSuits ?? []), target.suit] };
   });
   return applied ? next : party;
 }
@@ -513,6 +540,7 @@ export function applyReward(party: Card[], reward: MissionReward, rng: () => num
   if (reward.upgradeSidelinedCard) next = applyEvergreenUpgrade(next, reward.upgradeSidelinedCard);
   if (reward.upgradeEvergreenCard) next = applyEvergreenUpgradeByName(next, reward.upgradeEvergreenCard);
   if (reward.secondSuitByName) next = applySecondSuitByName(next, reward.secondSuitByName);
+  if (reward.extraSuitByName) next = applyExtraSuitByName(next, reward.extraSuitByName);
   if (reward.suitByName) next = applySuitByName(next, reward.suitByName);
   return next;
 }

@@ -771,12 +771,19 @@ export const MISSIONS: Mission[] = [
     // one to the bottom — with the rest returning to the discard pile (see GameState.druidWindow). Plus a bonus
     // Druid sticker the player picks for one of the 4♦/4♣/4♠ (see MissionReward.druidStickerChoice), and another
     // corrupt-another-card step.
+    //
+    // Gøran also picks up Hearts (Cleric) here as a THIRD suit (confirmed by John 2026-09-03) — on top of Clubs
+    // from Mission 5 and Spades from Mission 6, leaving him resolving three class powers on every play. Uses
+    // `extraSuitByName` rather than `secondSuitByName`, which would overwrite Mission 6's Spades instead of
+    // adding to it (see MissionReward.extraSuitByName / SuitedCard.extraSuits). Mission 8's own Diamonds step
+    // would complete the set — still unimplemented, see that mission's reward comment.
     standingJesters: true,
     sidelineHighArcana: true,
     reward: {
       recruits: [recruit('Alanta', 'DRUID', '7', 'C')],
       druidStickerChoice: true,
       corruptAnotherCard: true,
+      extraSuitByName: { name: 'Goran', suit: 'H' },
     },
   },
   {
@@ -890,9 +897,14 @@ export const MISSIONS: Mission[] = [
     //    extraReserveCards/presetMissionZone entries that never persist into the campaign party or any later
     //    mission's data to begin with (missions.ts has no cross-mission "pilgrim deck" state at all) — there's
     //    nothing left to remove that wasn't already gone by construction, so no code change was needed here.
-    //  - "Add the Diamonds suit to Goran" — NOT implemented here. The source's actual chain is: Mission 4 recruits
-    //    Goran (rank 8, no suit revealed yet), Mission 7 adds him a Hearts suit, and this mission adds him a second,
-    //    Diamonds suit on top (a Dual-class-Stickers-style secondSuit). A prior pass, working before a fuller
+    //  - "Add the Diamonds suit to Goran" — STILL NOT implemented here, though the rest of the chain now is. The
+    //    source's chain is: Mission 4 recruits Goran (rank 8, no suit revealed yet), then a suit per mission —
+    //    Clubs at 5, Spades at 6, Hearts at 7 (all three now implemented, the last via
+    //    MissionReward.extraSuitByName), and Diamonds HERE, which would complete all four right before Mission 9
+    //    makes him Evergreen. Adding it is now a one-line `extraSuitByName: { name: 'Goran', suit: 'D' }` on this
+    //    mission's reward — the field and its SuitedCard.extraSuits list already exist and already scale past two
+    //    suits — left unimplemented only because no live play has confirmed this specific step. A prior pass,
+    //    working before a fuller
     //    solo playthrough existed to confirm Mission 4's own ending recruits him, had already shipped Mission 4 (and
     //    the already-merged Mission 7 rework, out of scope for this pass) without him — as a stopgap, THIS mission
     //    was made his first recruitment instead (Spades/Paladin, both unsourced judgment calls — see Mission 4's
