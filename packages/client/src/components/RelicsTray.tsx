@@ -1,7 +1,10 @@
 import type { ClientGameState } from '@regicide/shared';
 
+// The Kinfolk Flute took the feather glyph before the Druid class existed; the Druid's own card is a feather in
+// the physical game (see legacy/classes.ts's DRUID), so the flute gets an actual flute and the feather is the
+// Druid's alone.
 const RELIC_INFO: Record<string, { glyph: string; name: string }> = {
-  KINFOLK_FLUTE: { glyph: '🪶', name: 'Kinfolk Flute' },
+  KINFOLK_FLUTE: { glyph: '🪈', name: 'Kinfolk Flute' },
   SCARLET_WHISTLE: { glyph: '🎗️', name: 'Scarlet Whistle' },
   AZURE_EMBLEM: { glyph: '🔷', name: 'Azure Emblem' },
   EVERGREEN_MOTHER: { glyph: '🌲', name: 'Evergreen Mother' },

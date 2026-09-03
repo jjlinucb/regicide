@@ -88,7 +88,7 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
             <span className="mission-zone-title">🌊 Pilgrims</span>
             <span className="mission-zone-caption">
               {state.pilgrimZone.length > 0
-                ? `Combined strength ${state.pilgrimZone.reduce((sum, c) => sum + cardValue(c), 0)} — matching an exact play banishes one; the next kill burns that much off the reserve deck, then clears the zone.`
+                ? `Combined strength ${state.pilgrimZone.reduce((sum, c) => sum + cardValue(c), 0)} — every card you play banishes a Pilgrim of the same value; the next kill burns whatever is left off the reserve deck, then clears the zone.`
                 : `${state.pilgrimDeckCount} left in the pilgrim deck.`}
             </span>
           </div>

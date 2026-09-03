@@ -119,7 +119,10 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     id: 'DRUID',
     name: 'Druid',
     tag: 'Regrowth',
-    glyph: '🌱',
+    // A feather, not a sprout: the firsthand playthrough report this class's power is sourced from calls it
+    // exactly that ("the feather power, officially called druid"), so the card face should read the way the
+    // physical card does.
+    glyph: '🪶',
     color: '#4a7c3f',
     specialAbility: 'WELLSPRING',
     specialName: 'Wellspring',
