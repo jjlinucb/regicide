@@ -2657,19 +2657,29 @@ describe('legacy: bonus Guardian sticker (secondClassGuardian — Mission 6\'s p
     expect(res.state.turnPhase).toBe('AWAIT_PLAY'); // the shield blocked the enemy's attack — no damage suffered
   });
 
-  it('guardianStickerEligible restricts to rank 8, excluding anything already special or already stickered — any suit qualifies', () => {
-    expect(guardianStickerEligible(suited('S', '8'))).toBe(true); // Paladin
-    expect(guardianStickerEligible(suited('C', '8'))).toBe(true); // Warrior — unlike the Reaver sticker, not excluded
+  it('guardianStickerEligible restricts to rank 8 and never a Paladin, excluding anything already special or already stickered', () => {
+    expect(guardianStickerEligible(suited('C', '8'))).toBe(true); // Warrior
     expect(guardianStickerEligible(suited('D', '8'))).toBe(true); // Bard
     expect(guardianStickerEligible(suited('H', '8'))).toBe(true); // Cleric
-    expect(guardianStickerEligible(suited('S', '7'))).toBe(false); // wrong rank
-    expect(guardianStickerEligible({ ...suited('S', '8'), guardian: true })).toBe(false); // already a primary special class
-    expect(guardianStickerEligible({ ...suited('S', '8'), secondClassGuardian: true })).toBe(false); // already stickered
+    // Sourced correction (2026-09-03): a Paladin is NOT a legal target — the Guardian shares the Paladin's grey
+    // colour family, the same way the Reaver excludes Warrior and the Druid excludes Cleric.
+    expect(guardianStickerEligible(suited('S', '8'))).toBe(false);
+    expect(guardianStickerEligible(suited('C', '7'))).toBe(false); // wrong rank
+    expect(guardianStickerEligible({ ...suited('C', '8'), guardian: true })).toBe(false); // already a primary special class
+    expect(guardianStickerEligible({ ...suited('C', '8'), secondClassGuardian: true })).toBe(false); // already stickered
+  });
+
+  it('each bonus-class sticker excludes the base class it shares a colour family with', () => {
+    // One place asserting the whole pattern, so a future change to any single rule has to face it (see
+    // CLASS_THEME's colour-family note and party.ts's guardianStickerEligible doc).
+    expect(reaverStickerEligible(suited('C', '6'))).toBe(false); // Reaver is black — never a Warrior
+    expect(guardianStickerEligible(suited('S', '8'))).toBe(false); // Guardian is grey — never a Paladin
+    expect(druidStickerEligible(suited('H', '4'))).toBe(false); // Druid is red — never a Cleric
   });
 
   it('applyGuardianStickerChoice applies the sticker to exactly the chosen card, and is a no-op for an ineligible id', () => {
-    const target = suited('S', '8');
-    const party = [target, suited('C', '8'), suited('H', '3')];
+    const target = suited('C', '8');
+    const party = [target, suited('D', '8'), suited('H', '3')];
 
     const next = applyGuardianStickerChoice(party, target.id);
     const stickered = next.find((c) => c.id === target.id);
