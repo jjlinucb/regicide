@@ -3656,25 +3656,84 @@ describe('legacy: mission 8 placement gating (zoneOpenForPlacement)', () => {
   });
 });
 
+describe('legacy: mission 8 ascending run — several placements can share one window', () => {
+  it("places 2, 3 and 4 in a single window from one enemy's accumulated table pile", () => {
+    // Confirmed correct by John (2026-09-03). The placement window stays open until the turn actually moves on,
+    // and the pool is the defeated enemy's WHOLE table pile — every card played against it while wearing it
+    // down, not just the killing blow — so one kill can walk the chain up several steps at once. Untested until
+    // now, and a neighbouring comment used to assert the opposite (see the wave-math describe below).
+    const puppy: Card = { id: 'puppy', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true };
+    // Immune to its own suit ('H'), so the Diamond cards below always land. Health 9 = 2+3+4, so the 4 is a
+    // clean exact kill and all three cards are sitting on its table by then. Attack 0 keeps the turns simple.
+    const troll: LegacyEnemySpec = { name: 'Troll', suit: 'H', health: 9, attack: 0 };
+    const trailer: LegacyEnemySpec = { name: 'Trailer', suit: 'H', health: 100, attack: 0 };
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'multi-placement-test',
+      party: buildInitialParty(),
+      enemies: [troll, trailer],
+      jesterCount: 0,
+      ascendingZone: true,
+      presetMissionZone: [puppy],
+    });
+    let state = ensureOk(res).state;
+
+    // Wear the Troll down over three turns so its table pile accumulates a 2, a 3 and a 4.
+    const chain: SuitedCard[] = (['2', '3', '4'] as const).map((rank) => ({
+      id: `chain-${rank}`,
+      kind: 'suited' as const,
+      suit: 'D' as const,
+      rank,
+      pilgrim: true, // Pilgrims never buff the enemy while they sit in the zone
+    }));
+    for (const card of chain) {
+      state = rig(state, [card]);
+      state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [card.id] })).state;
+    }
+
+    // The 4 killed it, and all three cards it soaked are now available at no extra cost.
+    expect(state.currentEnemy?.name).toBe('Trailer');
+    expect(state.zoneOpenForPlacement).toBe(true);
+    expect(state.zoneCommittedPlay.map((c) => c.id).sort()).toEqual(['chain-2', 'chain-3', 'chain-4']);
+
+    // Three placements, one after another, all inside this single window.
+    for (const card of chain) {
+      state = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: card.id })).state;
+      expect(state.zoneOpenForPlacement).toBe(true); // placing never closes the window
+    }
+    expect(state.missionZone.map((c) => c.id)).toEqual(['puppy', 'chain-2', 'chain-3', 'chain-4']);
+    expect(state.zoneCommittedPlay).toEqual([]);
+
+    // Still strictly ascending: the next slot is 5, so a spare 2 can't be slipped in behind it.
+    const spare: Card = { id: 'spare-2', kind: 'suited', suit: 'D', rank: '2', pilgrim: true };
+    state.zoneCommittedPlay = [spare];
+    const outOfOrder = applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: spare.id });
+    expect(outOfOrder.ok).toBe(false);
+  });
+});
+
 describe('legacy: mission 8 chain-vs-wave math (documents the corrected "before Wave 2" framing)', () => {
-  it('the real Mission 8 data needs 9 chain placements but Wave 1 alone only offers 6 kill-gated placement windows', () => {
+  it('the real Mission 8 data needs 9 chain placements while Wave 1 opens only 6 placement windows', () => {
     // Locks in the arithmetic behind the missions.ts comment correction above: a prior version of that comment
-    // implied the chain (and its purge) must finish before Wave 2 arrives — mathematically impossible, since the
-    // chain needs one placement per value 2-10 (9 total, after the preseeded Ace) but a placement window only
-    // opens right after a kill, and Wave 1 only has 6 enemies.
+    // implied the chain (and its purge) must finish before Wave 2 arrives, with no source for the deadline.
+    // NOTE: windows are not 1:1 with placements — several cards can go in during one window (see the describe
+    // above), so 6 windows do not cap you at 6 placements. Wave 1 finishing the chain is merely unlikely, not
+    // impossible; what actually rules out the deadline is that the source states no deadline at all.
     const mission8 = getMission(8)!;
     const chainPlacementsNeeded = 9; // values 2 through 10, on top of the preseeded Ace (presetMissionZone)
     const wave1KillCount = mission8.enemies.slice(0, 6).length;
     const totalKillCount = mission8.enemies.length;
     expect(wave1KillCount).toBe(6);
     expect(totalKillCount).toBe(12);
-    expect(wave1KillCount).toBeLessThan(chainPlacementsNeeded); // Wave 1 alone can never finish the chain
+    expect(wave1KillCount).toBeLessThan(chainPlacementsNeeded); // fewer windows than placements needed
     // The whole mission's kills (minus the very last, whose window never opens — see finishEnemyDefeatTail's
     // castleDeck.length === 0 branch) comfortably cover the 9 needed — a whole-mission goal, not a Wave-1 cutoff.
     expect(totalKillCount - 1).toBeGreaterThanOrEqual(chainPlacementsNeeded);
   });
 
-  it('BEHAVIORAL: 6 kill-gated placements (Wave 1 alone) stall the chain at required=8, short of the purge; the next 3 (spilling into Wave 2) finish it', () => {
+  it('BEHAVIORAL: taking just one placement per kill, Wave 1 stalls the chain at required=8; the next 3 kills finish it', () => {
     const puppy: Card = { id: 'puppy', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true };
     // Enemies are immune to whatever suit their own `suit` field names (see LegacyEnemySpec) — 'H' here, so the
     // Diamond-suited kill cards below are never blocked. Healths are set to exactly the matching kill card's
