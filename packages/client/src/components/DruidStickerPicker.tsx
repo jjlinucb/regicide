@@ -30,7 +30,7 @@ export function DruidStickerPicker({
 
   return (
     <div className="panel legacy-panel mercenary-camp">
-      <h3>🌱 Druid Sticker</h3>
+      <h3>🪶 Druid Sticker</h3>
       <p style={{ fontSize: '0.85rem', color: 'var(--ink-dim)', margin: 0 }}>
         Pick one of the 4 of Diamonds, Clubs, or Spades to permanently gain the Druid's Regrowth — it keeps its own
         class power too. This choice is final.

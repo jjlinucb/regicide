@@ -57,7 +57,7 @@ export function RegrowthWindow({
   return (
     <div className="legacy-jester-claim-banner" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.5rem' }}>
       <span>
-        🌱 Regrowth — {dealt.length} card(s) from the discard pile were dealt to you. Assign {required} of them, one
+        🪶 Regrowth — {dealt.length} card(s) from the discard pile were dealt to you. Assign {required} of them, one
         per destination. The rest go back to the discard pile.
       </span>
 
