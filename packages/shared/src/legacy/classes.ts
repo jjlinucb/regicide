@@ -115,14 +115,18 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     id: 'REAVER',
     name: 'Reaver',
     tag: 'Reveal and Add',
-    glyph: '🍄',
+    // A hammer: the physical Reaver card is a giant club/hammer, not the mushroom this used to show.
+    glyph: '🔨',
     color: '#1f2328',
   },
   GUARDIAN: {
     id: 'GUARDIAN',
     name: 'Guardian',
     tag: 'Absolute Shield',
-    glyph: '⛨',
+    // A stone, per the physical card. Doubles as a fix for the Paladin's 🛡 and this sitting side by side as two
+    // near-identical shields — within a colour family (both are grey, see the note above) the glyph is the only
+    // thing separating the two, so it has to actually read differently.
+    glyph: '🪨',
     color: '#64748b',
     specialAbility: 'AEGIS',
     specialName: 'Aegis',
