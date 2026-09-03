@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Server } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import type { Card, ClientGameState, ClientToServerEvents, LegacyStatePayload, ServerToClientEvents } from '@regicide/shared';
-import { guardianStickerEligible, reaverStickerEligible } from '@regicide/shared';
+import { druidStickerEligible, guardianStickerEligible, reaverStickerEligible } from '@regicide/shared';
 import { RoomManager } from './rooms/RoomManager.js';
 import { registerSocketHandlers } from './socket/handlers.js';
 import { InMemoryCampaignStore } from './db/campaigns.js';
@@ -542,6 +542,38 @@ describe('legacy campaign integration', () => {
       const again = await rooms.chooseGuardianSticker(created.code, created.playerId, eligible[1].id);
       expect('error' in again).toBe(true);
     }
+
+    client.close();
+  });
+
+  it("Mission 7's Druid-sticker reward is a one-time player choice, limited to the 4 of Diamonds/Clubs/Spades", async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Rashid' });
+
+    // Jump past mission 7 (auto-grants missions 1-7's rewards, including Mission 7's Druid-sticker choice).
+    const result = rooms.startLegacyMission(created.code, created.playerId, 8);
+    if ('error' in result) throw new Error(result.error);
+    expect(result.room.legacy?.party.some((c) => c.kind === 'suited' && c.secondClassDruid)).toBe(false);
+    const eligible = result.room.legacy!.party.filter(druidStickerEligible);
+    // Exactly the three rank-4 cards the source names — the 4 of Hearts is excluded.
+    expect(eligible.map((c) => c.suit).sort()).toEqual(['C', 'D', 'S']);
+
+    const notHost = await rooms.chooseDruidSticker(created.code, 'not-the-host', eligible[0].id);
+    expect('error' in notHost).toBe(true);
+
+    const hearts4 = result.room.legacy!.party.find((c) => c.kind === 'suited' && c.suit === 'H' && c.rank === '4')!;
+    const ineligible = await rooms.chooseDruidSticker(created.code, created.playerId, hearts4.id);
+    expect('error' in ineligible).toBe(true);
+
+    const applied = await rooms.chooseDruidSticker(created.code, created.playerId, eligible[0].id);
+    if ('error' in applied) throw new Error(applied.error);
+    const stickered = applied.room.legacy?.party.find((c) => c.id === eligible[0].id);
+    expect(stickered?.kind === 'suited' && stickered.secondClassDruid).toBe(true);
+
+    // One-time only.
+    const again = await rooms.chooseDruidSticker(created.code, created.playerId, eligible[1].id);
+    expect('error' in again).toBe(true);
 
     client.close();
   });

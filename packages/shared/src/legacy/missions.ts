@@ -62,7 +62,7 @@ export interface Mission {
   zoneVengeanceOnKill?: boolean;
   /** See GameState.pilgrimMechanic. */
   pilgrimMechanic?: boolean;
-  /** Vestigial — Mission 7's Pilgrim cards are seeded via `extraReserveCards` now (see GameState.pilgrimMechanic). No mission sets this anymore. */
+  /** Mission 7's face-down Pilgrim deck — see GameState.pilgrimMechanic/pilgrimDeck. */
   pilgrimCards?: Card[];
   /** See GameState.ascendingZone. */
   ascendingZone?: boolean;
@@ -147,15 +147,44 @@ function reaverCompanion(name: string, suit: Suit, rank: Rank): Card {
 }
 
 /**
- * A named survivor card, shared by Mission 7's extraReserveCards (see GameState.pilgrimMechanic) and Mission 8's
- * ascending mission zone (see GameState.ascendingZone) — both missions independently reused "Pilgrim" as flavor
- * for stranded survivors, and both read the `pilgrim` flag, gated by their own separate mission flag so the two
- * never collide: Mission 7 turns it into a permanent hand-trap once drawn (see SuitedCard.pilgrim); Mission 8
- * only cares that one placed in its zone never buffs the current enemy's attack the way an ordinary card
- * bridging a gap does.
+ * A named survivor card for Mission 8's ascending mission zone (see GameState.ascendingZone). Mission 8 and
+ * Mission 7 independently reused "Pilgrim" as flavor for stranded survivors and both read the `pilgrim` flag,
+ * gated by their own separate mission flag so the two never collide — but only Mission 8's are individually
+ * named, drawable, playable cards. Mission 7's are an anonymous 24-card deck built by pilgrimDeck() below.
+ * Mission 8 only cares that a Pilgrim placed in its zone never buffs the current enemy's attack the way an
+ * ordinary card bridging a gap does.
  */
 function pilgrim(name: string, suit: Suit, rank: Rank): Card {
   return { id: `pilgrim-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, pilgrim: true };
+}
+
+/**
+ * Mission 7's face-down Pilgrim deck (see GameState.pilgrimMechanic): 24 interchangeable survivors — 4 copies
+ * each of strength 2 through 7 — all carrying the same name, since nothing about the mechanic ever distinguishes
+ * one from another (they only ever matter as a value sitting in the mission zone). SOURCED (2026-09-03, John's
+ * live play, corroborated by a fan reimplementation's rules doc reading "4 copies each of values 2-7"), replacing
+ * two earlier readings in turn: an 8-card run of individually named survivors at values 2-9, then a 6-card
+ * 2/3/4/5/5/7 set.
+ *
+ * The 4 copies of each value are spread one per suit. Pilgrims have no suit power of their own (`noSuitPower`) —
+ * the source describes them as suitless, and this deck never reaches a hand to be played anyway; the suit is
+ * pure id/identity bookkeeping, exactly like a Mercenary "19"'s placeholder. Deliberately NOT applied to
+ * pilgrim() above, whose Mission 8 cards are real playable cards whose suits do resolve.
+ */
+function pilgrimDeck(): Card[] {
+  const suits: Suit[] = ['H', 'D', 'C', 'S'];
+  const ranks: Rank[] = ['2', '3', '4', '5', '6', '7'];
+  return ranks.flatMap((rank) =>
+    suits.map((suit) => ({
+      id: `pilgrim-${rank}-${suit}`,
+      kind: 'suited' as const,
+      suit,
+      rank,
+      name: 'Pilgrim',
+      pilgrim: true,
+      noSuitPower: true,
+    })),
+  );
 }
 
 /**
@@ -711,40 +740,43 @@ export const MISSIONS: Mission[] = [
       enemy('Abyssal: Hollowfang', 'CLERIC', 40, 20),
       enemy('Abyssal: Leadmaw', 'PALADIN', 40, 20),
     ],
-    // The Pilgrim mechanic (sourced from the official compendium FAQ — see GameState.pilgrimMechanic): 8 survivor
-    // cards shuffled into the reserve deck alongside the party, drawn normally like any other card. Once one
-    // lands in a hand it's a permanent hand-trap for the rest of the mission — dead weight that can't be played
-    // or discarded for any purpose, and blocks Feign Death while held — until an exact-damage kill frees one for
-    // free.
+    // The Pilgrim mechanic (see GameState.pilgrimMechanic for the full rule and the revision history behind it):
+    // a separate face-down 24-card deck (see pilgrimDeck above) that never touches the reserve deck. One flips
+    // face-up into the mission zone at the start of every turn and piles up there; every kill burns their
+    // combined value off the top of the reserve deck and then sweeps the zone to the discard pile. Playing a card
+    // whose value exactly matches a waiting Pilgrim banishes them out of that tally for good, and an exact kill
+    // carries the zone's highest-value Pilgrim clear before the burn is counted.
+    //
+    // SOURCED CORRECTION (2026-09-03 live play) over the compendium FAQ's hand-trap reading this mission shipped
+    // with — see GameState.pilgrimMechanic for why that reading was replaced.
     pilgrimMechanic: true,
+    pilgrimCards: pilgrimDeck(),
+    // Confirmed live 2026-09-03: the 4 Druids are drawable and playable during this fight too, not just handed
+    // over cold as the post-mission reward below — see druidCompanion's own doc comment.
     extraReserveCards: [
-      pilgrim('Old Fenwick', 'H', '2'),
-      pilgrim('Little Sae', 'D', '3'),
-      pilgrim('Bettina the Ferrywoman', 'C', '4'),
-      pilgrim('Corq Mudfoot', 'S', '5'),
-      pilgrim('Sister Yvaine', 'H', '6'),
-      pilgrim('Harlan Reedy', 'D', '7'),
-      pilgrim('Widow Corrin', 'C', '8'),
-      pilgrim('Young Thistle', 'S', '9'),
-      // Confirmed live 2026-09-03: the 4 Druids are drawable and playable during this fight too, not just handed
-      // over cold as the post-mission reward below — see druidCompanion's own doc comment.
       druidCompanion('Tolman', 'H', '3'),
       druidCompanion('Maya', 'D', '5'),
       druidCompanion('Alanta', 'C', '7'),
       druidCompanion('Zolgar', 'S', '9'),
     ],
-    // Reward: the Druid faction — 4 permanent new recruits, survivors themselves once, who learned something
-    // from the Well before the party pulled them out. Playing one activates Regrowth: salvage cards back out of
-    // the banish pile and return them to the reserve deck — Zolgar's Wellspring salvages 2 instead of 1.
+    // Reward, SOURCED CORRECTION (a fan reimplementation's rules doc — "Remove Druid 3/5/9 from the party (keep
+    // Druid 7)... add the Druid suit to the 4♦, 4♠, or 4♣... Corrupt another card" — confirmed by John
+    // 2026-09-03): the Druid faction arrives as survivors who learned something from the Well, but only the
+    // rank-7 Druid (Alanta) stays for good. The shipped version over-granted all 4 permanently, Zolgar's
+    // Wellspring special included; 3/5/9 are dropped, exactly the same "all 4 join the fight via
+    // extraReserveCards, 1 is kept by the reward" shape Missions 6 and 8 already use for their own factions.
+    //
+    // Playing a Druid activates Regrowth: the whole discard pile is dealt out across the table and every player
+    // assigns up to 4 of the cards dealt to them — one to hand, one banished, one to the top of the reserve deck,
+    // one to the bottom — with the rest returning to the discard pile (see GameState.druidWindow). Plus a bonus
+    // Druid sticker the player picks for one of the 4♦/4♣/4♠ (see MissionReward.druidStickerChoice), and another
+    // corrupt-another-card step.
     standingJesters: true,
     sidelineHighArcana: true,
     reward: {
-      recruits: [
-        recruit('Tolman', 'DRUID', '3', 'H'),
-        recruit('Maya', 'DRUID', '5', 'D'),
-        recruit('Alanta', 'DRUID', '7', 'C'),
-        specialRecruit('Zolgar', 'DRUID', '9', 'S'),
-      ],
+      recruits: [recruit('Alanta', 'DRUID', '7', 'C')],
+      druidStickerChoice: true,
+      corruptAnotherCard: true,
     },
   },
   {

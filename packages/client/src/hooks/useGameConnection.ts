@@ -222,6 +222,19 @@ export function useGameConnection() {
     [session],
   );
 
+  const chooseDruidSticker = useCallback(
+    (cardId: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+      return new Promise((resolve) => {
+        if (!session) return resolve({ ok: false, error: 'Not in a session.' });
+        socketRef.current?.emit('legacy:chooseDruidSticker', { code: session.code, cardId }, (res) => {
+          if (!res.ok) setError(res.error);
+          resolve(res);
+        });
+      });
+    },
+    [session],
+  );
+
   const startGame = useCallback((): void => {
     if (!session) return;
     socketRef.current?.emit('room:start', { code: session.code }, (res) => {
@@ -278,6 +291,7 @@ export function useGameConnection() {
     setBeastCompanionSelection,
     chooseReaverSticker,
     chooseGuardianSticker,
+    chooseDruidSticker,
     loadEndlessSave,
   };
 }

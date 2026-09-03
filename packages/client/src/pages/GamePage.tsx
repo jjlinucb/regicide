@@ -25,6 +25,7 @@ import { CapturedPiles } from '../components/CapturedPiles';
 import { EnemyCardPicker } from '../components/EnemyCardPicker';
 import { ReaverRevealCountPicker } from '../components/ReaverRevealCountPicker';
 import { RelicsTray } from '../components/RelicsTray';
+import { RegrowthWindow } from '../components/RegrowthWindow';
 
 const MEDAL_INFO: Record<'gold' | 'silver' | 'bronze', { emoji: string; label: string }> = {
   gold: { emoji: '🥇', label: 'Gold Victory' },
@@ -127,6 +128,11 @@ export function GamePage({
   const chantTrimmerId = state.chanterWindow?.pendingPlayerIds[0];
   const isMyChantTrim = isChantWindow && chantTrimmerId === myPlayerId;
   const myChantOverflow = Math.max(0, myHand.length - state.maxHandSize);
+  // Mission 7's Regrowth window — every player who was dealt cards resolves in queue order.
+  const isRegrowthWindow = state.turnPhase === 'AWAIT_REGROWTH' && Boolean(state.druidWindow);
+  const regrowthPickerId = state.druidWindow?.pendingPlayerIds[0];
+  const isMyRegrowth = isRegrowthWindow && regrowthPickerId === myPlayerId;
+  const myRegrowthDealt = state.druidWindow?.dealt[myPlayerId] ?? [];
   const isZonePurgeWindow = state.turnPhase === 'AWAIT_ZONE_PURGE' && Boolean(state.zonePurge);
   const isMyZonePurgeWindow = isZonePurgeWindow && state.zonePurge?.playerId === myPlayerId;
 
@@ -294,6 +300,10 @@ export function GamePage({
                   ? isMyChantTrim
                     ? `The chant drew everyone up — discard exactly ${myChantOverflow} card(s) to get back to your hand limit.`
                     : `${state.players.find((p) => p.id === chantTrimmerId)?.name} is trimming their hand from the chant...`
+                  : isRegrowthWindow
+                  ? isMyRegrowth
+                    ? 'Regrowth — assign the cards dealt to you from the discard pile.'
+                    : `${state.players.find((p) => p.id === regrowthPickerId)?.name} is sorting their Regrowth cards...`
                   : isZonePurgeWindow
                     ? isMyZonePurgeWindow
                       ? 'Choose cards to banish forever from the discard pile, or continue.'
@@ -378,6 +388,7 @@ export function GamePage({
             </button>
           </div>
         )}
+        {isMyRegrowth && <RegrowthWindow dealt={myRegrowthDealt} myPlayerId={myPlayerId} sendAction={sendAction} />}
         {isLegacy && <RelicsTray state={state} myPlayerId={myPlayerId} />}
         <div className="game-board">
           <div className="z-enemy">
@@ -698,6 +709,7 @@ export function GamePage({
         !isZoneVengeanceWindow &&
         !isMageRevealWindow &&
         !isChantWindow &&
+        !isRegrowthWindow &&
         !isZonePurgeWindow &&
         state.turnPhase !== 'AWAIT_JESTER_CLAIM' &&
         !isAwaitEndOfTurn &&

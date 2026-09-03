@@ -8,9 +8,11 @@ import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenary
 import { getMission, MISSIONS, missionEnemiesToSpecs, type MissionEnemySpec } from './missions.js';
 import {
   applyCorruptAnotherCard,
+  applyDruidStickerChoice,
   applyDualClassStickers,
   applyEvergreenUpgrade,
   applyGuardianStickerChoice,
+  druidStickerEligible,
   applyMageSticker,
   applyReaverStickerChoice,
   applyReward,
@@ -2870,21 +2872,37 @@ describe('legacy: Guardian class power (absolute shield, one attack at a time)',
   });
 });
 
-describe('legacy: mission 7 setup (Tales of Rebirth Pilgrim hand-trap)', () => {
-  it('is a 12-enemy 3-wave gauntlet with 8 Pilgrim cards and 4 Druid companions seeded via extraReserveCards, gated by pilgrimMechanic', () => {
+describe('legacy: mission 7 setup (Tales of Rebirth Pilgrim deck)', () => {
+  it('is a 12-enemy 3-wave gauntlet with a 24-card Pilgrim deck and 4 Druid companions, gated by pilgrimMechanic', () => {
     const mission7 = getMission(7)!;
     expect(mission7.enemies.length).toBe(12);
     expect(mission7.pilgrimMechanic).toBe(true);
-    // Sourced rework: Pilgrims are ordinary reserve-deck cards now, not a separate face-down deck/zone.
-    expect(mission7.pilgrimCards).toBeUndefined();
-    expect(mission7.extraReserveCards?.length).toBe(12);
-    const pilgrims = mission7.extraReserveCards?.filter((c) => c.kind === 'suited' && c.pilgrim) ?? [];
-    const druids = mission7.extraReserveCards?.filter((c) => c.kind === 'suited' && c.druid) ?? [];
-    expect(pilgrims.length).toBe(8);
-    expect(druids.length).toBe(4);
+    // Pilgrims live in their own face-down deck — never shuffled into the reserve deck.
+    expect(mission7.pilgrimCards?.length).toBe(24);
+    expect(mission7.pilgrimCards?.every((c) => c.kind === 'suited' && c.pilgrim && c.noSuitPower)).toBe(true);
+    // Sourced correction (2026-09-03 live play): 4 copies each of strength 2 through 7, all identically named.
+    const byValue = new Map<number, number>();
+    for (const c of mission7.pilgrimCards ?? []) {
+      if (c.kind !== 'suited') continue;
+      byValue.set(Number(c.rank), (byValue.get(Number(c.rank)) ?? 0) + 1);
+    }
+    expect([...byValue.entries()].sort((a, b) => a[0] - b[0])).toEqual([
+      [2, 4],
+      [3, 4],
+      [4, 4],
+      [5, 4],
+      [6, 4],
+      [7, 4],
+    ]);
+    expect(new Set((mission7.pilgrimCards ?? []).map((c) => (c.kind === 'suited' ? c.name : null)))).toEqual(new Set(['Pilgrim']));
+    // Every card carries a unique id despite the shared name (24 same-named cards would otherwise collide).
+    expect(new Set((mission7.pilgrimCards ?? []).map((c) => c.id)).size).toBe(24);
+    // Only the 4 Druid companions ride in through the reserve deck.
+    expect(mission7.extraReserveCards?.length).toBe(4);
+    expect(mission7.extraReserveCards?.every((c) => c.kind === 'suited' && c.druid)).toBe(true);
   });
 
-  it('shuffles the 8 Pilgrim cards into the reserve deck alongside the party at mission start (no separate deck/zone populated)', () => {
+  it('seeds the Pilgrim deck separately and flips its first card into the zone on the opening turn', () => {
     const mission7 = getMission(7)!;
     const res = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',
@@ -2895,21 +2913,23 @@ describe('legacy: mission 7 setup (Tales of Rebirth Pilgrim hand-trap)', () => {
       enemies: missionEnemiesToSpecs(mission7.enemies),
       jesterCount: 0,
       pilgrimMechanic: mission7.pilgrimMechanic,
+      pilgrimCards: mission7.pilgrimCards,
       extraReserveCards: mission7.extraReserveCards,
     });
     const state = ensureOk(res).state;
     expect(state.pilgrimMechanic).toBe(true);
-    // Vestigial fields from the old shared-zone economy — always empty under the new hand-trap rule.
-    expect(state.pilgrimZone.length).toBe(0);
-    expect(state.pilgrimDeck.length).toBe(0);
+    // The opening turn's own flip already fired: 1 in the zone, 5 still face-down.
+    expect(state.pilgrimZone.length).toBe(1);
+    expect(state.pilgrimDeck.length).toBe(23);
     const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
-    // 40 party + 8 Pilgrims + 4 Druids = 52 total in circulation (hands + reserve deck).
-    expect(handCount + state.tavernDeck.length).toBe(52);
+    // 40 party + 4 Druids = 44 in circulation (hands + reserve deck) — no Pilgrims among them.
+    expect(handCount + state.tavernDeck.length).toBe(44);
+    expect([...state.tavernDeck, ...state.players.flatMap((p) => p.hand)].some((c) => c.kind === 'suited' && c.pilgrim)).toBe(false);
   });
 });
 
-describe('legacy: mission 7 mechanics (Pilgrim hand-trap)', () => {
-  function startWellMission(n: number, enemies: LegacyEnemySpec[]): GameState {
+describe('legacy: mission 7 mechanics (Pilgrim zone burn)', () => {
+  function startWellMission(n: number, enemies: LegacyEnemySpec[], pilgrimCards?: Card[]): GameState {
     const ids = Array.from({ length: n }, (_, i) => `p${i}`);
     const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
     const res = applyAction(createLobbyState(), {
@@ -2921,219 +2941,142 @@ describe('legacy: mission 7 mechanics (Pilgrim hand-trap)', () => {
       enemies,
       jesterCount: 0,
       pilgrimMechanic: true,
+      pilgrimCards,
     });
     if (!res.ok) throw new Error(res.error);
     return res.state;
   }
 
   const fenwick: Card = { id: 'fenwick', kind: 'suited', suit: 'H', rank: '2', name: 'Old Fenwick', pilgrim: true };
+  const sae: Card = { id: 'sae', kind: 'suited', suit: 'D', rank: '3', name: 'Little Sae', pilgrim: true };
 
-  it('rejects PLAY_CARDS outright when a Pilgrim card is played alone', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 20, attack: 10 };
-    let state = startWellMission(1, [boss]);
-    state = rig(state, [fenwick]);
+  it('flips one Pilgrim into the zone per turn, accumulating them', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 200, attack: 0 };
+    // The deck is shuffled per attempt (see startLegacyMission), so assert counts, not a fixed order.
+    let state = startWellMission(1, [boss], [structuredClone(fenwick), structuredClone(sae)]);
+    expect(state.pilgrimZone.length).toBe(1);
+    expect(state.pilgrimDeck.length).toBe(1);
 
-    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [fenwick.id] });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toMatch(/dead weight|cannot be played/i);
+    // Yield to end the turn; the next turn's start flips the second Pilgrim in on top.
+    state = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id })).state;
+    expect(state.pilgrimZone.length).toBe(2);
+    expect(new Set(state.pilgrimZone.map((c) => c.id))).toEqual(new Set(['fenwick', 'sae']));
+    expect(state.pilgrimDeck.length).toBe(0);
   });
 
-  it('rejects a combo play if any one of its cards is a Pilgrim, even paired with an ordinary card', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 20, attack: 10 };
-    let state = startWellMission(1, [boss]);
-    const ordinary = suited('H', '2'); // same rank as fenwick, would otherwise form a valid combo
-    state = rig(state, [fenwick, ordinary]);
+  it('banishes a waiting Pilgrim when a play\'s printed value matches it exactly', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 200, attack: 0 };
+    let state = startWellMission(1, [boss], [structuredClone(sae)]);
+    expect(state.pilgrimZone.length).toBe(1);
+    state = rig(state, [suited('D', '3')]); // 3 exactly matches Little Sae
 
-    const res = applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [fenwick.id, ordinary.id] });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toMatch(/dead weight|cannot be played/i);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.pilgrimZone.length).toBe(0);
+    expect(state.banishPile.some((c) => c.id === 'sae')).toBe(true);
+    expect(state.discardPile.some((c) => c.id === 'sae')).toBe(false);
   });
 
-  it('still allows an ordinary (non-Pilgrim) card in the same hand to be played normally', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 20, attack: 10 };
-    let state = startWellMission(1, [boss]);
-    const ordinary = suited('D', '4');
-    state = rig(state, [fenwick, ordinary]);
+  it('leaves the zone alone when no waiting Pilgrim matches the play\'s value', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 200, attack: 0 };
+    let state = startWellMission(1, [boss], [structuredClone(sae)]);
+    state = rig(state, [suited('D', '4')]); // 4 vs the zone's lone 3
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [ordinary.id] }));
-    state = res.state;
-    expect(state.currentEnemy?.damageTaken).toBe(4);
-    // The Pilgrim is untouched — still stuck in hand.
-    expect(state.players[0].hand.some((c) => c.id === 'fenwick')).toBe(true);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.pilgrimZone.map((c) => c.id)).toEqual(['sae']);
+    expect(state.banishPile.length).toBe(0);
   });
 
-  it('rejects banking a Pilgrim onto the Kinfolk Flute, even though it prints an in-range value', () => {
-    const target: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 100, attack: 1 };
-    const res0 = applyAction(createLobbyState(), {
-      type: 'START_LEGACY_MISSION',
-      playerIds: ['p0'],
-      playerNames: ['Player 0'],
-      seed: 'flute-pilgrim-test',
-      party: buildInitialParty(),
-      enemies: [target],
-      jesterCount: 0,
-      relics: ['KINFOLK_FLUTE'],
-      pilgrimMechanic: true,
-    });
-    let state = ensureOk(res0).state;
-    const pilgrimCard: Card = { id: 'bank-pilgrim', kind: 'suited', suit: 'H', rank: '3', pilgrim: true };
-    state = rig(state, [pilgrimCard]);
-    const playerId = state.players[0].id;
+  it('burns the zone\'s combined value off the reserve deck on a kill, then sweeps the zone to the discard pile', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 4, attack: 0 };
+    const next: LegacyEnemySpec = { name: 'Murkgill', suit: 'S', health: 200, attack: 0 };
+    let state = startWellMission(1, [boss, next], [structuredClone(sae)]); // zone holds a 3
+    state = rig(state, [suited('S', '8')]); // overkill, so no exact-kill relief
+    const deckBefore = state.tavernDeck.length;
 
-    const badBank = applyAction(state, { type: 'BANK_KINFOLK_CARD', playerId, cardId: pilgrimCard.id });
-    expect(badBank.ok).toBe(false);
-    expect(state.players[0].kinfolkSlot).toBeNull();
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+
+    expect(state.tavernDeck.length).toBe(deckBefore - 3); // 3 burned, one per point of zone value
+    expect(state.pilgrimZone.length).toBe(0); // swept
+    expect(state.discardPile.some((c) => c.id === 'sae')).toBe(true); // to the discard pile, not banished
+    expect(state.banishPile.some((c) => c.id === 'sae')).toBe(false);
   });
 
-  it('rejects a DEFEND selection that includes a Pilgrim, even when its value would help cover the damage', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 5 };
-    let state = startWellMission(1, [boss]);
-    state = rig(state, [fenwick, suited('D', '6')]); // fenwick(2) + 6 = 8, would cover 5 damage if it were allowed
-    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
-    state = res.state;
-    expect(state.turnPhase).toBe('AWAIT_DEFEND');
-
-    const bad = applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) });
-    expect(bad.ok).toBe(false);
-
-    // Covering with just the non-Pilgrim card is allowed and succeeds instead.
-    const nonPilgrimId = state.players[0].hand.find((c) => c.id !== 'fenwick')!.id;
-    const good = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [nonPilgrimId] }));
-    expect(good.state.phase).toBe('IN_PROGRESS');
-    expect(good.state.players[0].hand.some((c) => c.id === 'fenwick')).toBe(true); // still stuck, untouched
-  });
-
-  it('blocks Feign Death entirely while holding a Pilgrim — the whole-hand discard is rejected outright, not silently allowed', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 20 };
-    let state = startWellMission(1, [boss]);
-    state = rig(state, [fenwick, suited('D', '2')]); // hand of 2, one is a Pilgrim
-    state.maxHandSize = 2; // "at hand limit" — the usual Feign Death precondition
-    let res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
-    state = res.state;
-    expect(state.turnPhase).toBe('AWAIT_DEFEND');
-
-    const bad = applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) });
-    expect(bad.ok).toBe(false);
-    expect(state.phase).toBe('IN_PROGRESS'); // rejected outright, not resolved as a loss
-  });
-
-  it('still loses normally (no soft-lock) when the non-Pilgrim cards alone cannot cover the damage', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 20 };
-    let state = startWellMission(1, [boss]);
-    state = rig(state, [fenwick, suited('D', '3')]);
-    state.maxHandSize = 2;
-    let res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
-    state = res.state;
-
-    const nonPilgrimId = state.players[0].hand.find((c) => c.id !== 'fenwick')!.id;
-    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [nonPilgrimId] }));
-    state = res.state;
-    expect(state.phase).toBe('LOST'); // 3 < 20, not the whole hand (Pilgrim left behind) — no Feign Death exception
-  });
-
-  it('does not free or discard a stuck Pilgrim via a Jester claim/refill — only an exact kill does that (bug-fix)', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 }; // survives; 0 attack means no defend to resolve first
-    let state = startWellMission(1, [boss]);
-    const j = jester();
-    const ordinary = suited('D', '4');
-    state = rig(state, [j, fenwick, ordinary]);
-    const playerId = state.players[0].id;
-
-    let res = ensureOk(applyAction(state, { type: 'PLAY_JESTER', playerId, cardId: j.id }));
-    state = res.state;
-    res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId }));
-    state = res.state;
-
-    expect(state.currentEnemy?.damageTaken).toBe(8); // flat 8-strength attack, survives (100 health)
-    // The stuck Pilgrim rode out the refill untouched — never discarded, never freed.
-    expect(state.players[0].hand.some((c) => c.id === 'fenwick')).toBe(true);
-    expect(state.discardPile.some((c) => c.id === 'fenwick')).toBe(false);
-    // Everything else in the old hand (the ordinary card) WAS discarded and replaced as normal.
-    expect(state.players[0].hand.some((c) => c.id === ordinary.id)).toBe(false);
-    expect(state.discardPile.some((c) => c.id === ordinary.id)).toBe(true);
-    // Refilled back up to the hand limit, the still-stuck Pilgrim occupying one of those slots.
-    expect(state.players[0].hand.length).toBe(state.maxHandSize);
-  });
-});
-
-describe('legacy: mission 7 mechanic (exact-kill Pilgrim release)', () => {
-  function startWellMission(n: number, enemies: LegacyEnemySpec[]): GameState {
-    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
-    const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
-    const res = applyAction(createLobbyState(), {
-      type: 'START_LEGACY_MISSION',
-      playerIds: ids,
-      playerNames: names,
-      seed: 'well-exact-kill-test',
-      party: buildInitialParty(),
-      enemies,
-      jesterCount: 0,
-      pilgrimMechanic: true,
-    });
-    if (!res.ok) throw new Error(res.error);
-    return res.state;
-  }
-
-  it('an exact-damage kill banishes one Pilgrim stuck in the killer\'s own hand, for free', () => {
+  it('an exact kill carries the zone\'s highest-value Pilgrim clear first, shrinking the burn', () => {
     const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
-    let state = startWellMission(1, [boss]);
-    const trapped: Card = { id: 'trapped-pilgrim', kind: 'suited', suit: 'H', rank: '2', name: 'Old Fenwick', pilgrim: true };
-    state = rig(state, [trapped, suited('S', '8')]); // 8 damage = exactly lethal
+    const next: LegacyEnemySpec = { name: 'Murkgill', suit: 'S', health: 200, attack: 0 };
+    // Both Pilgrims are already in the zone before the kill: the 2 and the 3.
+    let state = startWellMission(1, [boss, next], [structuredClone(fenwick), structuredClone(sae)]);
+    state = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id })).state;
+    expect(state.pilgrimZone.length).toBe(2);
+    state = rig(state, [suited('S', '8')]); // exactly lethal
+    const deckBefore = state.tavernDeck.length;
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[1].id] }));
-    state = res.state;
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
 
-    expect(state.currentEnemy).toBeNull(); // boss defeated, mission complete (only enemy)
-    expect(state.players[0].hand.some((c) => c.id === 'trapped-pilgrim')).toBe(false);
-    expect(state.banishPile.some((c) => c.id === 'trapped-pilgrim')).toBe(true);
-    expect(state.discardPile.some((c) => c.id === 'trapped-pilgrim')).toBe(false);
+    expect(state.banishPile.some((c) => c.id === 'sae')).toBe(true); // the 3, banished out of the tally
+    expect(state.tavernDeck.length).toBe(deckBefore - 2); // only the remaining 2 burns
+    expect(state.discardPile.some((c) => c.id === 'fenwick')).toBe(true); // swept with the rest of the zone
+    expect(state.pilgrimZone.length).toBe(0);
   });
 
-  it("frees a Pilgrim from another player's hand (scanned in turn order) when the killer holds none", () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
-    let state = startWellMission(2, [boss]);
-    const trapped: Card = { id: 'trapped-other', kind: 'suited', suit: 'H', rank: '2', pilgrim: true };
-    state = structuredClone(state);
-    state.players[0].hand = [suited('S', '8')]; // current player: no Pilgrim
-    state.players[1].hand = [trapped]; // teammate: holding one
-
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
-
-    expect(state.players[1].hand.some((c) => c.id === 'trapped-other')).toBe(false);
-    expect(state.banishPile.some((c) => c.id === 'trapped-other')).toBe(true);
-  });
-
-  it('does nothing extra on an exact kill when nobody is holding a Pilgrim', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 8, attack: 0 };
-    let state = startWellMission(1, [boss]);
+  it('burns nothing on a kill with an empty zone', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 4, attack: 0 };
+    const next: LegacyEnemySpec = { name: 'Murkgill', suit: 'S', health: 200, attack: 0 };
+    let state = startWellMission(1, [boss, next], []); // no Pilgrim deck at all
     state = rig(state, [suited('S', '8')]);
+    const deckBefore = state.tavernDeck.length;
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    expect(res.state.banishPile.length).toBe(0);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.tavernDeck.length).toBe(deckBefore);
   });
 
-  it('does NOT release a Pilgrim on an overkill (non-exact) hit', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 5, attack: 0 };
-    let state = startWellMission(1, [boss]);
-    const trapped: Card = { id: 'trapped-pilgrim-2', kind: 'suited', suit: 'H', rank: '2', pilgrim: true };
-    state = rig(state, [trapped, suited('S', '8')]); // 8 damage vs 5 health — overkill, not exact
-
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[1].id] }));
-    state = res.state;
-
-    expect(state.players[0].hand.some((c) => c.id === 'trapped-pilgrim-2')).toBe(true); // still stuck
-    expect(state.banishPile.some((c) => c.id === 'trapped-pilgrim-2')).toBe(false);
+  it('never puts a Pilgrim in a hand, so nothing about playing/discarding/Feign Death is blocked any more', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 200, attack: 0 };
+    const state = startWellMission(1, [boss], [structuredClone(fenwick)]);
+    expect(state.players[0].hand.some((c) => c.kind === 'suited' && c.pilgrim)).toBe(false);
+    expect(state.tavernDeck.some((c) => c.kind === 'suited' && c.pilgrim)).toBe(false);
   });
 });
 
 describe('legacy: mission 7 reward (Druid faction)', () => {
-  it('rewards 4 Druid recruits, one carrying the Wellspring special ability', () => {
+  it('keeps only the rank-7 Druid (Alanta) permanently — 3/5/9 and the Wellspring special are dropped', () => {
     const mission7 = getMission(7)!;
+    expect(mission7.reward.recruits.length).toBe(1);
+    expect(mission7.reward.recruits[0]).toMatchObject({ name: 'Alanta', class: 'DRUID', rank: '7' });
+
     const party = applyReward(buildInitialParty(), mission7.reward);
     const druids = party.filter((c) => c.kind === 'suited' && c.druid);
-    expect(druids.length).toBe(4);
-    expect(druids.filter((c) => c.kind === 'suited' && c.special === 'WELLSPRING').length).toBe(1);
+    expect(druids.length).toBe(1);
+    expect(druids[0].kind === 'suited' && druids[0].name).toBe('Alanta');
+    expect(party.some((c) => c.kind === 'suited' && c.special === 'WELLSPRING')).toBe(false);
+  });
+
+  it('grants a player-chosen Druid sticker (4 of Diamonds/Clubs/Spades only) plus a corrupt-another-card step', () => {
+    const mission7 = getMission(7)!;
+    expect(mission7.reward.druidStickerChoice).toBe(true);
+    expect(mission7.reward.corruptAnotherCard).toBe(true);
+
+    // Deliberately not auto-applied — the player has to pick a target first.
+    const party = applyReward(buildInitialParty(), mission7.reward);
+    expect(party.some((c) => c.kind === 'suited' && c.secondClassDruid)).toBe(false);
+
+    // Exactly the three rank-4 cards the source names are eligible — the 4 of Hearts is not.
+    const eligible = buildInitialParty().filter(druidStickerEligible);
+    expect(eligible.map((c) => c.suit).sort()).toEqual(['C', 'D', 'S']);
+    expect(eligible.every((c) => c.rank === '4')).toBe(true);
+  });
+
+  it('applies the chosen Druid sticker to that one card, keeping its own suit power', () => {
+    const party = buildInitialParty();
+    const target = party.filter(druidStickerEligible).find((c) => c.suit === 'D')!;
+    const next = applyDruidStickerChoice(party, target.id);
+    const stickered = next.filter((c) => c.kind === 'suited' && c.secondClassDruid);
+    expect(stickered.length).toBe(1);
+    expect(stickered[0].id).toBe(target.id);
+    expect(stickered[0].kind === 'suited' && stickered[0].suit).toBe('D'); // still a Bard
+    // A no-op for an ineligible target (the 4 of Hearts).
+    const hearts4 = party.find((c) => c.kind === 'suited' && c.suit === 'H' && c.rank === '4')!;
+    expect(applyDruidStickerChoice(party, hearts4.id)).toBe(party);
   });
 
   it('a Druid recruit takes its explicit suit (Druid has none of its own) and is flagged druid', () => {
@@ -3143,44 +3086,166 @@ describe('legacy: mission 7 reward (Druid faction)', () => {
   });
 });
 
-describe('legacy: Druid class power (Regrowth — salvage from the banish pile)', () => {
-  function druidCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
-    return { ...suited(suit, rank), druid: true, ...(special ? { special: 'WELLSPRING' } : {}) };
+describe('legacy: Druid class power (Regrowth — deal out the discard pile)', () => {
+  function druidCard(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
+    return { ...suited(suit, rank), druid: true };
   }
 
-  it("salvages 1 card from the banish pile to the bottom of the reserve deck, ignoring its printed suit's power", () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
+  it('deals the whole discard pile out and opens a Regrowth window for the only player', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 };
     let state = startMission(1, [boss]);
-    state.banishPile = [suited('H', '6')]; // Hearts (Cleric/heal) power never fires for a Druid card
+    state.discardPile = [suited('H', '6'), suited('C', '4'), suited('D', '9'), suited('S', '2'), suited('H', '5')];
     state = rig(state, [druidCard('H', '3')]);
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
 
-    expect(state.banishPile.length).toBe(0);
-    expect(state.tavernDeck[state.tavernDeck.length - 1]?.rank).toBe('6'); // returned to the bottom
-    expect(state.discardPile.length).toBe(0); // no heal fired — Hearts isn't a Druid's power
+    expect(state.turnPhase).toBe('AWAIT_REGROWTH');
+    expect(state.discardPile.length).toBe(0); // the whole pile was dealt out
+    expect(state.druidWindow?.pendingPlayerIds).toEqual([state.players[0].id]);
+    expect(state.druidWindow?.dealt[state.players[0].id]?.length).toBe(5);
   });
 
-  it('Wellspring salvages 2 cards instead of 1', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
+  it('sends one card each to hand, banish, top of deck and bottom of deck, returning the rest to the discard pile', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 };
     let state = startMission(1, [boss]);
-    state.banishPile = [suited('H', '6'), suited('C', '4')];
-    state = rig(state, [druidCard('H', '3', true)]);
+    state.discardPile = [suited('H', '6'), suited('C', '4'), suited('D', '9'), suited('S', '2'), suited('H', '5')];
+    state = rig(state, [druidCard('H', '3')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
+    const me = state.players[0].id;
+    const dealt = state.druidWindow!.dealt[me]!;
+    const handBefore = state.players[0].hand.length;
+    const deckBefore = state.tavernDeck.length;
 
-    expect(state.banishPile.length).toBe(0);
+    state = ensureOk(
+      applyAction(state, {
+        type: 'RESOLVE_REGROWTH',
+        playerId: me,
+        toHandCardId: dealt[0].id,
+        toBanishCardId: dealt[1].id,
+        toDeckTopCardId: dealt[2].id,
+        toDeckBottomCardId: dealt[3].id,
+      }),
+    ).state;
+
+    expect(state.players[0].hand.some((c) => c.id === dealt[0].id)).toBe(true);
+    expect(state.banishPile.some((c) => c.id === dealt[1].id)).toBe(true);
+    expect(state.tavernDeck[0].id).toBe(dealt[2].id); // top of the reserve deck
+    expect(state.tavernDeck[state.tavernDeck.length - 1].id).toBe(dealt[3].id); // bottom
+    expect(state.discardPile.map((c) => c.id)).toEqual([dealt[4].id]); // the 5th was unassigned
+    expect(state.players[0].hand.length).toBe(handBefore + 1);
+    expect(state.tavernDeck.length).toBe(deckBefore + 2);
+    expect(state.druidWindow).toBeNull(); // window closed, only player resolved
   });
 
-  it('does nothing (no crash) when the banish pile is empty', () => {
-    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 10 };
+  it('rejects assigning the same card to two destinations, or a card that was not dealt to you', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 };
     let state = startMission(1, [boss]);
+    state.discardPile = [suited('H', '6'), suited('C', '4'), suited('D', '9'), suited('S', '2')];
+    state = rig(state, [druidCard('H', '3')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    const me = state.players[0].id;
+    const dealt = state.druidWindow!.dealt[me]!;
+
+    const dup = applyAction(state, {
+      type: 'RESOLVE_REGROWTH',
+      playerId: me,
+      toHandCardId: dealt[0].id,
+      toBanishCardId: dealt[0].id,
+      toDeckTopCardId: dealt[1].id,
+      toDeckBottomCardId: dealt[2].id,
+    });
+    expect(dup.ok).toBe(false);
+    if (!dup.ok) expect(dup.error).toMatch(/one destination|chosen twice/i);
+
+    const foreign = applyAction(state, {
+      type: 'RESOLVE_REGROWTH',
+      playerId: me,
+      toHandCardId: 'not-a-dealt-card',
+      toBanishCardId: dealt[1].id,
+      toDeckTopCardId: dealt[2].id,
+      toDeckBottomCardId: dealt[3].id,
+    });
+    expect(foreign.ok).toBe(false);
+    if (!foreign.ok) expect(foreign.error).toMatch(/not dealt to you/i);
+  });
+
+  it('a player dealt fewer than 4 cards assigns exactly as many as they hold (John\'s ruling)', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 };
+    let state = startMission(1, [boss]);
+    state.discardPile = [suited('H', '6'), suited('C', '4')]; // only 2 cards for the lone player
+    state = rig(state, [druidCard('H', '3')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    const me = state.players[0].id;
+    const dealt = state.druidWindow!.dealt[me]!;
+    expect(dealt.length).toBe(2);
+
+    // Assigning all 4 destinations is impossible; assigning only 1 is rejected as too few.
+    const tooFew = applyAction(state, { type: 'RESOLVE_REGROWTH', playerId: me, toHandCardId: dealt[0].id });
+    expect(tooFew.ok).toBe(false);
+    if (!tooFew.ok) expect(tooFew.error).toMatch(/must assign exactly 2/i);
+
+    // Exactly 2, and the player chooses WHICH two destinations to use.
+    state = ensureOk(
+      applyAction(state, { type: 'RESOLVE_REGROWTH', playerId: me, toHandCardId: dealt[0].id, toDeckTopCardId: dealt[1].id }),
+    ).state;
+    expect(state.players[0].hand.some((c) => c.id === dealt[0].id)).toBe(true);
+    expect(state.tavernDeck[0].id).toBe(dealt[1].id);
+    expect(state.discardPile.length).toBe(0);
+    expect(state.turnPhase).not.toBe('AWAIT_REGROWTH');
+  });
+
+  it('deals round-robin across a 2-player table and queues both players, front of the queue first', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 };
+    let state = startMission(2, [boss]);
+    state.discardPile = [suited('H', '6'), suited('C', '4'), suited('D', '9')];
+    state = rig(state, [druidCard('H', '3')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+
+    const [p0, p1] = state.players.map((p) => p.id);
+    expect(state.druidWindow?.dealt[p0]?.length).toBe(2); // dealing starts from the current player
+    expect(state.druidWindow?.dealt[p1]?.length).toBe(1);
+    expect(state.druidWindow?.pendingPlayerIds).toEqual([p0, p1]);
+
+    // The back of the queue can't jump ahead.
+    const outOfTurn = applyAction(state, { type: 'RESOLVE_REGROWTH', playerId: p1, toHandCardId: state.druidWindow!.dealt[p1]![0].id });
+    expect(outOfTurn.ok).toBe(false);
+
+    state = ensureOk(
+      applyAction(state, {
+        type: 'RESOLVE_REGROWTH',
+        playerId: p0,
+        toHandCardId: state.druidWindow!.dealt[p0]![0].id,
+        toBanishCardId: state.druidWindow!.dealt[p0]![1].id,
+      }),
+    ).state;
+    expect(state.druidWindow?.pendingPlayerIds).toEqual([p1]); // p0 done, p1 still owes a pick
+    state = ensureOk(
+      applyAction(state, { type: 'RESOLVE_REGROWTH', playerId: p1, toDeckTopCardId: state.druidWindow!.dealt[p1]![0].id }),
+    ).state;
+    expect(state.druidWindow).toBeNull();
+  });
+
+  it('opens no window at all when the discard pile is empty', () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 };
+    let state = startMission(1, [boss]);
+    state.discardPile = [];
     state = rig(state, [druidCard('H', '3')]);
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    expect(res.state.banishPile.length).toBe(0);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.turnPhase).not.toBe('AWAIT_REGROWTH');
+    expect(state.druidWindow).toBeNull();
+  });
+
+  it("ignores the Druid card's own printed suit power (Hearts never heals)", () => {
+    const boss: LegacyEnemySpec = { name: 'Pondkin', suit: 'S', health: 100, attack: 0 };
+    let state = startMission(1, [boss]);
+    state.discardPile = [suited('H', '6')];
+    state = rig(state, [druidCard('H', '3')]);
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    // The pile was dealt out for Regrowth, not shuffled under the deck by a Cleric heal.
+    expect(state.druidWindow?.dealt[state.players[0].id]?.length).toBe(1);
   });
 });
 

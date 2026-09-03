@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { MISSIONS, guardianStickerEligible, reaverStickerEligible } from '@regicide/shared';
+import { MISSIONS, druidStickerEligible, guardianStickerEligible, reaverStickerEligible } from '@regicide/shared';
 import type { LegacySavePayload, LegacyStatePayload, MercenaryTypeId, RoomStatePayload } from '@regicide/shared';
 import { MercenaryCamp } from '../components/MercenaryCamp';
 import { BeastCompanionPicker } from '../components/BeastCompanionPicker';
 import { ReaverStickerPicker } from '../components/ReaverStickerPicker';
 import { GuardianStickerPicker } from '../components/GuardianStickerPicker';
+import { DruidStickerPicker } from '../components/DruidStickerPicker';
 
 /** Downloads the campaign's current progress as a JSON save file — a local backup independent of server persistence. */
 function downloadSave(legacyState: LegacyStatePayload): void {
@@ -34,6 +35,7 @@ export function CampaignLobbyPage({
   onSetBeastCompanionSelection,
   onChooseReaverSticker,
   onChooseGuardianSticker,
+  onChooseDruidSticker,
   onLeave,
 }: {
   roomState: RoomStatePayload;
@@ -44,6 +46,7 @@ export function CampaignLobbyPage({
   onSetBeastCompanionSelection: (cardId: string | null) => Promise<{ ok: true } | { ok: false; error: string }>;
   onChooseReaverSticker: (cardId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   onChooseGuardianSticker: (cardId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onChooseDruidSticker: (cardId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   onLeave: () => void;
 }) {
   const isHost = roomState.players.find((p) => p.id === myPlayerId)?.isHost ?? false;
@@ -58,6 +61,10 @@ export function CampaignLobbyPage({
   const guardianStickerGranted = MISSIONS.some((m) => legacyState.missionsCompleted.includes(m.id) && m.reward.guardianStickerChoice);
   const guardianStickerUsed = legacyState.party.some((c) => c.kind === 'suited' && c.secondClassGuardian);
   const guardianStickerEligibleCards = legacyState.party.filter(guardianStickerEligible);
+  // Mission 7's reward: same player-choice shape again, for the 4♦/4♣/4♠ and secondClassDruid.
+  const druidStickerGranted = MISSIONS.some((m) => legacyState.missionsCompleted.includes(m.id) && m.reward.druidStickerChoice);
+  const druidStickerUsed = legacyState.party.some((c) => c.kind === 'suited' && c.secondClassDruid);
+  const druidStickerEligibleCards = legacyState.party.filter(druidStickerEligible);
   // MISSIONS.length is not the highest built mission id — the list currently has a gap (Mission 7 isn't in yet),
   // so "all missions complete" must compare against the actual max id, not the array's count.
   const maxMissionId = Math.max(...MISSIONS.map((m) => m.id));
@@ -73,7 +80,10 @@ export function CampaignLobbyPage({
       (m) =>
         m.id >= legacyState.currentMission &&
         m.id < selectedMission.id &&
-        (m.reward.recruits.some((r) => r.beast) || m.reward.reaverStickerChoice || m.reward.guardianStickerChoice),
+        (m.reward.recruits.some((r) => r.beast) ||
+          m.reward.reaverStickerChoice ||
+          m.reward.guardianStickerChoice ||
+          m.reward.druidStickerChoice),
     );
 
   return (
@@ -142,6 +152,10 @@ export function CampaignLobbyPage({
 
         {guardianStickerGranted && !guardianStickerUsed && guardianStickerEligibleCards.length > 0 && (
           <GuardianStickerPicker eligible={guardianStickerEligibleCards} isHost={isHost} onChoose={onChooseGuardianSticker} />
+        )}
+
+        {druidStickerGranted && !druidStickerUsed && druidStickerEligibleCards.length > 0 && (
+          <DruidStickerPicker eligible={druidStickerEligibleCards} isHost={isHost} onChoose={onChooseDruidSticker} />
         )}
 
         {selectedMission && (

@@ -169,6 +169,7 @@ function finishAdvanceToNextPlayer(state: GameState, idleYield = false): void {
   state.kinfolkBankedThisTurn = false;
   flipMissionZoneCard(state);
   rollMissionZoneBonusCard(state);
+  flipPilgrimCard(state);
   flipStartOfTurnZoneCard(state);
   flipBeastDeckCard(state);
   flipBanishPileZoneCard(state);
@@ -290,6 +291,35 @@ function rollMissionZoneBonusCard(state: GameState): void {
   state.rollingZoneCards.push(card);
   const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester';
   log(state, `${label} recycles out of the banish pile into the rolling zone — the enemy grows bolder while it (and everything else piled up there) sits.`);
+}
+
+/**
+ * Mission 7 ("Tales of Rebirth") only: at the start of every turn, the top of the face-down Pilgrim deck flips
+ * face-up into the shared Pilgrim zone — a separate accumulation from missionZone's suit-immunity mechanic (see
+ * GameState.pilgrimZone). Called both once at mission start (the first player's first turn) and from
+ * finishAdvanceToNextPlayer; like missionZone's own flip, this is naturally skipped when a kill lets the same
+ * player continue their turn against a new enemy, since that path doesn't call advanceToNextPlayer.
+ */
+function flipPilgrimCard(state: GameState): void {
+  if (!state.pilgrimMechanic) return;
+  const card = state.pilgrimDeck.shift();
+  if (!card) return;
+  state.pilgrimZone.push(card);
+  log(state, `A Pilgrim surfaces in the mission zone: ${card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester'}.`);
+}
+
+/**
+ * Mission 7 only: an attack whose total played value exactly matches a Pilgrim currently sitting in the zone
+ * banishes them — permanently removed from the zone (and the kill-time burn total), not sent to the discard
+ * pile. Uses the play's raw totalValue (the cards' own printed sum), before any class-power multiplier or bonus.
+ */
+function checkPilgrimRescue(state: GameState, totalValue: number): void {
+  if (!state.pilgrimMechanic) return;
+  const idx = state.pilgrimZone.findIndex((c) => cardValue(c) === totalValue);
+  if (idx === -1) return;
+  const [rescued] = state.pilgrimZone.splice(idx, 1);
+  banishCards(state, [rescued]);
+  log(state, `${rescued.kind === 'suited' ? rescued.name ?? `the ${rescued.rank}` : 'A Jester'} is banished from the mission zone for good.`);
 }
 
 /**
@@ -1322,23 +1352,38 @@ function dealDamageAndCheckDefeat(
       // the rest of the defeat resolution.
       return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian, attackIncludesMage);
     }
-    if (state.pilgrimMechanic && remaining === 0) {
-      // Mission 7: sourced even by this mission's own transcript (though never actually coded until now) — an
-      // exact-damage kill banishes one Pilgrim for free, releasing it from whichever hand has been carrying it as
-      // dead weight (see SuitedCard.pilgrim / this mission's PLAY_CARDS/DEFEND hand-trap rejection). Scoped
-      // judgment call, not itself sourced: which Pilgrim/whose hand isn't specified anywhere, so this picks the
-      // first one found scanning hands in turn order starting from the current player. A no-op if nobody's
-      // holding one yet.
-      const n = state.players.length;
-      let freed: Card | null = null;
-      for (let i = 0; i < n && !freed; i++) {
-        const p = state.players[(state.currentPlayerIndex + i) % n];
-        const idx = p.hand.findIndex((c) => c.kind === 'suited' && c.pilgrim);
-        if (idx !== -1) [freed] = p.hand.splice(idx, 1);
+    if (state.pilgrimMechanic && state.pilgrimZone.length > 0) {
+      // Mission 7 (see GameState.pilgrimMechanic): every kill charges the party for whichever Pilgrims are still
+      // waiting in the zone — their combined value in cards burned off the top of the reserve deck — then sweeps
+      // the whole zone to the discard pile, resetting the tally for the next foe. That per-kill reset is what
+      // bounds this economy (the burn can never exceed the turns since the last kill); an earlier version of this
+      // mechanic left the zone standing across kills and drained the deck without bound.
+      if (remaining === 0) {
+        // An exact hit banishes the single highest-value Pilgrim before the burn is tallied, shrinking it.
+        // UNSOURCED JUDGMENT CALL: the source reads as a player's own pick of any zone card; auto-taking the
+        // most expensive one is the same simplification Mission 6's "exact kill spares the zone's highest-value
+        // card" already uses, and avoids a mid-resolution pending choice (and its UI) for a pick a player would
+        // almost always resolve this way anyway.
+        let best = 0;
+        for (let i = 1; i < state.pilgrimZone.length; i++) {
+          if (cardValue(state.pilgrimZone[i]) > cardValue(state.pilgrimZone[best])) best = i;
+        }
+        const [spared] = state.pilgrimZone.splice(best, 1);
+        banishCards(state, [spared]);
+        log(state, `The exact hit carries ${spared.kind === 'suited' ? spared.name ?? `the ${spared.rank}` : 'a Jester'} clear of the well — banished for good, out of the tally.`);
       }
-      if (freed) {
-        banishCards(state, [freed]);
-        log(state, `The exact hit frees ${freed.kind === 'suited' ? freed.name ?? 'a Pilgrim' : 'a Pilgrim'} from a weary hand — banished for good.`);
+      const burnTotal = state.pilgrimZone.reduce((sum, c) => sum + cardValue(c), 0);
+      if (burnTotal > 0) {
+        const burned = state.tavernDeck.splice(0, burnTotal);
+        if (burned.length > 0) {
+          pushToDiscardPile(state, burned);
+          log(state, `The ${state.pilgrimZone.length} Pilgrim(s) still waiting (combined strength ${burnTotal}) burn ${burned.length} card(s) off the reserve deck into the discard pile.`);
+        }
+      }
+      if (state.pilgrimZone.length > 0) {
+        pushToDiscardPile(state, state.pilgrimZone);
+        state.pilgrimZone = [];
+        log(state, 'The mission zone is swept clear — the Pilgrims left in it move to the discard pile.');
       }
     }
     if (state.beastDeckMechanic && remaining === 0) {
@@ -1638,6 +1683,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.zoneClosed = false;
   state.zonePurge = null;
   state.chanterWindow = null;
+  state.druidWindow = null;
   state.capturedPilesActive = false;
   state.capturedPiles = [];
   state.corruptedPartyEnemies = false;
@@ -1842,10 +1888,12 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.zoneVengeanceChoice = null;
   state.zoneReliefChoice = null;
   state.pilgrimMechanic = action.pilgrimMechanic ?? false;
-  // Vestigial (see GameState.pilgrimMechanic) — no mission sets action.pilgrimCards anymore, so this is always
-  // empty; Mission 7's actual Pilgrim cards ride in through extraReserveCards below, shuffled into the reserve
-  // deck like any other card.
-  state.pilgrimDeck = action.pilgrimCards ? [...action.pilgrimCards] : [];
+  // Shuffled on every attempt — Mission 7's deck is 24 interchangeable survivors, 4 copies each of strength 2-7
+  // (see missions.ts's pilgrimDeck), so dealing it in its declared order would march the zone up in blocks of
+  // four identical values instead of the varied draw the physical shuffled deck gives. Uses buildRng, so a seeded
+  // test/simulation still gets a reproducible order. Kept entirely out of the reserve deck: nothing ever draws a
+  // Pilgrim into a hand (see GameState.pilgrimMechanic).
+  state.pilgrimDeck = action.pilgrimCards ? shuffle(action.pilgrimCards, buildRng) : [];
   state.pilgrimZone = [];
   state.ascendingZone = action.ascendingZone ?? false;
   state.zoneOpenForPlacement = false;
@@ -1853,6 +1901,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.zoneClosed = false;
   state.zonePurge = null;
   state.chanterWindow = null;
+  state.druidWindow = null;
   state.capturedPilesActive = capturedPilesActive;
   state.capturedPiles = capturedPiles;
   state.corruptedPartyEnemies = corruptedPartyEnemies;
@@ -1867,6 +1916,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.skipNextBanishZoneFlip = false;
 
   log(state, `Mission started with ${n} player(s). First enemy: ${enemyLabel(state.currentEnemy)}.`);
+  flipPilgrimCard(state); // the first player's turn is starting right now, so the Mission 7 flip applies here too
   flipStartOfTurnZoneCard(state); // Mission 10: same reasoning — the first turn's start-of-turn flip fires here too
   flipBeastDeckCard(state); // Mission 11: same reasoning — the first turn's beast-deck flip fires here too
   flipBanishPileZoneCard(state); // Mission 12: same reasoning — the first turn's flip fires here too (a no-op, the banish pile starts empty)
@@ -2105,27 +2155,18 @@ function continueResolveCommittedPlay(
     }
   }
 
-  // Druids (Mission 7): playing one activates Regrowth — salvage cards back out of the banish pile and return
-  // them to the bottom of the reserve deck. Wellspring salvages 2 instead of 1. Pulls the most recently banished
-  // cards first (end of banishPile), same "reverse of banishment" ordering used nowhere else yet but the
-  // simplest deterministic choice here.
-  const druidCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.druid));
-  if (state.ruleset === 'legacy' && druidCards.length > 0) {
-    const salvageCount = hasSpecial(druidCards, 'WELLSPRING') ? 2 : 1;
-    const salvaged: Card[] = [];
-    for (let i = 0; i < salvageCount; i++) {
-      const card = state.banishPile.pop();
-      if (card) salvaged.push(card);
-    }
-    if (salvaged.length > 0) {
-      toReserveDeck(state, salvaged, 'bottom');
-      const salvagedLabel = salvaged
-        .map((c) => (c.kind === 'suited' ? c.name ?? `a ${c.rank}` : 'a Jester'))
-        .join(' and ');
-      log(state, `${druidCards[0].name ?? 'A Druid'} channels Regrowth — ${salvagedLabel} returns from the banish pile to the bottom of the reserve deck.`);
-    } else {
-      log(state, 'The banish pile is empty — nothing for Regrowth to salvage.');
-    }
+  // Druids (Mission 7): playing one activates Regrowth — the whole discard pile is dealt out across the table
+  // and every player assigns up to 4 of their own dealt cards (hand / banish / top of deck / bottom of deck),
+  // with the rest returning to the discard pile. Like a Chanter's chant, that's a per-player window, so it can't
+  // resolve inline here — it opens after the attack lands (see beginRegrowth below). A card carrying only a
+  // bonus Druid sticker (secondClassDruid) opens the same window on top of resolving its own suit power, exactly
+  // as a secondClassGuardian card still raises a shield.
+  const druidCards = cards.filter(
+    (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.druid || c.secondClassDruid),
+  );
+  const regrowthActive = state.ruleset === 'legacy' && druidCards.length > 0;
+  if (regrowthActive) {
+    log(state, `${druidCards[0].name ?? 'A Druid'} channels Regrowth — the discard pile is dealt out across the table.`);
   }
 
   // Chanters (Mission 8): playing one opens a chant worth its own card value — every player at the table draws
@@ -2181,6 +2222,7 @@ function continueResolveCommittedPlay(
     state,
     `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${damage}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
   );
+  if (state.ruleset === 'legacy') checkPilgrimRescue(state, totalValue);
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
   // Mission 6, sourced fix: a winning attack that includes a Guardian cancels Myla's zoneVengeanceOnKill
@@ -2202,11 +2244,25 @@ function continueResolveCommittedPlay(
     if (chantCount > 0) {
       return beginChant(state, chantCount, { kind: 'resumeResolved', turnPhase: state.turnPhase, pendingDamage: state.pendingDamage });
     }
+    // Same reasoning as the chant just above: a Druid's Regrowth fires on ANY play it's part of, the killing
+    // blow included, resuming whatever dealDamageAndCheckDefeat already decided once the last player picks.
+    if (regrowthActive) {
+      return beginRegrowth(state, { kind: 'resumeResolved', turnPhase: state.turnPhase, pendingDamage: state.pendingDamage });
+    }
     return ok(state); // enemy was defeated, same player continues against the next one
   }
 
   if (chantCount > 0) {
     return beginChant(state, chantCount, { kind: 'deferredAttack', blockNextAttack: guardianBlocksNextAttack });
+  }
+
+  // Mission 7's Regrowth window (see beginRegrowth). Ordered after the chant for the same reason the Azure
+  // Emblem window below is: these per-play windows don't stack, and a single play can only reach this point
+  // with both a Chanter and a Druid in it via a same-rank combo of the two (e.g. a Druid 7 with a Chanter 7)
+  // once both factions are in the party — rare enough that the chant simply wins, matching the existing
+  // chant-beats-Azure-Emblem precedent rather than inventing a queue of stacked windows.
+  if (regrowthActive) {
+    return beginRegrowth(state, { kind: 'deferredAttack', blockNextAttack: guardianBlocksNextAttack });
   }
 
   // Azure Emblem (Mission 6 relic), sourced fix: whenever a Mage joins the attack, the Mage's OWN player gets
@@ -2278,12 +2334,6 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
   if (cards.some((c) => c.kind === 'jester')) {
     return fail('Use the Jester action to play the Jester.');
   }
-  // Mission 7's Pilgrim hand-trap: once drawn into a hand, a Pilgrim card can never be played, for any reason
-  // (see SuitedCard.pilgrim / GameState.pilgrimMechanic) — reject the whole play rather than silently dropping it.
-  if (state.pilgrimMechanic && cards.some((c) => c.kind === 'suited' && c.pilgrim)) {
-    return fail('A Pilgrim card is dead weight — it cannot be played.');
-  }
-
   // A Mercenary any-suit Ace (see SuitedCard.wildSuit) needs its suit resolved before validatePlayShape ever
   // reads it — the earliest point in this play's resolution a suit is needed at all. `cards` holds direct
   // references into player.hand, so mutating `.suit` here is visible everywhere downstream (tableCards, etc.).
@@ -2433,9 +2483,6 @@ function bankKinfolkCard(state: GameState, action: Extract<GameAction, { type: '
   const card = player.hand.find((c) => c.id === action.cardId);
   if (!card) return fail(`Card ${action.cardId} is not in your hand.`);
   if (card.kind !== 'suited') return fail('Only a suited card worth 2-5 can be banked onto the Kinfolk Flute.');
-  if (state.pilgrimMechanic && card.pilgrim) {
-    return fail('A Pilgrim card is dead weight — it cannot be banked, even onto the Kinfolk Flute.');
-  }
   const value = cardValue(card);
   if (value < 2 || value > 5) return fail('Only a card worth 2-5 can be banked onto the Kinfolk Flute.');
 
@@ -2456,11 +2503,6 @@ function assistCombo(state: GameState, action: Extract<GameAction, { type: 'ASSI
   const card = assister.hand.find((c) => c.id === action.cardId);
   if (!card) return fail('Card is not in your hand.');
   if (card.kind !== 'suited') return fail('Only a suited card can be added to a combo.');
-  // Mission 7's Pilgrim hand-trap extends to a silent Scarlet Whistle assist too — slipping one in is still
-  // "playing" it (see GameState.pilgrimMechanic / playCards' own rejection).
-  if (state.pilgrimMechanic && card.pilgrim) {
-    return fail('A Pilgrim card is dead weight — it cannot be played, even silently assisted in.');
-  }
 
   // A Mercenary any-suit Ace (see SuitedCard.wildSuit) can be the assisting card too — this window can open on a
   // lone Companion-pairing play, whose validatePlayShape branch reads suits immediately (see playCards's own
@@ -2659,19 +2701,13 @@ function resolveJesterAttack(state: GameState, player: PlayerState, jesterCard: 
  * Discards `player`'s entire hand and redraws it back up to `state.maxHandSize` — the base game's own printed
  * Jester power (see useSoloJester), reused here for Legacy's CLAIM_JESTER, which never suspends it.
  *
- * Two bug-fixes layered on top of that discard:
- *  - Routes through pushToDiscardPile instead of a raw push, so Missions 4/11/12's discardCleanupLowToHigh
- *    ordering (which their pileTopEnemyBonus-style mechanics depend on) isn't silently bypassed just because the
- *    discard happened to originate from a Jester claim instead of a covered DEFEND.
- *  - Mission 7's Pilgrim hand-trap (see GameState.pilgrimMechanic): a Pilgrim card can never be discarded once
- *    drawn into a hand, by ANY path, this one included. A stuck Pilgrim is carved out of the discard and simply
- *    stays in `player.hand` across the refill, same as it would survive a normal PLAY_CARDS/DEFEND rejection.
+ * Bug-fix layered on top of that discard: routes through pushToDiscardPile instead of a raw push, so Missions
+ * 4/11/12's discardCleanupLowToHigh ordering (which their pileTopEnemyBonus-style mechanics depend on) isn't
+ * silently bypassed just because the discard happened to originate from a Jester claim instead of a covered DEFEND.
  */
 function refillHandFromDeck(state: GameState, player: PlayerState, sourceLabel: string): void {
-  const stuckPilgrims = state.pilgrimMechanic ? player.hand.filter((c) => c.kind === 'suited' && c.pilgrim) : [];
-  const discardable = stuckPilgrims.length > 0 ? player.hand.filter((c) => !(c.kind === 'suited' && c.pilgrim)) : player.hand;
-  pushToDiscardPile(state, discardable);
-  player.hand = stuckPilgrims;
+  pushToDiscardPile(state, player.hand);
+  player.hand = [];
   while (player.hand.length < state.maxHandSize && drawOneCard(state, player)) {
     // keep drawing until the hand limit or the deck runs dry
   }
@@ -2736,19 +2772,10 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
     if (!card) return fail(`Card ${id} is not in your hand.`);
     cards.push(card);
   }
-  // Mission 7's Pilgrim hand-trap: once drawn into a hand, a Pilgrim card can never be discarded either — not to
-  // cover damage, and not as part of a Feign Death (which requires discarding the WHOLE hand; a Pilgrim sitting
-  // there makes that impossible on its own, exactly per the sourced rule that it "blocks Feign Death while held").
-  if (state.pilgrimMechanic && cards.some((c) => c.kind === 'suited' && c.pilgrim)) {
-    return fail('A Pilgrim card is dead weight — it cannot be discarded. Choose other cards to cover the damage.');
-  }
   const discardTotal = cards.reduce((sum, c) => sum + cardValue(c), 0);
   const isEntireHand = cards.length === player.hand.length;
   // Legacy "Feign Death": discarding a full hand always succeeds, but only if you didn't play a card this turn
-  // (so your hand wasn't reduced below your limit) — i.e. you yielded straight into this defend. Gated on the
-  // literal whole hand (isEntireHand), so a Pilgrim sitting in hand makes Feign Death permanently unreachable —
-  // its dead-weight card can never be part of that whole-hand discard (see the rejection above) — exactly the
-  // sourced rule that Feign Death is blocked while a Pilgrim is held.
+  // (so your hand wasn't reduced below your limit) — i.e. you yielded straight into this defend.
   const feignDeath =
     state.ruleset === 'legacy' &&
     isEntireHand &&
@@ -2756,19 +2783,8 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
     player.hand.length === state.maxHandSize &&
     state.lastActionWasYield[state.currentPlayerIndex];
 
-  // Mission 7: since a Pilgrim can never be offered up (see the rejection above), "your whole hand" is an
-  // impossible bar to clear whenever one is held — the base insufficient-discard check below would otherwise
-  // reject every possible DEFEND action outright, soft-locking the game. Once every OTHER (non-Pilgrim) card in
-  // hand has been offered, that's the most this player is capable of discarding — treat it the same way the base
-  // rule treats emptying a Pilgrim-free hand, so an insufficient defense still resolves as a normal loss below
-  // instead of being stuck rejecting forever.
-  const maxDischargeableCount = state.pilgrimMechanic
-    ? player.hand.filter((c) => !(c.kind === 'suited' && c.pilgrim)).length
-    : player.hand.length;
-  const offeredEverythingDischargeable = cards.length === maxDischargeableCount;
-
-  if (discardTotal < state.pendingDamage && !offeredEverythingDischargeable) {
-    return fail(`That only covers ${discardTotal} of ${state.pendingDamage} damage — select more cards or everything you're able to discard.`);
+  if (discardTotal < state.pendingDamage && !isEntireHand) {
+    return fail(`That only covers ${discardTotal} of ${state.pendingDamage} damage — select more cards or your whole hand.`);
   }
 
   const idSet = new Set(action.cardIds);
@@ -2980,6 +2996,104 @@ function resolveChant(state: GameState, action: Extract<GameAction, { type: 'RES
 }
 
 /**
+ * Legacy-only (Mission 7+): opens (or immediately clears) a Regrowth window — the WHOLE discard pile is dealt
+ * out round-robin across the table starting from the current player, then every player who received at least one
+ * card assigns their picks one at a time via RESOLVE_REGROWTH (see GameState.druidWindow). Dealing round-robin
+ * from the current player, rather than splitting the pile into equal blocks, is what the source describes ("deal
+ * it out to all players") and keeps the remainder cards with the players nearest the Druid's own turn.
+ * `onResolved` (see ChanterResolution) is carried through to whenever the play's tail finally runs — either right
+ * away, if the discard pile was empty, or once the last player's picks resolve.
+ */
+function beginRegrowth(state: GameState, onResolved: ChanterResolution): EngineResult {
+  const pile = state.discardPile;
+  state.discardPile = [];
+  const dealt: Record<string, Card[]> = {};
+  const n = state.players.length;
+  for (let i = 0; i < pile.length; i++) {
+    const p = state.players[(state.currentPlayerIndex + i) % n];
+    (dealt[p.id] ??= []).push(pile[i]);
+  }
+  const pendingPlayerIds = state.players.filter((p) => (dealt[p.id]?.length ?? 0) > 0).map((p) => p.id);
+  if (pendingPlayerIds.length === 0) {
+    log(state, 'The discard pile is empty — nothing for Regrowth to deal out.');
+    return runChantResolution(state, onResolved);
+  }
+  state.druidWindow = { pendingPlayerIds, dealt, onResolved };
+  state.turnPhase = 'AWAIT_REGROWTH';
+  log(state, `${pile.length} card(s) are dealt out to ${pendingPlayerIds.length} player(s) — each assigns up to 4 of them.`);
+  return ok(state);
+}
+
+/**
+ * Legacy-only (Mission 7+): the front-of-queue player in an open Regrowth window assigns their dealt cards — at
+ * most one each to hand, banish pile, top of the reserve deck, and bottom of the reserve deck (see
+ * GameState.druidWindow). A player dealt fewer than 4 cards assigns exactly as many as they hold, choosing which
+ * destinations to use; that "as many actions as you have cards" rule is an UNSOURCED JUDGMENT CALL (John's
+ * ruling) — the source only describes the full 4-card case. Everything left unassigned returns to the discard
+ * pile.
+ */
+function resolveRegrowth(state: GameState, action: Extract<GameAction, { type: 'RESOLVE_REGROWTH' }>): EngineResult {
+  if (state.turnPhase !== 'AWAIT_REGROWTH' || !state.druidWindow) return fail('There is no open Regrowth to resolve.');
+  const [pickerId, ...rest] = state.druidWindow.pendingPlayerIds;
+  if (action.playerId !== pickerId) return fail("It's not your turn to resolve Regrowth.");
+
+  const player = findPlayer(state, pickerId);
+  if (!player) return fail('Unknown player.');
+  const pool = state.druidWindow.dealt[pickerId] ?? [];
+
+  const picks: { id: string | undefined; label: string }[] = [
+    { id: action.toHandCardId, label: 'hand' },
+    { id: action.toBanishCardId, label: 'banish' },
+    { id: action.toDeckTopCardId, label: 'top of deck' },
+    { id: action.toDeckBottomCardId, label: 'bottom of deck' },
+  ];
+  const chosenIds = picks.filter((p) => p.id !== undefined).map((p) => p.id as string);
+  if (new Set(chosenIds).size !== chosenIds.length) {
+    return fail('Each card can only go to one destination — the same card was chosen twice.');
+  }
+  const required = Math.min(4, pool.length);
+  if (chosenIds.length !== required) {
+    return fail(`You were dealt ${pool.length} card(s) and must assign exactly ${required} of them — assigned ${chosenIds.length}.`);
+  }
+  const byId = new Map(pool.map((c) => [c.id, c]));
+  for (const id of chosenIds) {
+    if (!byId.has(id)) return fail(`Card ${id} was not dealt to you.`);
+  }
+
+  const take = (id: string | undefined): Card | null => (id === undefined ? null : byId.get(id) ?? null);
+  const toHand = take(action.toHandCardId);
+  const toBanish = take(action.toBanishCardId);
+  const toTop = take(action.toDeckTopCardId);
+  const toBottom = take(action.toDeckBottomCardId);
+
+  if (toHand) player.hand.push(toHand);
+  if (toBanish) banishCards(state, [toBanish]);
+  if (toTop) toReserveDeck(state, [toTop], 'top');
+  if (toBottom) toReserveDeck(state, [toBottom], 'bottom');
+
+  // Everything this player didn't assign goes straight back to the discard pile.
+  const leftovers = pool.filter((c) => !chosenIds.includes(c.id));
+  if (leftovers.length > 0) pushToDiscardPile(state, leftovers);
+
+  const assignedLabel = picks
+    .filter((p) => p.id !== undefined)
+    .map((p) => {
+      const card = byId.get(p.id as string)!;
+      return `${card.kind === 'suited' ? card.name ?? `a ${card.rank}` : 'a Jester'} to ${p.label}`;
+    })
+    .join(', ');
+  log(state, `${player.name} sends ${assignedLabel}${leftovers.length > 0 ? `, returning ${leftovers.length} card(s) to the discard pile` : ''}.`);
+
+  const { onResolved, dealt } = state.druidWindow;
+  if (rest.length === 0) {
+    state.druidWindow = null;
+    return runChantResolution(state, onResolved);
+  }
+  state.druidWindow = { pendingPlayerIds: rest, dealt, onResolved };
+  return ok(state);
+}
+
+/**
  * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic, sourced fix: opens the Azure Emblem window after a
  * play that included a Mage card — the Mage's OWN player (the attacker, `attackerId`) may bank one of
  * `eligibleCardIds` (this play's Mage card(s), still sitting on the enemy's table) onto the reserve deck via
@@ -3173,6 +3287,7 @@ export function createLobbyState(): GameState {
     zoneClosed: false,
     zonePurge: null,
     chanterWindow: null,
+    druidWindow: null,
     capturedPilesActive: false,
     capturedPiles: [],
     corruptedPartyEnemies: false,
@@ -3223,6 +3338,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return resolveZonePurge(draft, action);
     case 'RESOLVE_CHANT':
       return resolveChant(draft, action);
+    case 'RESOLVE_REGROWTH':
+      return resolveRegrowth(draft, action);
     case 'USE_SOLO_JESTER':
       return useSoloJester(draft, action);
     case 'BANISH_FOR_RESCUE':
