@@ -7,7 +7,11 @@
     "packages/client"
   ],
   "scripts": {
-    "test": "npm test -w packages/shared",
+    "bootstrap": "npm install",
+    "pretest": "npm run build -w packages/shared",
+    "test": "npm test -w packages/shared && npm test -w packages/server",
+    "pretypecheck": "npm run build -w packages/shared",
+    "typecheck": "tsc -p packages/server/tsconfig.json --noEmit && tsc -p packages/client/tsconfig.json --noEmit",
     "dev:server": "npm run dev -w packages/server",
     "dev:client": "npm run dev -w packages/client",
     "build": "npm run build -w packages/shared && npm run build -w packages/client && npm run build -w packages/server",
