@@ -3,7 +3,7 @@ import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engi
 import { redactStateFor } from '../game/redact.js';
 import { makeRng } from '../game/deck.js';
 import { cardSuits, missionZoneValueSum } from '../game/rules.js';
-import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
+import type { Card, EngineResult, GameAction, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs, type MissionEnemySpec } from './missions.js';
@@ -2032,7 +2032,9 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
     expect(state.currentEnemy?.damageTaken).toBe(16);
   });
 
-  it('lets the player decline the reveal\'s bonus entirely (John\'s house rule) — revealed cards are still banished, but no value is added', () => {
+  it("John's ruling (2026-09-04): the pick is mandatory once cards are revealed — the retired DECLINE_REAVER_REVEAL is rejected and the window stays open", () => {
+    // Reverses the 2026-08-31 house rule that let a player reveal and then take nothing: "if you reveal only one,
+    // you at least have to use one". The reveal-COUNT choice is now the only lever on what a reveal costs.
     const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
     let state = startCrimsonMission(1, [boss]);
     state = structuredClone(state);
@@ -2045,39 +2047,97 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
 
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
     state = chooseMaxReaverRevealCount(state);
-
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
-    res = ensureOk(applyAction(state, { type: 'DECLINE_REAVER_REVEAL', playerId: state.players[0].id }));
-    state = res.state;
 
-    // 4 * 2 (Reaver's own doubling, unconditional) = 8 — no bonus from the declined reveal.
-    expect(state.currentEnemy?.damageTaken).toBe(8);
+    // A stale client still sending the old decline action is refused outright, not given a free way out.
+    const declined = applyAction(state, { type: 'DECLINE_REAVER_REVEAL', playerId: state.players[0].id } as unknown as GameAction);
+    expect(declined.ok).toBe(false);
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    expect(state.reaverReveal?.candidates.length).toBe(4);
+
+    // The only exit is choosing one of the revealed cards, which folds its value into the attack.
+    const chosen = state.reaverReveal!.candidates.find((c) => c.rank === '6')!;
+    state = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id })).state;
+
+    expect(state.currentEnemy?.damageTaken).toBe(20); // (4 + 6) * 2 (Reaver's own doubling)
     expect(state.turnPhase).not.toBe('AWAIT_REAVER_REVEAL');
-    expect(state.tavernDeck.length).toBe(reserveBefore - 4); // still revealed (and consumed) even though declined
+    expect(state.tavernDeck.length).toBe(reserveBefore - 4);
     expect(state.banishPile.filter((c) => c.kind === 'suited' && c.rank === '2').length).toBe(3);
-    expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '6')).toBe(true); // banished, not added to the attack
   });
 
-  it('declining the bonus can preserve an exact kill (and its Mission 5 death-throes splash) that choosing a card would have overkilled', () => {
+  it("revealing just one card still forces taking it — an overkill past an exact kill (and the forfeited Mission 5 splash) is now the player's own risk", () => {
+    // The 2026-08-31 house rule let this same play decline the bonus to keep the exact kill and its death-throes
+    // splash. John gave that up knowingly on 2026-09-04: revealing at all commits you to using something.
     const first: LegacyEnemySpec = { name: 'First Sporeling', suit: 'C', health: 8, attack: 7 };
     const second: LegacyEnemySpec = { name: 'Second Sporeling', suit: 'D', health: 20, attack: 3 };
     let state = startCrimsonMission(1, [first, second], { exactKillSplashDamage: true });
     state = structuredClone(state);
-    state.tavernDeck = [suited('C', '5'), ...state.tavernDeck]; // a bonus that would overkill if chosen
-    state = rig(state, [reaverCard('D', '4')]); // (4 + 0) * 2 (Reaver's own doubling) = 8, an exact kill
+    const bonus = suited('C', '5'); // the single card a count of 1 will turn up — enough to overshoot
+    state.tavernDeck = [bonus, ...state.tavernDeck];
+    state = rig(state, [reaverCard('D', '4')]); // (4 + 0) * 2 (Reaver's own doubling) = 8 would have been exact
 
     let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
-    state = chooseMaxReaverRevealCount(state);
+    state = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_COUNT', playerId: state.players[0].id, count: 1 })).state;
 
     expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
-    res = ensureOk(applyAction(state, { type: 'DECLINE_REAVER_REVEAL', playerId: state.players[0].id }));
-    state = res.state;
+    expect(state.reaverReveal?.candidates.map((c) => c.id)).toEqual([bonus.id]);
+    state = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: bonus.id })).state;
 
+    // (4 + 5) * 2 = 18 into 8 health: still a kill, but no longer exact, so no splash carries into the next enemy.
     expect(state.currentEnemy?.name).toBe('Second Sporeling');
-    expect(state.currentEnemy?.damageTaken).toBe(7); // First Sporeling's base attack (7), splashed in
+    expect(state.currentEnemy?.damageTaken).toBe(0);
+  });
+
+  it('never opens an unanswerable window: a reveal that turns up nothing but Jesters banishes them and resolves with no bonus', () => {
+    // The mandatory pick's one deadlock risk — `candidates` drops revealed Jesters, so a reveal can legitimately
+    // come back with nothing choosable. That case has to settle itself rather than wait for an impossible choice.
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
+    let state = startCrimsonMission(1, [boss]);
+    state = structuredClone(state);
+    state.tavernDeck = [jester(), jester(), jester(), jester(), ...state.tavernDeck];
+    const reserveBefore = state.tavernDeck.length;
+    state = rig(state, [reaverCard('D', '4')]);
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseMaxReaverRevealCount(state);
+
+    expect(state.turnPhase).not.toBe('AWAIT_REAVER_REVEAL');
+    expect(state.reaverReveal).toBeNull();
+    expect(state.currentEnemy?.damageTaken).toBe(8); // 4 * 2 (Reaver's own doubling), no reveal bonus
+    expect(state.tavernDeck.length).toBe(reserveBefore - 4); // the Jesters were still spent
+    expect(state.banishPile.filter((c) => c.kind === 'jester').length).toBe(4); // and banished for good, as always
+  });
+
+  it('never opens an unanswerable window: an empty reserve deck skips the reveal entirely, and a short one opens a mandatory pick over what it could find', () => {
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
+    const base = startCrimsonMission(1, [boss]);
+
+    // Empty reserve deck: nothing to reveal, nothing to choose, no window, no bonus.
+    let empty = structuredClone(base);
+    empty.tavernDeck = [];
+    empty = rig(empty, [reaverCard('D', '4'), suited('H', '2')]);
+    empty = ensureOk(applyAction(empty, { type: 'PLAY_CARDS', playerId: empty.players[0].id, cardIds: [empty.players[0].hand[0].id] })).state;
+    expect(empty.turnPhase).not.toBe('AWAIT_REAVER_REVEAL_COUNT');
+    expect(empty.turnPhase).not.toBe('AWAIT_REAVER_REVEAL');
+    expect(empty.reaverReveal).toBeNull();
+    expect(empty.currentEnemy?.damageTaken).toBe(8); // 4 * 2, no reveal bonus
+
+    // Fewer cards left than the count chosen: the reveal pulls what's there, and that single card must be used.
+    let short = structuredClone(base);
+    const only = suited('C', '6');
+    short.tavernDeck = [only];
+    short = rig(short, [reaverCard('D', '4')]);
+    short = ensureOk(applyAction(short, { type: 'PLAY_CARDS', playerId: short.players[0].id, cardIds: [short.players[0].hand[0].id] })).state;
+    expect(short.reaverRevealCountChoice?.maxCount).toBe(4); // the count offered ignores how deep the deck actually is
+    short = chooseMaxReaverRevealCount(short);
+
+    expect(short.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+    expect(short.reaverReveal?.candidates.map((c) => c.id)).toEqual([only.id]);
+    short = ensureOk(applyAction(short, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: short.players[0].id, cardId: only.id })).state;
+    expect(short.currentEnemy?.damageTaken).toBe(20); // (4 + 6) * 2
   });
 
   it('doubles unconditionally on its own, and quadruples when combined with a Warrior (Clubs) card in the same play', () => {
