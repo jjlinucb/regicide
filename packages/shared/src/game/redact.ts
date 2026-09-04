@@ -33,7 +33,6 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     comboAssist: state.comboAssist,
     scarletWhistleSoloChoice: state.scarletWhistleSoloChoice,
     relics: state.relics,
-    corruptedRelics: state.corruptedRelics,
     kinfolkBankedThisTurn: state.kinfolkBankedThisTurn,
     azureEmblemWindow: state.azureEmblemWindow,
     mageReveal: state.mageReveal,

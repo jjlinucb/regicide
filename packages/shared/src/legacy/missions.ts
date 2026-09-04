@@ -2,6 +2,7 @@ import type { Card, LegacyEnemySpec, Rank, Suit } from '../game/types.js';
 import type { ClassId } from './classes.js';
 import { CLASS_THEME } from './classes.js';
 import type { MissionReward, RecruitSpec } from './party.js';
+import { canBeCorrupted } from './party.js';
 
 export interface MissionEnemySpec {
   name: string;
@@ -47,13 +48,15 @@ export interface Mission {
   /** See GameState.standingJesters. */
   standingJesters?: boolean;
   /**
-   * Relic ids this mission hands the party at SETUP, in a corrupted (inert) state — see
-   * GameState.corruptedRelics. Distinct from `reward.relics`, which grants a relic permanently at mission END:
-   * these are in play for this mission only, and are not persisted to the campaign by themselves.
+   * Relic ids this mission puts on the table at SETUP, fully functional for the whole mission. Distinct from
+   * `reward.relics`, which banks a relic permanently at mission END: these are in play for this mission only and
+   * are never persisted to the campaign by themselves.
    *
-   * Mission 9 only today, per John (2026-09-04): "you do get the Evergreen relic, but it's corrupted."
+   * Mission 9 only today: it starts holding 'CORRUPTED_EVERGREEN_MOTHER' and, on a win, banks the healed
+   * 'EVERGREEN_MOTHER' as its reward. Those are two separate relics, a weaker tier and its healed form — nothing
+   * here marks a relic "corrupted" as a state.
    */
-  startingCorruptedRelics?: string[];
+  startingRelics?: string[];
   /** See GameState.discardTopBuffsAttack. */
   discardTopBuffsAttack?: boolean;
   /** See GameState.exactKillToReserveDeck. */
@@ -317,7 +320,15 @@ function restoredHero(name: string, suit: Suit, rank: Rank): Card {
   return { id: `restored-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, restored: true };
 }
 function corruptedHero(name: string, suit: Suit, rank: Rank): Card {
-  return { id: `corrupted-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, corrupted: true };
+  const card: Card = { id: `corrupted-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name };
+  // Authored mission data is held to the same corruption eligibility rule as a reward's random pick (party.ts's
+  // canBeCorrupted — rank 2-9, base class only, never a Mage). Thrown at module load rather than filtered
+  // silently: MISSIONS is static, so this can only ever fire on a bad edit to the two entries below, and a loud
+  // failure the first test run catches beats shipping a card the rules say cannot exist.
+  if (!canBeCorrupted(card)) {
+    throw new Error(`Mission data error: "${name}" (${suit}${rank}) is not an eligible corruption target — see party.ts's canBeCorrupted.`);
+  }
+  return { ...card, corrupted: true };
 }
 
 /** Converts a mission's enemy specs into the engine's LegacyEnemySpec shape (suit-keyed). Mage enemies aren't used yet — the class only exists as a party reward so far. */
@@ -1130,30 +1141,27 @@ export const MISSIONS: Mission[] = [
     // caught by this pass's own regression test).
     standingJesters: true,
     sidelineHighArcana: true,
-    // JOHN, 2026-09-04 (the whole of what he specified): "one, you do get the Evergreen relic, but it's
-    // corrupted." So Mission 9 now SETS OUT with the Evergreen Mother already on the table, corrupted, rather
-    // than only meeting it in the reward below. He flagged this as one item of a Mission 9 setup he hasn't
-    // finished dictating ("one, ..."), so nothing else about this mission's opening setup was touched.
+    // JOHN, 2026-09-04, correcting an earlier misreading of his own words: "CORRUPTED EVERGREEN MOTHER" IS THE
+    // NAME OF A WEAKER TIER OF RELIC, NOT A CONDITION APPLIED TO ONE. There are two relics, and Mission 9 is
+    // where both of them happen:
+    //   • Corrupted Evergreen Mother — handed over at SETUP, below, and fully functional all mission. Its power,
+    //     in his words: when you play a corrupted CARD, instead of banishing the reserve deck's top card,
+    //     another player must banish a card from their own hand; solo, the rule doesn't change, so you banish
+    //     from your own. That is exactly what engine.ts's applyCorruptedCost already did, so no engine mechanic
+    //     was invented for it.
+    //   • Evergreen Mother — the healed relic, this mission's REWARD, carried into Missions 10-12.
     //
-    // THREE THINGS HE DID NOT SAY, decided here and deliberately kept to the least destructive option each —
-    // all three are cheap to reverse, and none is buried in the engine:
-    //  1. WHAT A CORRUPTED RELIC DOES. Modelled as fully inert: present and visible, no powers (see
-    //     selectors.ts's relicActive, the single gate). This is the only choice that changes nothing about how
-    //     Mission 9 actually plays — before this, the relic simply wasn't in play during Mission 9, so the
-    //     corrupted-card cost already fell through to "banish the reserve deck's top card", and it still does.
-    //     A weakened-but-working or works-at-a-price relic would silently re-tune this mission's difficulty on a
-    //     guess; inert does not. Change relicActive if he rules otherwise.
-    //  2. WHETHER MISSION 9 CAN CLEANSE IT. No in-mission cleanse exists — nothing clears corruptedRelics
-    //     mid-mission, and no action was invented to do so. The campaign already has two cleansing mechanics it
-    //     could borrow if he wants one (Mission 10's exact-kill restoration, Mission 12's restored cards), but
-    //     neither is wired to relics and neither was assumed here.
-    //  3. WHETHER IT'S NEW HERE OR CORRUPTED FROM EARLIER. The reward below is UNCHANGED, so the relic is still
-    //     granted permanently on a Mission 9 win and still works normally from Mission 10 on. Combined with the
-    //     per-mission corruption above, that reads as: it's corrupted while you fight for it, and clean once the
-    //     mission is won. It also means missions 10-12 are untouched by this change. If the party has already
-    //     won Mission 9 and replays it, the mission's corrupted state deliberately wins (see engine.ts's
-    //     startLegacyMission) — the relic is corrupted AT Mission 9, every time.
-    startingCorruptedRelics: ['EVERGREEN_MOTHER'],
+    // The earlier reading treated "corrupted" as a state that switched the relic OFF for the mission. It didn't;
+    // that whole GameState.corruptedRelics / relicActive apparatus is gone.
+    //
+    // AWAITING HIS SPEC: what the HEALED relic does differently. He hasn't said, so EVERGREEN_MOTHER keeps the
+    // behavior it already had — identical to the corrupted tier's. That is a PLACEHOLDER, flagged as such at
+    // applyCorruptedCost, not a ruling that the two tiers are the same.
+    //
+    // BEWARE THE WORD: "corrupted" now names two unrelated things in this codebase. Corrupted CARDS
+    // (SuitedCard.corrupted) are a real mechanic with real rules — immunity-ignoring, a banish cost, and a strict
+    // rank-2-9-base-class eligibility rule (party.ts's canBeCorrupted). Corrupted RELICS are just a tier name.
+    startingRelics: ['CORRUPTED_EVERGREEN_MOTHER'],
     reward: {
       recruits: [],
       relics: ['EVERGREEN_MOTHER'],

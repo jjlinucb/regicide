@@ -450,7 +450,9 @@ export class RoomManager {
       legacy.beastCompanionPool = [...legacy.beastCompanionPool, ...beastRecruits.map((r) => buildRecruitCard(r))];
     }
     if (mission.reward.relics?.length) {
-      legacy.permanentRules = [...legacy.permanentRules, ...mission.reward.relics];
+      // Deduped: a mission's reward can be granted more than once for the same campaign (a replay of an
+      // already-won mission, or a jump-ahead that back-grants it), and a relic held twice is meaningless.
+      legacy.permanentRules = Array.from(new Set([...legacy.permanentRules, ...mission.reward.relics]));
     }
     if (!legacy.missionsCompleted.includes(mission.id)) {
       legacy.missionsCompleted = [...legacy.missionsCompleted, mission.id];
@@ -607,7 +609,7 @@ export class RoomManager {
       randomizeEnemyOrder: mission.randomizeEnemyOrder,
       randomizeEnemyTierOrder: mission.randomizeEnemyTierOrder,
       relics: room.legacy.permanentRules,
-      startingCorruptedRelics: mission.startingCorruptedRelics,
+      startingRelics: mission.startingRelics,
     });
     if (!result.ok) return { error: result.error };
     room.gameState = result.state;

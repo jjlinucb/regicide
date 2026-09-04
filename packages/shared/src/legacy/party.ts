@@ -276,7 +276,8 @@ export function applyDualClassStickers(party: Card[], count: number, rng: () => 
 
 /**
  * Mission 9's "second Mage sticker" reward: picks one random eligible existing party member (suited, not
- * already Mage/Reaver/Guardian/Druid/Evergreen or already stickered) and gives it a bonus Mage sticker — unlike
+ * corrupted — see canGainSpecialClass — and not already Mage/Reaver/Guardian/Druid/Evergreen or already
+ * stickered) and gives it a bonus Mage sticker — unlike
  * a pure Mage recruit's `arcane` flag, the card keeps resolving its own suit power AND triggers its own Mage
  * reveal (see SuitedCard.secondClassArcane, engine.ts's revealForMage). Unlike Dual-class Stickers' "Lucky 4" ranks,
  * the physical game picks uniformly across the whole party (by revealing shuffled cards until an eligible one
@@ -285,15 +286,92 @@ export function applyDualClassStickers(party: Card[], count: number, rng: () => 
  */
 export function applyMageSticker(party: Card[], rng: () => number = Math.random): Card[] {
   const eligible = party.filter(
-    (c) => c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.evergreen && !c.secondClassArcane,
+    (c) => c.kind === 'suited' && canGainSpecialClass(c) && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.evergreen && !c.secondClassArcane,
   );
   if (eligible.length === 0) return party;
   const pick = eligible[Math.floor(rng() * eligible.length)];
   return party.map((c) => (c.id === pick.id ? { ...c, secondClassArcane: true } : c));
 }
 
-/** The rank band corruptAnotherCard is allowed to target — see applyCorruptAnotherCard's own doc for why. */
+/** The only ranks a card can ever be corrupted at — see canBeCorrupted. */
 const CORRUPTIBLE_RANKS: Rank[] = ['2', '3', '4', '5', '6', '7', '8', '9'];
+
+/**
+ * Whether `card` carries a special faction class — as a full class of its own OR as a bonus sticker. These are
+ * Legacy's rarer recruits and upgrades; ordinary party members carry none of them.
+ *
+ * (Terminology: a second *suit* — Dual-class Stickers, secondSuitByName, extraSuits — is NOT special. Those all
+ * grant another of the four ORIGINAL base classes, so a card carrying one is still rank-and-file.)
+ */
+export function hasSpecialClass(card: Extract<Card, { kind: 'suited' }>): boolean {
+  return Boolean(
+    card.arcane ||
+      card.secondClassArcane ||
+      card.reaver ||
+      card.secondClassReaver ||
+      card.guardian ||
+      card.secondClassGuardian ||
+      card.druid ||
+      card.secondClassDruid ||
+      card.chanter ||
+      card.secondClassChanter ||
+      card.evergreen,
+  );
+}
+
+/**
+ * THE single eligibility rule for corrupting a party card (SuitedCard.corrupted). Every path that can turn a
+ * card corrupted routes through this rather than re-listing the filter.
+ *
+ * JOHN'S RULE (live play 2026-09-04, restated and widened 2026-09-04): the only cards that can EVER be corrupted
+ * are ranks 2-9 of the four original base classes — Warrior, Bard, Cleric, Paladin. Never a 10, never an Ace,
+ * never any special faction class, and SPECIFICALLY NEVER A MAGE, which was his own headline example. Corruption
+ * targets an ordinary rank-and-file party member, not one of Legacy's rarer, already-special recruits. Also
+ * excluded: an already-inert `noSuitPower` card (nothing to corrupt), and anything already `corrupted` or
+ * `restored` (mutually exclusive — see SuitedCard.restored).
+ *
+ * Goran is excluded BY NAME, an unsourced judgment call following the precedent guardianStickerEligible already
+ * set for the same reason: his class identity is handed to him on a scripted timeline by mission rewards
+ * (recruited inert, granted suits at Missions 5/6/7, upgraded to `evergreen` at Mission 9), so he is not
+ * rank-and-file, and `evergreen` doesn't exclude him until three missions after he first becomes corruptible.
+ * Without this, corrupting him at Missions 5-8 and then running Mission 9's scripted upgrade would manufacture a
+ * corrupted Evergreen — precisely the "corrupted special class" state this rule exists to forbid.
+ *
+ * NAMING WARNING: "corrupted" means two unrelated things in this codebase. THIS is corrupted CARDS, a real
+ * mechanic. The other is the relic TIER named 'CORRUPTED_EVERGREEN_MOTHER' (see missions.ts's Mission 9) — a
+ * relic's name, carrying none of these rules.
+ */
+export function canBeCorrupted(card: Card): card is Extract<Card, { kind: 'suited' }> {
+  return (
+    card.kind === 'suited' &&
+    !card.corrupted &&
+    !card.restored &&
+    CORRUPTIBLE_RANKS.includes(card.rank) &&
+    !hasSpecialClass(card) &&
+    !card.noSuitPower &&
+    card.name !== 'Goran'
+  );
+}
+
+/**
+ * canBeCorrupted's mirror, enforcing the same invariant from the other direction: an ALREADY-corrupted card can
+ * never gain a special faction class. Every "give one card a bonus Mage/Reaver/Guardian/Druid/Chanter sticker"
+ * reward filters on this, alongside its own rank/class rules.
+ *
+ * WHY THIS EXISTS (bug found 2026-09-04): blocking only the corrupt-a-card direction is not enough to make
+ * John's "a Mage can never be corrupted" rule true. Missions 1/5/6/7/8 each corrupt a random party member;
+ * Mission 9 then hands a random eligible member a bonus Mage sticker. applyMageSticker excluded every special
+ * class but NOT `corrupted` — so it could land on a card corrupted three missions earlier and manufacture a
+ * corrupted Mage, exactly the state John says is impossible. The other four stickers had the same hole.
+ *
+ * JUDGMENT CALL: John said the state can't exist; he didn't say which side gives way. Skipping the card is the
+ * least destructive option — these rewards pick from ~40 party members, so another target is always available,
+ * and nothing is lost. The alternative (a sticker CLEANSING the corruption) would invent a mechanic he never
+ * described.
+ */
+export function canGainSpecialClass(card: Extract<Card, { kind: 'suited' }>): boolean {
+  return !card.corrupted;
+}
 
 /**
  * A mixed-bag reward step (see MissionReward.corruptAnotherCard): permanently corrupts one random eligible
@@ -302,38 +380,15 @@ const CORRUPTIBLE_RANKS: Rank[] = ['2', '3', '4', '5', '6', '7', '8', '9'];
  * `corrupted` — see SuitedCard.restored). A no-op if nothing is eligible. `rng` defaults to Math.random; see
  * applyDualClassStickers's doc for why/when to pass a seeded one.
  *
- * SOURCED CORRECTION (John, live play 2026-09-04): only a rank 2-9 card from one of the original 4 base classes
- * (Warrior/Bard/Cleric/Paladin) can be corrupted — never a 10, an Ace, or any of the special faction classes a
- * later mission introduces (Mage/Reaver/Guardian/Druid/Chanter/Evergreen, including a card only carrying one of
- * those as a bonus sticker), and never an already-inert `noSuitPower` card. "No mages can be corrupted" was
- * John's own headline example of the broader rule: corruption targets an ordinary rank-and-file party member,
- * not one of Legacy's rarer, already-special recruits. The prior version had no such restriction at all.
+ * Eligibility is canBeCorrupted's, shared with every other path that can mark a card corrupted — see its doc for
+ * John's rule itself and why it is enforced in one place.
  */
 export function applyCorruptAnotherCard(
   party: Card[],
   excludeIds: Set<string> = new Set(),
   rng: () => number = Math.random,
 ): Card[] {
-  const eligible = party.filter(
-    (c) =>
-      c.kind === 'suited' &&
-      !c.corrupted &&
-      !c.restored &&
-      !excludeIds.has(c.id) &&
-      CORRUPTIBLE_RANKS.includes(c.rank) &&
-      !c.arcane &&
-      !c.secondClassArcane &&
-      !c.reaver &&
-      !c.secondClassReaver &&
-      !c.guardian &&
-      !c.secondClassGuardian &&
-      !c.druid &&
-      !c.secondClassDruid &&
-      !c.chanter &&
-      !c.secondClassChanter &&
-      !c.evergreen &&
-      !c.noSuitPower,
-  );
+  const eligible = party.filter((c) => canBeCorrupted(c) && !excludeIds.has(c.id));
   if (eligible.length === 0) return party;
   const pick = eligible[Math.floor(rng() * eligible.length)];
   return party.map((c) => (c.id === pick.id ? { ...c, corrupted: true } : c));
@@ -366,6 +421,7 @@ export function guardianStickerEligible(card: Card): card is Extract<Card, { kin
   return (
     card.kind === 'suited' &&
     card.rank === '8' &&
+    canGainSpecialClass(card) &&
     ['WARRIOR', 'BARD', 'CLERIC'].includes(SUIT_TO_CLASS[card.suit].id) && // never a Paladin — see the doc above
     card.name !== 'Goran' &&
     !card.arcane &&
@@ -427,6 +483,7 @@ export function druidStickerEligible(card: Card): card is Extract<Card, { kind: 
   return (
     card.kind === 'suited' &&
     card.rank === '4' &&
+    canGainSpecialClass(card) &&
     ['D', 'C', 'S'].includes(card.suit) &&
     !card.arcane &&
     !card.reaver &&
@@ -467,6 +524,7 @@ export function chanterStickerEligible(card: Card): card is Extract<Card, { kind
   return (
     card.kind === 'suited' &&
     card.rank === '2' &&
+    canGainSpecialClass(card) &&
     SUIT_TO_CLASS[card.suit].id !== 'BARD' &&
     !card.arcane &&
     !card.reaver &&
@@ -580,6 +638,7 @@ export function reaverStickerEligible(card: Card): card is Extract<Card, { kind:
   return (
     card.kind === 'suited' &&
     card.rank === '6' &&
+    canGainSpecialClass(card) &&
     ['BARD', 'CLERIC', 'PALADIN'].includes(SUIT_TO_CLASS[card.suit].id) &&
     !card.arcane &&
     !card.reaver &&
