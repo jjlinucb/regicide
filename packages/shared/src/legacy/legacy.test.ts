@@ -3443,7 +3443,7 @@ describe('legacy: mission 8 setup (Winds of Chaos)', () => {
     expect(anchor.noSuitPower).toBe(true);
   });
 
-  it('is a 12-enemy 2-wave gauntlet (6 dual-immune Trolls, 6 dual-immune Wyverns), ascendingZone enabled, with 6 Pilgrims + 1 wildcard + 4 fight-setup Chanters as extra reserve cards, and a preset Puppy anchor', () => {
+  it('is a 12-enemy 2-wave gauntlet (6 dual-immune Trolls, 6 dual-immune Wyverns), ascendingZone enabled, with 6 Pilgrims + 4 fight-setup Chanters as extra reserve cards, and a preset Puppy anchor', () => {
     const mission8 = getMission(8)!;
     expect(mission8.enemies.length).toBe(12);
     expect(mission8.enemies.every((e) => e.secondClass !== undefined)).toBe(true); // every enemy, both waves, is dual-immune
@@ -3452,7 +3452,7 @@ describe('legacy: mission 8 setup (Winds of Chaos)', () => {
     expect(new Set(mission8.enemies.slice(0, 6).map(pairKey)).size).toBe(6);
     expect(new Set(mission8.enemies.slice(6, 12).map(pairKey)).size).toBe(6);
     expect(mission8.ascendingZone).toBe(true);
-    expect(mission8.extraReserveCards?.length).toBe(11);
+    expect(mission8.extraReserveCards?.length).toBe(10);
     // Pilgrims run 1-7 only (John's live play): the seeded Ace anchor plus 2-7 in the deck. Slots 8, 9 and 10
     // have no Pilgrim by design — the chain's last three placements must be ordinary party cards, each buffing
     // the enemy's attack while it sits there. The old 2-10 run of nine made every placement free.
@@ -3464,7 +3464,9 @@ describe('legacy: mission 8 setup (Winds of Chaos)', () => {
     // And no Pilgrim impersonating Goran at rank 10 — he's a rank 8 everywhere else in the campaign.
     expect(deckPilgrims.some((c) => c.name === 'Goran')).toBe(false);
     expect(mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.chanter).length).toBe(4);
-    expect(mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.flexibleComboRank).length).toBe(1);
+    // No wildcard card of its own (John: "there is no wandering coin"). The 2/5 placement RULE still works —
+    // it's just that the only 2/5 cards in play are ones bought from the Mercenary Camp.
+    expect(mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.flexibleComboRank).length).toBe(0);
     expect(mission8.presetMissionZone?.length).toBe(1);
     expect(mission8.presetMissionZone?.[0]).toMatchObject({ rank: 'A', pilgrim: true });
   });
@@ -3487,8 +3489,8 @@ describe('legacy: mission 8 setup (Winds of Chaos)', () => {
     expect(state.ascendingZone).toBe(true);
     expect(state.missionZone.length).toBe(1);
     const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
-    // 40 party + 11 extras (6 Pilgrims + 1 wildcard + 4 fight-setup Chanters) = 51 total in circulation.
-    expect(handCount + state.tavernDeck.length).toBe(51);
+    // 40 party + 10 extras (6 Pilgrims + 4 fight-setup Chanters) = 50 total in circulation.
+    expect(handCount + state.tavernDeck.length).toBe(50);
   });
 });
 

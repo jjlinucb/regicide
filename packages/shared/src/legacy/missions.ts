@@ -222,17 +222,6 @@ function chanterCompanion(name: string, suit: Suit, rank: Rank): Card {
   return { id: `chanter-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, chanter: true };
 }
 
-/**
- * Mission 8's one sourced wildcard for its ascending mission zone: reuses the existing "2/5" Mercenary-shop card
- * shape (see legacy/mercenaries.ts's TWO_FIVE_* / SuitedCard.flexibleComboRank) rather than inventing a new card
- * flag — printed rank 5 (its ordinary value everywhere outside the zone: hand, discard, defend), flexibleComboRank
- * '2' is the flagged alternate placeInZone also accepts (see rules.ts's matchesAscendingZoneSlot). Sourced
- * fan-reimplementation rules doc: "2/5 cards can be placed as a 2 during 2-selection or as a 5 during
- * 5-selection. Once placed, they count as 2 for enemy attack calculation" (see ascendingZoneAttackBuff).
- */
-function zoneWildcard(name: string, suit: Suit): Card {
-  return { id: `zone-wildcard-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank: '5', flexibleComboRank: '2', name };
-}
 
 /**
  * Mission 6's own fight SETUP (not a reward — see this mission's own comment below): the 4 Guardian cards,
@@ -926,17 +915,21 @@ export const MISSIONS: Mission[] = [
     // placement with an extra card pulled fresh from hand — not sourced anywhere. The real rule ("during cleanup,
     // the player may optionally move cards from the play area to the mission zone... at no extra cost") reuses a
     // card already committed to the kill's own winning attack instead — see GameState.zoneCommittedPlay /
-    // engine.ts's placeInZone/finishEnemyDefeatTail. The same source also documents the missing wildcard: "2/5
-    // cards can be placed as a 2 during 2-selection or as a 5 during 5-selection. Once placed, they count as 2
-    // for enemy attack calculation" — implemented by reusing the existing "2/5" Mercenary card shape (see
-    // zoneWildcard / rules.ts's matchesAscendingZoneSlot/ascendingZoneAttackBuff) rather than inventing a new
-    // flag.
+    // engine.ts's placeInZone/finishEnemyDefeatTail. The same source also documents a "2/5"
+    // wildcard: "2/5 cards can be placed as a 2 during 2-selection or as a 5 during 5-selection. Once placed,
+    // they count as 2 for enemy attack calculation."
+    //
+    // CORRECTION (2026-09-03, John: "there is no wandering coin, get rid of it"): this mission ships no wildcard
+    // card of its own — "The Wandering Coin" was an invented card that had no business being in the deck, and
+    // it's gone, along with the zoneWildcard() helper that built it. The RULE above stays wired up, because the
+    // Mercenary Camp still sells 2/5 cards (see legacy/mercenaries.ts) and one bought there can be placed in
+    // this zone: SuitedCard.flexibleComboRank plus rules.ts's matchesAscendingZoneSlot/ascendingZoneAttackBuff
+    // accept the alternate value on placement and score it as a 2 for the attack buff.
     ascendingZone: true,
     // "Scrap," the Pilgrim Puppy, is the chain's permanent anchor — seeded straight into the zone at value 1 (an
     // Ace), never re-placed. The other Pilgrims are shuffled into the reserve deck alongside the party, ordinary
-    // cards in every other respect, plus the one "2/5" wildcard the source names above (see zoneWildcard) and the
-    // 4 Chanter cards this mission's reward now enters the fight WITH instead of granting after it (see the
-    // reward comment below).
+    // cards in every other respect, plus the 4 Chanter cards this mission's reward now enters the fight WITH
+    // instead of granting after it (see the reward comment below).
     //
     // CORRECTION (2026-09-03, John's live play — "pilgrims are 1-7 only"): the Pilgrims run 1 through 7, i.e. the
     // seeded Ace plus six in the deck, NOT the 2-through-10 run of nine this shipped with. That's the whole
@@ -954,7 +947,6 @@ export const MISSIONS: Mission[] = [
       pilgrim('Sister Halvard', 'H', '5'),
       pilgrim('Corin Drizzlecoat', 'S', '6'),
       pilgrim('Fenna Longrope', 'D', '7'),
-      zoneWildcard('The Wandering Coin', 'C'),
       chanterCompanion('Sela Windchant', 'D', '3'),
       chanterCompanion('Orin Deepvoice', 'H', '5'),
       chanterCompanion('Ketta Skysong', 'C', '7'),
