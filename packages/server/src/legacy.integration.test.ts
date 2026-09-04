@@ -12,6 +12,16 @@ import { InMemoryEndlessSaveStore } from './db/endlessSaves.js';
 
 type Client = ClientSocket<ServerToClientEvents, ClientToServerEvents>;
 
+/**
+ * Which of `wanted` suits still have an uncorrupted card at `rank` in this campaign's party. A jump-ahead grants
+ * every earlier mission's reward, including several unseeded corruptAnotherCard steps, so a sticker test can't
+ * hardcode its candidate suits — a corrupted card is permanently out (see shared party.ts's canGainSpecialClass).
+ */
+function uncorruptedSuitsOfRank(party: Card[], rank: string, wanted: string[]): string[] {
+  const corrupted = party.filter((c) => c.kind === 'suited' && c.rank === rank && c.corrupted).map((c) => (c.kind === 'suited' ? String(c.suit) : ''));
+  return wanted.filter((s) => !corrupted.includes(s)).sort();
+}
+
 function emitAsync<T>(socket: Client, event: keyof ClientToServerEvents, payload: unknown): Promise<T> {
   return new Promise((resolve) => {
     // @ts-expect-error - dynamic event dispatch for test convenience
@@ -556,8 +566,11 @@ describe('legacy campaign integration', () => {
     if ('error' in result) throw new Error(result.error);
     expect(result.room.legacy?.party.some((c) => c.kind === 'suited' && c.secondClassDruid)).toBe(false);
     const eligible = result.room.legacy!.party.filter(druidStickerEligible);
-    // Exactly the three rank-4 cards the source names — the 4 of Hearts is excluded.
-    expect(eligible.map((c) => c.suit).sort()).toEqual(['C', 'D', 'S']);
+    // The three rank-4 cards the source names — the 4 of Hearts is excluded — minus any that this run's random
+    // corruptAnotherCard rewards happened to hit, since a corrupted card can never gain a special class (see
+    // party.ts's canGainSpecialClass). Which cards get corrupted is unseeded, so this is derived, not hardcoded.
+    expect(eligible.map((c) => c.suit).sort()).toEqual(uncorruptedSuitsOfRank(result.room.legacy!.party, '4', ['C', 'D', 'S']));
+    expect(eligible.length).toBeGreaterThan(0);
 
     const notHost = await rooms.chooseDruidSticker(created.code, 'not-the-host', eligible[0].id);
     expect('error' in notHost).toBe(true);
@@ -571,9 +584,12 @@ describe('legacy campaign integration', () => {
     const stickered = applied.room.legacy?.party.find((c) => c.id === eligible[0].id);
     expect(stickered?.kind === 'suited' && stickered.secondClassDruid).toBe(true);
 
-    // One-time only.
-    const again = await rooms.chooseDruidSticker(created.code, created.playerId, eligible[1].id);
-    expect('error' in again).toBe(true);
+    // One-time only — a second eligible card is rejected once the sticker's already been used. Guarded on there
+    // BEING a second one: this run's random corruption may have taken the others out of the running.
+    if (eligible.length > 1) {
+      const again = await rooms.chooseDruidSticker(created.code, created.playerId, eligible[1].id);
+      expect('error' in again).toBe(true);
+    }
 
     client.close();
   });
@@ -588,9 +604,11 @@ describe('legacy campaign integration', () => {
     if ('error' in result) throw new Error(result.error);
     expect(result.room.legacy?.party.some((c) => c.kind === 'suited' && c.secondClassChanter)).toBe(false);
     const eligible = result.room.legacy!.party.filter(chanterStickerEligible);
-    // Rank 2, any base class except Bard.
+    // Rank 2, any base class except Bard — minus any corrupted by an earlier mission's reward (see the Druid
+    // test above for why this is derived rather than hardcoded).
     expect(eligible.every((c) => c.rank === '2')).toBe(true);
-    expect(eligible.map((c) => c.suit).sort()).toEqual(['C', 'H', 'S']);
+    expect(eligible.map((c) => c.suit).sort()).toEqual(uncorruptedSuitsOfRank(result.room.legacy!.party, '2', ['C', 'H', 'S']));
+    expect(eligible.length).toBeGreaterThan(0);
 
     const notHost = await rooms.chooseChanterSticker(created.code, 'not-the-host', eligible[0].id);
     expect('error' in notHost).toBe(true);
@@ -604,9 +622,12 @@ describe('legacy campaign integration', () => {
     const stickered = applied.room.legacy?.party.find((c) => c.id === eligible[0].id);
     expect(stickered?.kind === 'suited' && stickered.secondClassChanter).toBe(true);
 
-    // One-time only.
-    const again = await rooms.chooseChanterSticker(created.code, created.playerId, eligible[1].id);
-    expect('error' in again).toBe(true);
+    // One-time only — a second eligible card is rejected once the sticker's already been used. Guarded on there
+    // BEING a second one: this run's random corruption may have taken the others out of the running.
+    if (eligible.length > 1) {
+      const again = await rooms.chooseChanterSticker(created.code, created.playerId, eligible[1].id);
+      expect('error' in again).toBe(true);
+    }
 
     client.close();
   });

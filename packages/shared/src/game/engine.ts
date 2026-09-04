@@ -34,7 +34,6 @@ import {
   pileTopImmuneSuits,
   validatePlayShape,
 } from './rules.js';
-import { relicActive } from './selectors.js';
 import { classForSuit } from '../legacy/classes.js';
 
 const SUIT_NAME: Record<Suit, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
@@ -721,16 +720,24 @@ function pushToDiscardPile(state: GameState, cards: Card[]): void {
 }
 
 /**
- * Pays a corrupted card's cost: normally banishes the top of
- * the reserve deck (see SuitedCard.corrupted). With Mission 9's 'EVERGREEN_MOTHER' relic
- * ACTIVE — held and NOT itself corrupted (see relicActive; Mission 9 hands the party a corrupted copy, which
- * does nothing here until cleansed) — the cost changes instead to another player banishing a card from their
- * own hand. In solo play (no "other player" to ask), the same player banishes from their own remaining hand
- * instead (the relic's "solo side"). If there's no eligible hand to banish from (every other hand is empty, or the solo player's own hand
- * is), nothing happens.
+ * Pays a CORRUPTED CARD's cost (SuitedCard.corrupted): normally banishes the top of the reserve deck. Either
+ * Evergreen Mother relic changes that cost to another player banishing a card from their own hand instead. In
+ * solo play (no "other player" to ask) the same player banishes from their own remaining hand (the relic's
+ * "solo side"). If there's no eligible hand to banish from (every other hand is empty, or the solo player's own
+ * hand is), nothing happens.
+ *
+ * TWO RELICS, ONE POWER — for now (John, 2026-09-04). "Corrupted" in a relic's NAME is a weaker TIER of relic,
+ * not a condition applied to one; nothing in this engine ever switches a relic off. They are:
+ *   'CORRUPTED_EVERGREEN_MOTHER' — handed over at Mission 9's SETUP, working for the whole mission. The power
+ *      above is exactly what John described for it, verbatim.
+ *   'EVERGREEN_MOTHER'          — the healed relic, Mission 9's REWARD, carried into Missions 10-12.
+ *
+ * PLACEHOLDER, AWAITING JOHN'S SPEC: the healed Evergreen Mother currently does the same thing as the corrupted
+ * one, because he has not yet said what healing it changes. That equality is a stand-in, NOT a decided rule —
+ * do not read it as "the two tiers are the same relic." When he specs the healed version, split this branch.
  */
 function applyCorruptedCost(state: GameState, player: PlayerState, label: string): void {
-  if (relicActive(state, 'EVERGREEN_MOTHER')) {
+  if (state.relics.includes('EVERGREEN_MOTHER') || state.relics.includes('CORRUPTED_EVERGREEN_MOTHER')) {
     const candidates = state.players.length === 1 ? [player] : state.players.filter((p) => p.id !== player.id);
     const eligible = candidates.filter((p) => p.hand.length > 0);
     if (eligible.length === 0) {
@@ -963,9 +970,20 @@ function revealForMage(
   count: number,
   trigger: Card,
 ): EngineResult {
-  // John's house rule: a corrupted ("cursed") Mage pays the same cost as any other corrupted card — banishing
-  // the reserve deck's top card — the instant its reveal fires, in exchange for passing its immunity-ignoring
-  // property on to whatever card it ends up choosing (see resolveMageRevealChoice's arcaneImmuneSuits).
+  // DEFENSIVE, NOT A RULE — this state should no longer be reachable. John (2026-09-04): a Mage can never be
+  // corrupted, and as of this pass every path that marks a card corrupted, and every path that stickers a
+  // special class onto one, enforces that (party.ts's canBeCorrupted / canGainSpecialClass). Kept anyway, for
+  // two reasons:
+  //   1. SAVE FILES. A campaign's party is persisted verbatim (RoomManager's loadSave) and older saves predate
+  //      those guards — applyMageSticker could land on an already-corrupted card. Deleting this doesn't make
+  //      such a card safe, it makes it WORSE: it would still ignore immunity (see continueResolveCommittedPlay's
+  //      playIncludesImmunityIgnoringCard, which reads `corrupted` off any resolving card) but would now pay
+  //      nothing for it, because the ordinary corrupted-card cost skips arcane cards.
+  //   2. John's own live play has produced corrupted cards outside the eligibility rule before (the "cursed Ace"
+  //      of Mission 7). The rule is young; the engine holding up under a card that breaks it is cheap insurance.
+  // If it ever does fire: a corrupted Mage pays the same cost as any other corrupted card, banishing the reserve
+  // deck's top card the instant its reveal fires, in exchange for passing its immunity-ignoring property on to
+  // whatever card it chooses (see resolveMageRevealChoice's arcaneImmuneSuits).
   if (trigger.kind === 'suited' && trigger.corrupted) {
     const triggerPlayer = state.players.find((p) => p.id === playerId)!;
     applyCorruptedCost(state, triggerPlayer, trigger.name ?? 'A corrupted Mage');
@@ -1050,9 +1068,10 @@ function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, {
   // its chant, and so on — see continueResolveCommittedPlay, which applies the same class-vs-suit split to these
   // as it does to the played cards. (A revealed Mage still chains instead, just below.)
   const arcaneCards = [...window.arcaneCards, chosen];
-  // John's house rule: a corrupted ("cursed") Mage's reveal passes its own immunity-ignoring property on to
-  // whatever card it pulls up — window.trigger is whichever Mage card opened THIS round of the reveal (see
-  // revealForMage's own doc comment), which already paid the corrupted cost above if it was corrupted.
+  // The other half of revealForMage's defensive corrupted-Mage handling — see the long note there for why this
+  // is kept despite the state being unreachable from code. A corrupted Mage's reveal passes its own
+  // immunity-ignoring property on to whatever card it pulls up; window.trigger is whichever Mage card opened
+  // THIS round of the reveal, which already paid the corrupted cost above if it was corrupted.
   const triggerIsCorruptedMage = window.trigger.kind === 'suited' && Boolean(window.trigger.corrupted);
   const arcaneImmuneSuits = triggerIsCorruptedMage
     ? Array.from(new Set([...window.arcaneImmuneSuits, ...cardSuits(chosen)]))
@@ -1341,6 +1360,14 @@ function dealDamageAndCheckDefeat(
       // of letting it fall into the discard pile — its value mirrors the enemy's attack tier (10/15/20). It's a
       // corrupted card (see SuitedCard.corrupted): drawing and playing it later ignores whatever enemy is then
       // immune to, at the cost of banishing the reserve deck's own top card the instant it's played.
+      //
+      // THE ONE CORRUPTED CARD OUTSIDE party.ts's canBeCorrupted, deliberately: that rule governs corrupting a
+      // PARTY MEMBER (rank 2-9, base class only, never a Mage), and a specimen is not one — it's a fabricated
+      // token of a dead enemy that never touches the campaign roster, and its J/Q/K rank IS the mechanic,
+      // mirroring the enemy's attack tier. It carries no class flags at all, so it cannot be a Mage or any other
+      // special class, which is the part of John's rule this could otherwise violate. FLAGGED FOR HIM: if he
+      // means the rank band literally, with no exception for enemy tokens, this mission mechanic needs a
+      // different shape rather than a filter here.
       const specimenRank = enemy.baseAttack <= 10 ? 'J' : enemy.baseAttack <= 15 ? 'Q' : 'K';
       const specimenCard: Card = {
         id: `specimen-${enemy.suit}-${Date.now()}-${Math.floor(nextRandom(state) * 1e6)}`,
@@ -1733,7 +1760,6 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.endlessLoop = 0;
   state.exactKillOnly = false;
   state.relics = [];
-  state.corruptedRelics = [];
   state.comboAssist = null;
   state.kinfolkBankedThisTurn = false;
   state.azureEmblemWindow = null;
@@ -1913,14 +1939,13 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.jesterClaim = null;
   state.endlessLoop = 0;
   state.exactKillOnly = action.exactKillOnly ?? false;
-  // A mission's starting corrupted relics are handed to the party ON TOP of whatever the campaign already
-  // earned, so the relic is genuinely in play for this mission — just switched off (see relicActive). Deduped:
-  // a campaign replaying a mission it has already won would otherwise list the same relic twice, and the
-  // mission's own corrupted state deliberately wins in that case (Mission 9's relic is corrupted AT Mission 9,
-  // whether or not a previous clear already banked it permanently).
-  const startingCorruptedRelics = action.startingCorruptedRelics ?? [];
-  state.relics = Array.from(new Set([...(action.relics ?? []), ...startingCorruptedRelics]));
-  state.corruptedRelics = [...startingCorruptedRelics];
+  // A mission's own starting relics (see Mission.startingRelics) go on the table ON TOP of whatever the
+  // campaign has permanently earned, and are not persisted past this mission. Deduped, so a party that already
+  // holds one permanently and is handed it again by the mission lists it once — and so replaying a won mission
+  // can't stack copies. Mission 9's case is two DIFFERENT relics, not one twice: it sets out holding the
+  // Corrupted Evergreen Mother and, once won, banks the healed Evergreen Mother permanently, so a replay
+  // legitimately has both in `relics` at once (they share one power today — see applyCorruptedCost).
+  state.relics = Array.from(new Set([...(action.relics ?? []), ...(action.startingRelics ?? [])]));
   state.comboAssist = null;
   state.kinfolkBankedThisTurn = false;
   state.azureEmblemWindow = null;
@@ -2471,7 +2496,7 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
   // standalone play of just the slot card; a real hand card must still be played alongside it.
   let kinfolkCard: Card | null = null;
   if (action.includeKinfolkSlot) {
-    if (!relicActive(state, 'KINFOLK_FLUTE')) return fail('The Kinfolk Flute has not been earned yet.');
+    if (!state.relics.includes('KINFOLK_FLUTE')) return fail('The Kinfolk Flute has not been earned yet.');
     if (!player.kinfolkSlot) return fail('Your Kinfolk slot is empty.');
     if (cards.length === 0) return fail('Play at least one hand card alongside your Kinfolk Flute card.');
     kinfolkCard = player.kinfolkSlot;
@@ -2496,7 +2521,7 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
   // (see assistCombo/resolveComboAssist, reusing the same resolveCommittedPlay path below). Moot whenever the
   // player's own Kinfolk slot already supplied the second card — that resolves immediately, no window needed.
   const scarletAssist =
-    relicActive(state, 'SCARLET_WHISTLE') &&
+    state.relics.includes('SCARLET_WHISTLE') &&
     !kinfolkCard &&
     cards.length === 1 &&
     cards[0].kind === 'suited' &&
@@ -2598,7 +2623,7 @@ function declineScarletWhistleSoloChoice(
  */
 function bankKinfolkCard(state: GameState, action: Extract<GameAction, { type: 'BANK_KINFOLK_CARD' }>): EngineResult {
   if (state.ruleset !== 'legacy') return fail('BANK_KINFOLK_CARD is only available in Regicide Legacy.');
-  if (!relicActive(state, 'KINFOLK_FLUTE')) return fail('The Kinfolk Flute has not been earned yet.');
+  if (!state.relics.includes('KINFOLK_FLUTE')) return fail('The Kinfolk Flute has not been earned yet.');
   const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_PLAY');
   if (err) return fail(err);
 
@@ -3370,10 +3395,6 @@ function resolveMagePlayCards(
   killedEnemy: boolean,
   onResolved: ChanterResolution,
 ): EngineResult {
-  // NOTE: deliberately still a raw `relics.includes` rather than relicActive, unlike every other relic gate in
-  // this file. This line sits inside Mage attack banish resolution, which was being rewritten in parallel when
-  // the corrupted-relic state landed; swapping it would be a pure no-op today (nothing ever corrupts the Azure
-  // Emblem) at the cost of a conflict in someone else's live edit. Fold it into relicActive once that settles.
   if (!state.relics.includes('AZURE_EMBLEM')) {
     settleMageAttackCards(state, cards, killedEnemy);
     return runChantResolution(state, onResolved);
@@ -3534,7 +3555,6 @@ export function createLobbyState(): GameState {
     endlessLoop: 0,
     exactKillOnly: false,
     relics: [],
-    corruptedRelics: [],
     comboAssist: null,
     scarletWhistleSoloChoice: null,
     kinfolkBankedThisTurn: false,

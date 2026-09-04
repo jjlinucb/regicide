@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
-import { relicActive } from '../game/selectors.js';
 import { redactStateFor } from '../game/redact.js';
 import { makeRng } from '../game/deck.js';
 import { cardSuits, missionZoneValueSum } from '../game/rules.js';
@@ -11,6 +10,7 @@ import { getMission, MISSIONS, missionEnemiesToSpecs, type MissionEnemySpec } fr
 import {
   applyChanterStickerChoice,
   applyCorruptAnotherCard,
+  canBeCorrupted,
   applyDruidStickerChoice,
   applyExtraSuitByName,
   applyDualClassStickers,
@@ -863,9 +863,15 @@ describe('legacy: mission playthrough', () => {
     expect(state.discardPile.some((c) => c.kind === 'suited' && c.corrupted)).toBe(true);
   });
 
-  it("John's house rule: a corrupted Mage pays the normal corrupted-card cost and passes its immunity-ignoring property to whatever its reveal chooses", () => {
-    // Enemy is immune to Clubs (its own suit) — without the fix, a Clubs card tucked under the attack would have
-    // its doubling blocked like any other immune suit.
+  it('DEFENSIVE, NOT A RULE: an impossible corrupted Mage still resolves safely — pays the corrupted-card cost, passes its immunity-ignoring on to its reveal', () => {
+    // John (2026-09-04) rules that a Mage can never be corrupted, and party.ts's canBeCorrupted /
+    // canGainSpecialClass now make this state unreachable from code — DO NOT read this test as a rule. It pins
+    // the engine's fallback behavior for a card that arrives corrupted anyway (an older save file, predating
+    // those guards). See revealForMage's own note for why deleting the handling would be worse than keeping it:
+    // the card would still ignore immunity and would pay nothing at all for it.
+    //
+    // Enemy is immune to Clubs (its own suit) — a Clubs card tucked under the attack would otherwise have its
+    // doubling blocked like any other immune suit.
     const enemy: LegacyEnemySpec = { name: 'Warded Foe', suit: 'C', health: 100, attack: 1 };
     let state = startMission(1, [enemy]);
     const cursedMage: SuitedCard = { ...suited('H', '4'), arcane: true, corrupted: true };
@@ -6489,20 +6495,20 @@ describe('legacy: Mercenary any-suit Ace (wildSuit)', () => {
   });
 });
 
-describe("legacy: mission 9 setup — the Evergreen Mother relic starts in play, corrupted (John, 2026-09-04)", () => {
-  /** Starts a mission exactly as RoomManager does: the campaign's earned relics, plus the mission's own corrupted ones. */
-  function startMissionWithSetup(n: number, enemies: LegacyEnemySpec[], opts: { relics?: string[]; startingCorruptedRelics?: string[] }): GameState {
+describe('legacy: mission 9 — the two Evergreen Mother relics (John, 2026-09-04)', () => {
+  /** Starts a mission exactly as RoomManager does: the campaign's permanently earned relics, plus the mission's own. */
+  function startWithRelics(n: number, enemies: LegacyEnemySpec[], opts: { relics?: string[]; startingRelics?: string[] }): GameState {
     const ids = Array.from({ length: n }, (_, i) => `p${i}`);
     const res = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',
       playerIds: ids,
       playerNames: ids.map((_, i) => `Player ${i}`),
-      seed: 'corrupted-relic-test',
+      seed: 'evergreen-relic-test',
       party: buildInitialParty(),
       enemies,
       jesterCount: 0,
       relics: opts.relics,
-      startingCorruptedRelics: opts.startingCorruptedRelics,
+      startingRelics: opts.startingRelics,
     });
     if (!res.ok) throw new Error(res.error);
     return res.state;
@@ -6510,67 +6516,213 @@ describe("legacy: mission 9 setup — the Evergreen Mother relic starts in play,
 
   const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 10 };
 
-  it('declares the relic in its starting setup, and still grants it permanently as its reward', () => {
-    const mission9 = getMission(9)!;
-    expect(mission9.startingCorruptedRelics).toEqual(['EVERGREEN_MOTHER']);
-    // The reward is deliberately untouched: the relic is still earned for good on a win, so Missions 10-12
-    // carry a working Evergreen Mother exactly as they did before this change.
-    expect(mission9.reward.relics).toEqual(['EVERGREEN_MOTHER']);
-  });
-
-  it('is the only mission that starts with a corrupted relic — nothing else was given one', () => {
-    const withCorruptedRelics = MISSIONS.filter((m) => m.startingCorruptedRelics?.length);
-    expect(withCorruptedRelics.map((m) => m.id)).toEqual([9]);
-  });
-
-  it('puts the relic genuinely IN PLAY at mission start, and marks it corrupted', () => {
-    const state = startMissionWithSetup(2, [boss], { relics: [], startingCorruptedRelics: ['EVERGREEN_MOTHER'] });
-    expect(state.relics).toContain('EVERGREEN_MOTHER');
-    expect(state.corruptedRelics).toEqual(['EVERGREEN_MOTHER']);
-    expect(relicActive(state, 'EVERGREEN_MOTHER')).toBe(false);
-  });
-
-  it("DECISION (not sourced): a corrupted relic is fully inert — the corrupted-card cost falls back to banishing the reserve deck's top card, exactly as it did before the relic was in play at all", () => {
-    let state = startMissionWithSetup(2, [boss], { startingCorruptedRelics: ['EVERGREEN_MOTHER'] });
+  /** Plays one corrupted card from a two-card hand and reports who paid its cost. */
+  function playCorruptedCard(state: GameState): { tavernSpent: number; otherHandSpent: number; ownHandLeft: number; banished: number } {
     const corrupted: SuitedCard = { ...suited('H', '5'), corrupted: true };
-    state = rig(state, [corrupted]);
-    const tavernBefore = state.tavernDeck.length;
-    const otherHandBefore = state.players[1].hand.length;
+    const rigged = rig(state, [corrupted, suited('D', '2')]);
+    const tavernBefore = rigged.tavernDeck.length;
+    const otherBefore = rigged.players[1]?.hand.length ?? 0;
+    const res = ensureOk(applyAction(rigged, { type: 'PLAY_CARDS', playerId: rigged.players[0].id, cardIds: [corrupted.id] }));
+    return {
+      tavernSpent: tavernBefore - res.state.tavernDeck.length,
+      otherHandSpent: otherBefore - (res.state.players[1]?.hand.length ?? 0),
+      ownHandLeft: res.state.players[0].hand.length,
+      banished: res.state.banishPile.length,
+    };
+  }
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-
-    // The relic's redirect did NOT fire: the reserve deck paid, and no other player lost a card.
-    expect(res.state.tavernDeck.length).toBe(tavernBefore - 1);
-    expect(res.state.players[1].hand.length).toBe(otherHandBefore);
-    expect(res.state.banishPile.length).toBe(1);
+  it('starts holding the corrupted relic and rewards the healed one — two distinct relics, not one in two states', () => {
+    const mission9 = getMission(9)!;
+    expect(mission9.startingRelics).toEqual(['CORRUPTED_EVERGREEN_MOTHER']);
+    expect(mission9.reward.relics).toEqual(['EVERGREEN_MOTHER']);
+    expect(mission9.startingRelics).not.toEqual(mission9.reward.relics);
   });
 
-  it('stays corrupted at Mission 9 even for a campaign that already earned the relic, and never lists it twice', () => {
-    const state = startMissionWithSetup(2, [boss], {
-      relics: ['EVERGREEN_MOTHER'], // already banked from a previous clear
-      startingCorruptedRelics: ['EVERGREEN_MOTHER'],
+  it('is the only mission that puts a relic on the table at setup', () => {
+    expect(MISSIONS.filter((m) => m.startingRelics?.length).map((m) => m.id)).toEqual([9]);
+  });
+
+  it('CORRECTS PR #87: the corrupted relic is fully FUNCTIONAL from mission start — another player banishes from hand, not the reserve deck', () => {
+    const state = startWithRelics(2, [boss], { relics: [], startingRelics: ['CORRUPTED_EVERGREEN_MOTHER'] });
+    expect(state.relics).toEqual(['CORRUPTED_EVERGREEN_MOTHER']);
+
+    const cost = playCorruptedCard(state);
+    expect(cost.tavernSpent).toBe(0); // the reserve deck was NOT the one that paid
+    expect(cost.otherHandSpent).toBe(1);
+    expect(cost.banished).toBe(1);
+  });
+
+  it("solo, the rule doesn't change: you banish from your own hand", () => {
+    const state = startWithRelics(1, [boss], { startingRelics: ['CORRUPTED_EVERGREEN_MOTHER'] });
+    const cost = playCorruptedCard(state);
+    expect(cost.tavernSpent).toBe(0);
+    expect(cost.ownHandLeft).toBe(0); // one card played, the other banished as the cost
+    expect(cost.banished).toBe(1);
+  });
+
+  it('a replay after winning holds BOTH relics, each listed once, and the cost is still paid only once', () => {
+    const state = startWithRelics(2, [boss], {
+      relics: ['EVERGREEN_MOTHER'], // banked permanently by the earlier clear
+      startingRelics: ['CORRUPTED_EVERGREEN_MOTHER'],
     });
     expect(state.relics.filter((r) => r === 'EVERGREEN_MOTHER').length).toBe(1);
-    expect(relicActive(state, 'EVERGREEN_MOTHER')).toBe(false);
+    expect(state.relics.filter((r) => r === 'CORRUPTED_EVERGREEN_MOTHER').length).toBe(1);
+
+    // Both relics carry the same power today, so this is the guard against the grant double-firing.
+    const cost = playCorruptedCard(state);
+    expect(cost.otherHandSpent).toBe(1);
+    expect(cost.banished).toBe(1);
   });
 
-  it('REGRESSION: a mission that declares no corrupted relics leaves an earned relic fully working (Missions 10-12 unaffected)', () => {
-    let state = startMissionWithSetup(2, [boss], { relics: ['EVERGREEN_MOTHER'] });
-    expect(state.corruptedRelics).toEqual([]);
-    expect(relicActive(state, 'EVERGREEN_MOTHER')).toBe(true);
-
-    const corrupted: SuitedCard = { ...suited('H', '5'), corrupted: true };
-    state = rig(state, [corrupted]);
-    const tavernBefore = state.tavernDeck.length;
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-
-    expect(res.state.tavernDeck.length).toBe(tavernBefore); // redirect fired — reserve deck untouched
+  it('a mission that hands over no relic of its own is untouched — the campaign keeps exactly what it earned', () => {
+    const state = startWithRelics(2, [boss], { relics: ['KINFOLK_FLUTE'] });
+    expect(state.relics).toEqual(['KINFOLK_FLUTE']);
   });
 
-  it('surfaces the corrupted state to the client, so the UI can mark the relic', () => {
-    const state = startMissionWithSetup(2, [boss], { startingCorruptedRelics: ['EVERGREEN_MOTHER'] });
+  it('REGRESSION: Missions 10-12 are unchanged — the healed relic alone still redirects the corrupted-card cost', () => {
+    const state = startWithRelics(2, [boss], { relics: ['EVERGREEN_MOTHER'] });
+    const cost = playCorruptedCard(state);
+    expect(cost.tavernSpent).toBe(0);
+    expect(cost.otherHandSpent).toBe(1);
+  });
+
+  it('REGRESSION: with neither relic, a corrupted card still costs the reserve deck its top card', () => {
+    const state = startWithRelics(2, [boss], {});
+    const cost = playCorruptedCard(state);
+    expect(cost.tavernSpent).toBe(1);
+    expect(cost.otherHandSpent).toBe(0);
+  });
+
+  it('shows the relic to the client', () => {
+    const state = startWithRelics(2, [boss], { startingRelics: ['CORRUPTED_EVERGREEN_MOTHER'] });
     const view = redactStateFor(state, state.players[0].id);
-    expect(view.relics).toContain('EVERGREEN_MOTHER');
-    expect(view.corruptedRelics).toEqual(['EVERGREEN_MOTHER']);
+    expect(view.relics).toEqual(['CORRUPTED_EVERGREEN_MOTHER']);
+  });
+});
+
+describe('legacy: corruption eligibility — a Mage can never be corrupted (John, 2026-09-04)', () => {
+  const ordinary = (): SuitedCard => ({ ...suited('C', '5'), name: 'Grael Stormbreaker' });
+
+  it('accepts an ordinary rank 2-9 base-class party member', () => {
+    expect(canBeCorrupted(ordinary())).toBe(true);
+    expect(canBeCorrupted(suited('H', '2'))).toBe(true);
+    expect(canBeCorrupted(suited('S', '9'))).toBe(true);
+    // A second BASE-class suit is still rank-and-file — a Dual-class Sticker doesn't protect a card.
+    expect(canBeCorrupted({ ...ordinary(), secondSuit: 'D' })).toBe(true);
+  });
+
+  it('rejects a Mage, whether by class or by bonus sticker — the headline case', () => {
+    expect(canBeCorrupted({ ...ordinary(), arcane: true })).toBe(false);
+    expect(canBeCorrupted({ ...ordinary(), secondClassArcane: true })).toBe(false);
+  });
+
+  it('rejects every other special faction class and its sticker', () => {
+    const flags = [
+      'reaver',
+      'secondClassReaver',
+      'guardian',
+      'secondClassGuardian',
+      'druid',
+      'secondClassDruid',
+      'chanter',
+      'secondClassChanter',
+      'evergreen',
+    ] as const;
+    for (const flag of flags) {
+      expect(canBeCorrupted({ ...ordinary(), [flag]: true })).toBe(false);
+    }
+  });
+
+  it('rejects ranks outside 2-9, Jesters, inert cards, and anything already corrupted or restored', () => {
+    expect(canBeCorrupted(suited('C', '10'))).toBe(false);
+    expect(canBeCorrupted(suited('C', 'A'))).toBe(false);
+    expect(canBeCorrupted(suited('C', 'J'))).toBe(false);
+    expect(canBeCorrupted(jester())).toBe(false);
+    expect(canBeCorrupted({ ...ordinary(), noSuitPower: true })).toBe(false);
+    expect(canBeCorrupted({ ...ordinary(), corrupted: true })).toBe(false);
+    expect(canBeCorrupted({ ...ordinary(), restored: true })).toBe(false);
+  });
+
+  it('rejects Goran by name — his class identity is on a scripted timeline, and Mission 9 makes him Evergreen', () => {
+    expect(canBeCorrupted({ ...suited('S', '8'), name: 'Goran' })).toBe(false);
+  });
+
+  it('applyCorruptAnotherCard corrupts nothing when the whole party is ineligible', () => {
+    const allIneligible: Card[] = [
+      { ...suited('H', '4'), arcane: true },
+      { ...suited('D', '5'), secondClassArcane: true },
+      suited('C', '10'),
+      suited('S', 'A'),
+    ];
+    expect(applyCorruptAnotherCard(allIneligible, new Set(), () => 0)).toEqual(allIneligible);
+  });
+
+  it('applyCorruptAnotherCard always lands on the one eligible card, whatever the rng picks', () => {
+    const party: Card[] = [
+      { ...suited('H', '4'), arcane: true },
+      suited('D', '10'),
+      { ...suited('C', '7'), name: 'Torin Oakenshield' },
+      { ...suited('S', '8'), name: 'Goran' },
+    ];
+    for (const roll of [0, 0.5, 0.99]) {
+      const next = applyCorruptAnotherCard(party, new Set(), () => roll);
+      const corruptedCards = next.filter((c) => c.kind === 'suited' && c.corrupted);
+      expect(corruptedCards.length).toBe(1);
+      expect(corruptedCards[0].kind === 'suited' && corruptedCards[0].name).toBe('Torin Oakenshield');
+    }
+  });
+
+  it("every corrupted card baked into mission data obeys the same rule (guards missions.ts's presets)", () => {
+    const presets = MISSIONS.flatMap((m) => [
+      ...(m.extraReserveCards ?? []),
+      ...(m.presetMissionZone ?? []),
+      ...(m.presetBanishPile ?? []),
+    ]);
+    const corruptedPresets = presets.filter((c): c is SuitedCard => c.kind === 'suited' && Boolean(c.corrupted));
+    expect(corruptedPresets.length).toBeGreaterThan(0); // Mission 12's pair — if this ever hits 0, the test has gone blind
+    for (const c of corruptedPresets) {
+      // Strip the flag the preset was built with and re-check eligibility from scratch.
+      expect(canBeCorrupted({ ...c, corrupted: false })).toBe(true);
+    }
+  });
+});
+
+describe('legacy: the other direction — an already-corrupted card can never GAIN a special class', () => {
+  const corruptedCard = (suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard => ({ ...suited(suit, rank), corrupted: true });
+
+  it("BUG FIX: Mission 9's Mage sticker skips a card corrupted by an earlier mission", () => {
+    // Every card here is otherwise a legal Mage-sticker target; the only thing ruling them out is corruption.
+    const party: Card[] = [corruptedCard('C', '5'), corruptedCard('H', '7'), corruptedCard('D', '3')];
+    expect(applyMageSticker(party, () => 0)).toEqual(party);
+    expect(party.every((c) => c.kind === 'suited' && !c.secondClassArcane)).toBe(true);
+  });
+
+  it('BUG FIX, end to end: corrupting a card at one mission never makes it a Mage at the next', () => {
+    let party: Card[] = [
+      { ...suited('C', '5'), name: 'Grael Stormbreaker' },
+      { ...suited('H', '7'), name: 'Brother Coen' },
+    ];
+    party = applyCorruptAnotherCard(party, new Set(), () => 0);
+    const corruptedId = party.find((c) => c.kind === 'suited' && c.corrupted)!.id;
+
+    for (const roll of [0, 0.5, 0.99]) {
+      const after = applyMageSticker(party, () => roll);
+      const stuck = after.find((c) => c.id === corruptedId)!;
+      expect(stuck.kind === 'suited' && stuck.secondClassArcane).toBeFalsy();
+      // And no card anywhere ends up both corrupted and Mage.
+      expect(after.some((c) => c.kind === 'suited' && c.corrupted && (c.arcane || c.secondClassArcane))).toBe(false);
+    }
+  });
+
+  it('the four player-picked stickers reject a corrupted card too', () => {
+    expect(reaverStickerEligible(corruptedCard('H', '6'))).toBe(false);
+    expect(guardianStickerEligible({ ...corruptedCard('H', '8'), name: 'Ealda Mercyhand' })).toBe(false);
+    expect(druidStickerEligible(corruptedCard('D', '4'))).toBe(false);
+    expect(chanterStickerEligible(corruptedCard('C', '2'))).toBe(false);
+    // Sanity: the same cards uncorrupted ARE eligible, so the assertions above can't be passing for another reason.
+    expect(reaverStickerEligible(suited('H', '6'))).toBe(true);
+    expect(guardianStickerEligible({ ...suited('H', '8'), name: 'Ealda Mercyhand' })).toBe(true);
+    expect(druidStickerEligible(suited('D', '4'))).toBe(true);
+    expect(chanterStickerEligible(suited('C', '2'))).toBe(true);
   });
 });

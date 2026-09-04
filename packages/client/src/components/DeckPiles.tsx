@@ -1,8 +1,8 @@
-import { relicActive, type ClientGameState } from '@regicide/shared';
+import type { ClientGameState } from '@regicide/shared';
 import { CardPile } from './CardPile';
 
 export function DeckPiles({ state, myPlayerId }: { state: ClientGameState; myPlayerId: string }) {
-  const hasKinfolkFlute = relicActive(state, 'KINFOLK_FLUTE');
+  const hasKinfolkFlute = state.relics.includes('KINFOLK_FLUTE');
   const myKinfolkSlot = state.players.find((p) => p.id === myPlayerId)?.kinfolkSlot ?? null;
 
   return (
