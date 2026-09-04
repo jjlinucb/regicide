@@ -447,9 +447,13 @@ function applyEnemyPaladinDamageReduction(state: GameState, damage: number): num
  * banish from hand (skipped entirely if their hand is empty). Which card the current player gives up isn't
  * specified by the transcript for Hearts/Diamonds — same judgment call as Mission 10's enemy-Bard forced move
  * (see resolveCorruptedEnemyEndOfTurnEffect) — so this always picks their lowest-value card. Once the deck runs
- * dry it reshuffles from its own used-card pile (GameState.beastDeckDiscard) and the cycle continues — since the
- * beast deck is always exactly the 4 base-suited Beast Companions, one full cycle always flips all 4 suits
- * exactly once before clearing and restarting; skipped entirely for the turn right after an exact kill (see
+ * dry it reshuffles from its own used-card pile (GameState.beastDeckDiscard) and the cycle continues — one full
+ * cycle flips every beast in the pool exactly once before clearing and restarting. That used to mean all 4 suits
+ * exactly once, back when the pool was exactly Mission 4's 4 base-suited beasts; Mission 9's Ash (a MAGE beast,
+ * Spades — see missions.ts's Mission 9 reward) makes it 5, so one suit's effect now fires twice per cycle. His
+ * printed suit is read here like any other beast's: this step is the dungeon's machinery keyed to a card face,
+ * not a class power resolving, so `arcane` (which does suppress his own suit power when he's PLAYED, see
+ * continueResolveCommittedPlay) has no bearing on it. Skipped entirely for the turn right after an exact kill (see
  * GameState.skipNextBeastDeckFlip, consumed here). Called both once at mission start (the first player's first
  * turn) and from advanceToNextPlayer, same as every other start-of-turn flip in this file.
  */
