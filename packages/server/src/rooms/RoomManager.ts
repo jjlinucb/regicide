@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { applyAction, createLobbyState, ENDLESS_MODE_MAX_LOOP } from '@regicide/shared';
 import type { Card, GameAction, GameState, LegacySavePayload, MercenaryProgress, MercenaryTypeId, SuitedCard } from '@regicide/shared';
 import {
+  applyChanterStickerChoice,
   applyDruidStickerChoice,
   applyGuardianStickerChoice,
   applyReaverStickerChoice,
@@ -11,6 +12,7 @@ import {
   buildMercenaryLoadout,
   buildRecruitCard,
   getMission,
+  chanterStickerEligible,
   druidStickerEligible,
   guardianStickerEligible,
   LEGACY_JESTER_COUNT,
@@ -504,7 +506,8 @@ export class RoomManager {
             skipped.reward.recruits.some((r) => r.beast) ||
             skipped.reward.reaverStickerChoice ||
             skipped.reward.guardianStickerChoice ||
-            skipped.reward.druidStickerChoice
+            skipped.reward.druidStickerChoice ||
+            skipped.reward.chanterStickerChoice
           )
             introducesInteractiveChoice = true;
         }
@@ -744,6 +747,27 @@ export class RoomManager {
       return { error: 'That card is not eligible for the Druid sticker.' };
     }
     room.legacy.party = applyDruidStickerChoice(room.legacy.party, cardId);
+    await this.campaignStore.save(toRecord(room));
+    return { room };
+  }
+
+  /**
+   * Resolves Mission 8's player-chosen Chanter-sticker reward (see MissionReward.chanterStickerChoice's doc):
+   * permanently gives `cardId` a bonus Chanter sticker. Mirrors chooseDruidSticker exactly, just for rank-2
+   * non-Bard cards and `secondClassChanter` instead of the 4♦/4♣/4♠/`secondClassDruid`.
+   */
+  async chooseChanterSticker(code: string, requestingPlayerId: string, cardId: string): Promise<{ room: Room } | { error: string }> {
+    const room = this.getRoom(code);
+    if (!room || !room.legacy) return { error: 'Campaign not found.' };
+    if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can choose the Chanter sticker.' };
+    if (room.legacy.party.some((c) => c.kind === 'suited' && c.secondClassChanter)) {
+      return { error: 'The Chanter sticker has already been used.' };
+    }
+    const target = room.legacy.party.find((c) => c.id === cardId);
+    if (!target || !chanterStickerEligible(target)) {
+      return { error: 'That card is not eligible for the Chanter sticker.' };
+    }
+    room.legacy.party = applyChanterStickerChoice(room.legacy.party, cardId);
     await this.campaignStore.save(toRecord(room));
     return { room };
   }

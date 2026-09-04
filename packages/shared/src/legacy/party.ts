@@ -134,6 +134,9 @@ export interface MissionReward {
    * legacy/missions.ts): permanently corrupts one random EXISTING party member (never a card this same reward
    * just granted — see applyCorruptAnotherCard) with SuitedCard.corrupted. Not pure upside: the card's class
    * power(s) ignore enemy immunity from then on, but every play banishes the reserve deck's top card as a cost.
+   * John's house rule (2026-09-04): only an ordinary rank 2-9 card from one of the 4 base classes is eligible —
+   * never a 10/Ace, and never one of Legacy's special faction classes (Mage included) — see
+   * applyCorruptAnotherCard's own doc for the full eligibility rule.
    */
   corruptAnotherCard?: boolean;
   /**
@@ -218,6 +221,15 @@ export interface MissionReward {
    * bonus plus a corrupt-another-card step instead.
    */
   druidStickerChoice?: boolean;
+  /**
+   * Mission 8's reward, John's ruling (live play 2026-09-04): after the mission, the player picks ONE of the
+   * eligible rank-2 cards — any base class except Bard (see chanterStickerEligible for why) — to permanently
+   * gain a bonus Chanter sticker (SuitedCard.secondClassChanter — see applyChanterStickerChoice above). Like
+   * Missions 5/6/7's reaverStickerChoice/guardianStickerChoice/druidStickerChoice, a PLAYER CHOICE, so
+   * deliberately NOT auto-applied by applyReward below (there is no card to target yet without the player's own
+   * input).
+   */
+  chanterStickerChoice?: boolean;
 }
 
 /** The "Lucky 4" ranks Dual-class Stickers target — one sticker per rank, matching the physical game's 4-sticker sheets. */
@@ -280,12 +292,22 @@ export function applyMageSticker(party: Card[], rng: () => number = Math.random)
   return party.map((c) => (c.id === pick.id ? { ...c, secondClassArcane: true } : c));
 }
 
+/** The rank band corruptAnotherCard is allowed to target — see applyCorruptAnotherCard's own doc for why. */
+const CORRUPTIBLE_RANKS: Rank[] = ['2', '3', '4', '5', '6', '7', '8', '9'];
+
 /**
  * A mixed-bag reward step (see MissionReward.corruptAnotherCard): permanently corrupts one random eligible
  * existing party member, excluding any card id in `excludeIds` (the recruits this same reward just granted —
  * "another" card, not the new arrival) and any card already `corrupted` or `restored` (mutually exclusive with
  * `corrupted` — see SuitedCard.restored). A no-op if nothing is eligible. `rng` defaults to Math.random; see
  * applyDualClassStickers's doc for why/when to pass a seeded one.
+ *
+ * SOURCED CORRECTION (John, live play 2026-09-04): only a rank 2-9 card from one of the original 4 base classes
+ * (Warrior/Bard/Cleric/Paladin) can be corrupted — never a 10, an Ace, or any of the special faction classes a
+ * later mission introduces (Mage/Reaver/Guardian/Druid/Chanter/Evergreen, including a card only carrying one of
+ * those as a bonus sticker), and never an already-inert `noSuitPower` card. "No mages can be corrupted" was
+ * John's own headline example of the broader rule: corruption targets an ordinary rank-and-file party member,
+ * not one of Legacy's rarer, already-special recruits. The prior version had no such restriction at all.
  */
 export function applyCorruptAnotherCard(
   party: Card[],
@@ -293,7 +315,24 @@ export function applyCorruptAnotherCard(
   rng: () => number = Math.random,
 ): Card[] {
   const eligible = party.filter(
-    (c) => c.kind === 'suited' && !c.corrupted && !c.restored && !excludeIds.has(c.id),
+    (c) =>
+      c.kind === 'suited' &&
+      !c.corrupted &&
+      !c.restored &&
+      !excludeIds.has(c.id) &&
+      CORRUPTIBLE_RANKS.includes(c.rank) &&
+      !c.arcane &&
+      !c.secondClassArcane &&
+      !c.reaver &&
+      !c.secondClassReaver &&
+      !c.guardian &&
+      !c.secondClassGuardian &&
+      !c.druid &&
+      !c.secondClassDruid &&
+      !c.chanter &&
+      !c.secondClassChanter &&
+      !c.evergreen &&
+      !c.noSuitPower,
   );
   if (eligible.length === 0) return party;
   const pick = eligible[Math.floor(rng() * eligible.length)];
@@ -413,6 +452,45 @@ export function applyDruidStickerChoice(party: Card[], cardId: string): Card[] {
     if (applied || c.id !== cardId || !druidStickerEligible(c)) return c;
     applied = true;
     return { ...c, secondClassDruid: true };
+  });
+  return applied ? next : party;
+}
+
+/**
+ * Whether `card` is a legal target for Mission 8's post-mission Chanter-sticker pick (see
+ * MissionReward.chanterStickerChoice): rank 2, not a Bard (John's ruling, live play 2026-09-04 — "but not
+ * bard"), not already carrying a special class of its own, and not already stickered with this same bonus.
+ * Exported so both RoomManager's server-side validation and the client's picker UI filter on the exact same
+ * rule.
+ */
+export function chanterStickerEligible(card: Card): card is Extract<Card, { kind: 'suited' }> {
+  return (
+    card.kind === 'suited' &&
+    card.rank === '2' &&
+    SUIT_TO_CLASS[card.suit].id !== 'BARD' &&
+    !card.arcane &&
+    !card.reaver &&
+    !card.guardian &&
+    !card.druid &&
+    !card.chanter &&
+    !card.evergreen &&
+    !card.secondClassChanter
+  );
+}
+
+/**
+ * Applies the player's chosen target (see chanterStickerEligible) for Mission 8's Chanter-sticker reward —
+ * permanently gives that one card SuitedCard.secondClassChanter, the same "keeps its own suit power AND gets the
+ * bonus mechanic" shape as applyDruidStickerChoice/applyGuardianStickerChoice/applyReaverStickerChoice. A no-op
+ * (same reference) if `cardId` doesn't match an eligible card — callers should validate with
+ * chanterStickerEligible first and surface an error rather than rely on this silently doing nothing.
+ */
+export function applyChanterStickerChoice(party: Card[], cardId: string): Card[] {
+  let applied = false;
+  const next = party.map((c) => {
+    if (applied || c.id !== cardId || !chanterStickerEligible(c)) return c;
+    applied = true;
+    return { ...c, secondClassChanter: true };
   });
   return applied ? next : party;
 }

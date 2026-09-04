@@ -159,6 +159,15 @@ export interface SuitedCard {
    */
   secondClassReaver?: boolean;
   /**
+   * Legacy-only: marks a card that's picked up a bonus Chanter sticker (Mission 8's reward, a player-chosen
+   * pick — see legacy/party.ts's applyChanterStickerChoice/chanterStickerEligible) on top of an existing class.
+   * Unlike a pure Chanter recruit's `chanter` flag (which replaces suit-power resolution entirely), this card
+   * keeps resolving its normal suit power AND leads the chant when played (see engine.ts's
+   * continueResolveCommittedPlay's chanterCards handling) — the same "second class" shape as
+   * secondClassArcane/secondClassGuardian/secondClassDruid/secondClassReaver above.
+   */
+  secondClassChanter?: boolean;
+  /**
    * Legacy-only: marks a Beast Companion (Mission 4's reward, x4, each tied to a specific character). Works like
    * an Animal Companion (see rules.ts's isAnimalCompanion) — playable alone, or paired with exactly one other
    * card — but instead of contributing its own printed value (an Ace's flat 1) to the pair's total, it copies

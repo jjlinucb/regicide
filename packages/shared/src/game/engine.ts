@@ -2239,8 +2239,13 @@ function continueResolveCommittedPlay(
   // (see beginChantCountChoice/GameState.chanterCountChoice), with no relation to the Chanter card's own printed
   // rank at all — this replaces the old "sum of the Chanters' own values, doubled by Encore" reading, which is
   // why ENCORE no longer exists as a signature ability (see legacy/classes.ts's CHANTER entry). Stacking more
-  // than one Chanter into the same play still opens just the one chant, same as before.
-  const chanterCards = resolvingCards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.chanter));
+  // than one Chanter into the same play still opens just the one chant, same as before. Mission 8's reward,
+  // sourced fix: a secondClassChanter card (the bonus Chanter sticker granted to an existing rank-2 party card,
+  // see party.ts's applyChanterStickerChoice) leads this same chant on top of its own suit power, exactly like a
+  // secondClassGuardian card still raises a shield.
+  const chanterCards = resolvingCards.filter(
+    (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.chanter || c.secondClassChanter),
+  );
   const chantTriggered = state.ruleset === 'legacy' && chanterCards.length > 0;
 
   // Gøran's Evergreen (Mission 9): playing his card resolves all four base class powers at once — heal, draw,
