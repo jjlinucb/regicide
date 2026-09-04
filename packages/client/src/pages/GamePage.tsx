@@ -411,7 +411,7 @@ export function GamePage({
         )}
         {isMyRegrowth && <RegrowthWindow dealt={myRegrowthDealt} myPlayerId={myPlayerId} sendAction={sendAction} />}
         {isLegacy && <RelicsTray state={state} myPlayerId={myPlayerId} />}
-        <div className="game-board">
+        <div className={`game-board${state.capturedPilesActive ? ' has-captured-piles' : ''}`}>
           <div className="z-enemy">
             {state.currentEnemy && (
               <EnemyDisplay
@@ -421,6 +421,16 @@ export function GamePage({
               />
             )}
           </div>
+          {/* Mission 9's captured piles get their own bordered zone directly under the enemy, with the draw deck
+              below it — the column order on John's physical playmat. See .game-board.has-captured-piles. */}
+          {state.capturedPilesActive && (
+            <div className="z-piles">
+              <div className="board-panel">
+                <span className="board-panel-title">Captured piles</span>
+                <CapturedPiles piles={state.capturedPiles} />
+              </div>
+            </div>
+          )}
           <div className="z-missionzone">
             <MissionZonePanel
               state={state}
@@ -440,7 +450,6 @@ export function GamePage({
           </div>
           <div className="z-decks">
             <DeckPiles state={state} myPlayerId={myPlayerId} />
-            {state.capturedPilesActive && <CapturedPiles piles={state.capturedPiles} />}
           </div>
           <div className="z-log">
             <div className="board-panel">
