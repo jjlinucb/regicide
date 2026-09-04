@@ -1076,15 +1076,10 @@ export const MISSIONS: Mission[] = [
     // every pile cycles its face-up card to the bottom and reveals the next one instead. An exact kill sends a
     // chosen pile's face-up card straight to the top of the reserve deck (see GameState.capturedPilesActive).
     //
-    // UNSOURCED BALANCE JUDGMENT CALL (see deck.ts's buildCapturedPiles and engine.ts's startLegacyMission for the
-    // full history): the pile split itself scales down for a smaller table now (engine.ts picks the actual pile
-    // size) instead of always carving out a fixed 30 regardless of player count — real playtesting found a solo
-    // game left with almost nothing in the tavern deck for this whole fight. A second playtesting pass later
-    // found the first fix's own scaling let the pile size climb back toward that sourced 30-card figure exactly
-    // at the player counts (3-4) where this engine's per-count hand-size table deals the most total cards up
-    // front — draining the tavern deck to 0-1 cards before a single turn was played. No source specifies scaling
-    // by player count at all, so the pile size is now capped to keep a real post-deal buffer in the tavern deck
-    // at every player count instead of ever reaching that sourced 30-card figure exactly.
+    // The split is the sourced flat 30 (10 per pile) at every player count — see deck.ts's buildCapturedPiles.
+    // Two earlier passes scaled it down by player count because the tavern deck ran dry after the opening deal;
+    // both were compensating for the 16 Pilgrims this mission was failing to fold in (see extraReserveCards
+    // below, now the full 24-card pilgrimDeck()). With those restored the scaling is gone (John, 2026-09-04).
     capturedPilesActive: true,
     // SOURCED CORRECTION (fan-reimplementation rules doc setup step: "Shuffle the pilgrim deck + remaining party
     // cards + holding pile together to form the tavern deck"; post-mission step: "The pilgrim deck is dissolved —
@@ -1092,23 +1087,23 @@ export const MISSIONS: Mission[] = [
     // the source instead folds Mission 7's OWN pilgrim survivors back in here, one final time, before they
     // dissolve for good. Mission 7's pilgrim identities aren't exported as a reusable list (they're inline in
     // that mission's own extraReserveCards above), so rather than refactor Mission 7's already-merged, already-
-    // tested entry (out of scope for this pass) these are freshly-built cards using the exact same 8 names/
-    // suits/ranks as Mission 7's own pilgrim() calls — "the same people," recognizably, without sharing object
-    // references across two missions' games (this codebase never clones a mission's static card objects per
-    // game — see RoomManager's startLegacyMission — so two missions sharing literal array/object references would
-    // risk one game's in-place card mutation (e.g. a suit-changing combo) leaking into the other's template).
+    // tested entry, an earlier pass hand-wrote 8 stand-in survivors here instead. CORRECTION (2026-09-04, John):
+    // "the pilgrim deck" in that setup step means the WHOLE deck — all 24 of Mission 7's pilgrims (4 copies each
+    // of values 2-7, see pilgrimDeck above), not a sampled 8. The 8-card version was an under-implementation of
+    // the same source line already quoted above, and it left this mission's reserve deck 16 cards short — which
+    // is exactly what the pile-size scaling below was invented to paper over (see engine.ts's startLegacyMission).
+    //
+    // This calls pilgrimDeck() a SECOND time rather than reusing Mission 7's array: this codebase never clones a
+    // mission's static card objects per game (see RoomManager's startLegacyMission), so two missions sharing
+    // literal array/object references would risk one game's in-place card mutation (e.g. a suit-changing combo)
+    // leaking into the other's template. A fresh call gives Mission 9 its own objects while keeping the cards
+    // identical — "the same people," recognizably, without the shared reference. The two decks reuse the same
+    // ids, which is safe because they never coexist: Mission 9 sets no pilgrimMechanic/pilgrimCards of its own,
+    // so these are the only Pilgrims in its game.
+    //
     // Unlike Mission 7, none of these carry any zone mechanic here (no pilgrimMechanic flag on this mission) —
-    // ordinary reserve-deck bodies only, same as the Acolytes they replace.
-    extraReserveCards: [
-      pilgrim('Old Fenwick', 'H', '2'),
-      pilgrim('Little Sae', 'D', '3'),
-      pilgrim('Bettina the Ferrywoman', 'C', '4'),
-      pilgrim('Corq Mudfoot', 'S', '5'),
-      pilgrim('Sister Yvaine', 'H', '6'),
-      pilgrim('Harlan Reedy', 'D', '7'),
-      pilgrim('Widow Corrin', 'C', '8'),
-      pilgrim('Young Thistle', 'S', '9'),
-    ],
+    // ordinary reserve-deck bodies only, same as the Acolytes they replaced.
+    extraReserveCards: pilgrimDeck(),
     // Reward: the Evergreen Mother relic (a corrupted card's cost becomes another player banishing from their
     // own hand instead of the reserve deck's top card, or your own hand solo) and a second Mage sticker for one
     // more lucky party member — both unchanged, not part of this pass's confirmed mismatches.

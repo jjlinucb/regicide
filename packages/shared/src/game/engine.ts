@@ -23,6 +23,7 @@ import {
   currentEnemyAttack,
   currentEnemyAttackWithDiscardBuff,
   discardPileTopValue,
+  hasUnpierceableImmunity,
   isBeastCompanion,
   isCompanionCard,
   isMageCard,
@@ -1859,35 +1860,17 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   let capturedPiles: CapturedPile[] = [];
   let reserveDeck: Card[];
   if (capturedPilesActive) {
-    // UNSOURCED BALANCE JUDGMENT CALL (see buildCapturedPiles's own doc comment): scale each pile down for a
-    // smaller table instead of always carving out the sourced 30-card fixed split — a solo or 2-player fight gets
-    // a smaller pile, leaving more of the party in the actual tavern deck.
+    // The sourced split — 10 per pile, 30 total, at every player count (see buildCapturedPiles's own default).
     //
-    // SECOND-PASS BALANCE FIX (2026-08-28, unsourced — see the mission-9-recheck sim, deleted after use, and the
-    // legacy-mission-playtest-findings memory doc): the first pass's `Math.min(10, 4 + 2*n)` grows the pile size
-    // monotonically with player count, reaching the sourced 10/pile (30 total) "once there are enough players
-    // (3-4)" — but this engine's OWN per-player-count hand limit (8/7/6/5) times player count means the initial
-    // hand deal alone claims MORE total cards as n grows (8, 14, 18, 20) even though each individual hand shrinks,
-    // while the leftover-party pool the first pass left behind actually SHRANK as n grew (22, 16, 10, 10 before
-    // extras/jesters). Measured against the actual numbers this produces: a solo game keeps 22 cards in the
-    // tavern deck after the opening deal (fine — this is what the first pass fixed) and a 2-player game keeps 10
-    // (tight but survivable), but a 3-player game is left with exactly 1 card and a 4-player game is left with
-    // exactly 0 — the entire reserve deck is consumed by dealing starting hands, before a single turn is played,
-    // at precisely the player counts (3-4) the sourced 30-card split was supposedly tested at. That's a
-    // reintroduction of the same bug the first pass fixed, just relocated to higher player counts instead of
-    // solo. This now additionally caps the pile size so the tavern deck always keeps a minimum buffer of cards
-    // after the opening deal, computed directly from this mission's own actual numbers (party size, extras,
-    // jesters, and the real per-count hand limit) rather than a flat player-count formula, so it holds regardless
-    // of how those inputs change — and only trims the pile size, never grows it past the first pass's own
-    // `Math.min(10, 4 + 2*n)` cap, so a solo/2-player fight (already comfortably above the buffer) is unaffected.
-    const MIN_STARTING_RESERVE = 10;
-    const initialHandDeal = n * (MAX_HAND_SIZE_BY_PLAYER_COUNT[n] ?? 5);
-    const extrasAndJesters = nonJesterExtraReserveCards.length + deckJesterCount;
-    const maxPileSizeForReserve = Math.floor(
-      (partyForReserve.length + extrasAndJesters - initialHandDeal - MIN_STARTING_RESERVE) / 3,
-    );
-    const pileSize = Math.max(1, Math.min(10, 4 + 2 * n, maxPileSizeForReserve));
-    const split = buildCapturedPiles(partyForReserve, buildRng, pileSize);
+    // No player-count scaling any more. Two earlier passes shrank the pile size because a solo game (and then a
+    // 3-4 player game) was left with almost nothing in the tavern deck after the opening deal. Both were
+    // compensating for a DIFFERENT bug: Mission 9 only folded in 8 of Mission 7's 24 Pilgrims, so its reserve
+    // deck was 16 cards short of what the source actually calls for (see missions.ts's Mission 9
+    // extraReserveCards, now the full pilgrimDeck()). With the real 24 in, a flat 30-card carve-out leaves a
+    // workable tavern deck at every count — from a 40-card starting party (the floor; a real campaign's party is
+    // larger), 40 - 30 + 24 = 34 cards, minus an opening deal of 8/14/18/20 for 1/2/3/4 players, leaving
+    // 26/20/16/14. The scaling was papering over the missing Pilgrims, so it goes with them (John, 2026-09-04).
+    const split = buildCapturedPiles(partyForReserve, buildRng);
     capturedPiles = split.piles;
     reserveDeck = buildLegacyReserveDeck([...split.leftoverParty, ...nonJesterExtraReserveCards], deckJesterCount, buildRng);
   } else {
@@ -2278,12 +2261,13 @@ function continueResolveCommittedPlay(
   const chantTriggered = state.ruleset === 'legacy' && chanterCards.length > 0;
 
   // Gøran's Evergreen (Mission 9): playing his card resolves all four base class powers at once — heal, draw,
-  // double damage, reduce enemy strength — and always ignores enemy immunity, regardless of which suits are
-  // actually in the play or what the enemy is immune to.
+  // double damage, reduce enemy strength — and ignores enemy immunity, regardless of which suits are actually in
+  // the play or what the enemy is immune to. The one exception is Myla herself (see immunityIsUnpierceable
+  // below): the four powers still all resolve against her, but the two she wards stay blocked.
   const evergreenActive = state.ruleset === 'legacy' && resolvingCards.some((c) => c.kind === 'suited' && c.evergreen);
-  if (evergreenActive) {
-    log(state, `${(resolvingCards.find((c) => c.kind === 'suited' && c.evergreen) as Extract<Card, { kind: 'suited' }> | undefined)?.name ?? 'Evergreen'} surges — all four powers resolve at once, ignoring immunity.`);
-  }
+  // Logged after immunityIsUnpierceable is known (see below), so the message never promises an immunity break
+  // against Myla that won't happen — the four powers still all resolve, hers just stay blocked.
+  const evergreenName = (resolvingCards.find((c) => c.kind === 'suited' && c.evergreen) as Extract<Card, { kind: 'suited' }> | undefined)?.name ?? 'Evergreen';
   // nonArcaneSuits already carries the reveal cards' suits (see resolvingCards above), at the same
   // effectiveTotalValue as every other suit in the play.
   const effectiveSuits: Suit[] = evergreenActive ? Array.from(new Set([...nonArcaneSuits, 'H', 'D', 'C', 'S'])) : nonArcaneSuits;
@@ -2293,13 +2277,30 @@ function continueResolveCommittedPlay(
   // redundant for played cards and kept only for arcaneImmuneSuits (a corrupted MAGE'S chosen reveal card, whose
   // trigger is itself a played corrupted card and so already covered — belt and braces).
   const playIncludesImmunityIgnoringCard = resolvingCards.some((c) => c.kind === 'suited' && (c.corrupted || c.restored));
-  const ignoreImmunityForPlay = Boolean(claimedJester) || evergreenActive || playIncludesImmunityIgnoringCard;
+  // JOHN, 2026-09-04: Myla (Mission 9's boss) is the one enemy whose immunity can never be pierced — not by a
+  // claimed Jester, not by Gøran's Evergreen, not by a corrupted or restored card, and not by a corrupted Mage's
+  // revealed suit (immunityIgnoringSuits below, the one immunity bypass that doesn't route through the flag
+  // here). Her Bard + Paladin immunity holds for the whole fight; see rules.ts's hasUnpierceableImmunity for the
+  // scoping. Nothing else about a Jester changes: it still lands its 8 damage and still skips her counter-attack
+  // (see the claimedJester check further down), it just doesn't strip the immunity any more.
+  const immunityIsUnpierceable =
+    state.ruleset === 'legacy' && state.currentEnemy != null && hasUnpierceableImmunity(state.currentEnemy);
+  const ignoreImmunityForPlay =
+    !immunityIsUnpierceable && (Boolean(claimedJester) || evergreenActive || playIncludesImmunityIgnoringCard);
+  if (evergreenActive) {
+    log(
+      state,
+      `${evergreenName} surges — all four powers resolve at once${ignoreImmunityForPlay ? ', ignoring immunity' : ', but the immunity holds'}.`,
+    );
+  }
 
   // Corrupted and restored cards ignore immunity, per-suit only (not the whole play) — see SuitedCard.corrupted /
   // SuitedCard.restored. John's house rule: arcaneImmuneSuits extends the same per-suit exemption to whatever a
   // corrupted Mage's reveal pulled up (see resolveMageRevealChoice) — the Mage itself already paid the corrupted
   // cost when its reveal fired (see revealForMage).
-  const immunityIgnoringSuits = Array.from(new Set([...corruptedSuits, ...restoredSuits, ...arcaneImmuneSuits]));
+  const immunityIgnoringSuits = immunityIsUnpierceable
+    ? []
+    : Array.from(new Set([...corruptedSuits, ...restoredSuits, ...arcaneImmuneSuits]));
   // Sourced fix (see tutorial_vids/summaries/mission-3.md), refined by John's later ruling (see
   // resolveMageRevealChoice): a Mage's chosen reveal card is banished, but its value is still folded into the
   // play's own total value here, so it buffs every other class power (heal/draw/enemy-strength-reduction amounts)
@@ -2317,7 +2318,9 @@ function continueResolveCommittedPlay(
   // always matches what actually lands on the enemy (enemy.damageTaken below).
   log(
     state,
-    `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${damage}${claimedJester ? ', combined with the claimed Jester — ignoring immunity' : ''}.`,
+    `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${damage}${
+      claimedJester ? `, combined with the claimed Jester${ignoreImmunityForPlay ? ' — ignoring immunity' : ' — but the immunity holds'}` : ''
+    }.`,
   );
   if (state.ruleset === 'legacy') checkPilgrimRescue(state, cards);
   state.lastActionWasYield[state.currentPlayerIndex] = false;
@@ -2734,6 +2737,17 @@ function playJester(state: GameState, action: Extract<GameAction, { type: 'PLAY_
 }
 
 /**
+ * What a Jester claim/use actually promises against the enemy in front of it. Every enemy but one loses its
+ * immunity to that attack; Myla (Mission 9's boss) never does — see rules.ts's hasUnpierceableImmunity — so the
+ * log doesn't tell the table she did.
+ */
+function jesterImmunityClause(state: GameState): string {
+  return state.currentEnemy && hasUnpierceableImmunity(state.currentEnemy)
+    ? 'though this enemy\'s immunity holds regardless'
+    : 'ignoring immunity';
+}
+
+/**
  * Legacy-only: claims an open Jester window. Validated against the window being open, not turn ownership — any
  * player may claim. Resolves immediately as its own attack (see below) rather than handing the claimant a
  * separate PLAY_CARDS step, matching the base game's own printed Jester text ("play it on its own, instead of
@@ -2753,7 +2767,7 @@ function claimJester(state: GameState, action: Extract<GameAction, { type: 'CLAI
   state.currentPlayerIndex = state.players.findIndex((p) => p.id === player.id);
   state.turnPhase = 'AWAIT_PLAY';
   state.kinfolkBankedThisTurn = false;
-  log(state, `${player.name} claims the Jester — a free 8-strength attack, ignoring immunity.`);
+  log(state, `${player.name} claims the Jester — a free 8-strength attack, ${jesterImmunityClause(state)}.`);
   return resolveJesterAttack(state, player, jesterCard, 'discard');
 }
 
@@ -2773,7 +2787,7 @@ function useStandingJester(state: GameState, action: Extract<GameAction, { type:
   const jesterCard = state.standingJesters[0];
   state.standingJesters = state.standingJesters.slice(1);
   state.lastActionWasYield[state.currentPlayerIndex] = false;
-  log(state, `${player.name} calls on a standing Jester — a free 8-strength attack, ignoring immunity.`);
+  log(state, `${player.name} calls on a standing Jester — a free 8-strength attack, ${jesterImmunityClause(state)}.`);
   return resolveJesterAttack(state, player, jesterCard, 'topUp');
 }
 
@@ -2951,6 +2965,10 @@ function banishForRescue(state: GameState, action: Extract<GameAction, { type: '
 
   player.hand = player.hand.filter((c) => c.id !== card.id);
   banishCards(state, [card]);
+  // JOHN's wording: the rescued card goes "on top of my discard pile". In this codebase the discard pile's TOP is
+  // the array's LAST element — that's what .pop() takes (see resolveCorruptedEnemyEndOfTurnEffect and the beast
+  // pool's Warrior flip) and what rules.ts's discardPileTopValue reads — so a plain push already puts it there.
+  // Verified rather than assumed; left as-is deliberately, not overlooked.
   state.discardPile.push(pile.faceUp);
   log(
     state,
