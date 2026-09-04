@@ -784,7 +784,7 @@ function revealForReaver(
   forcedPlay: boolean,
   totalValue: number,
   arcaneBonus: number,
-  arcaneSuits: Suit[],
+  arcaneCards: SuitedCard[],
   arcaneImmuneSuits: Suit[],
   count: number,
   trigger: SuitedCard,
@@ -804,9 +804,9 @@ function revealForReaver(
     } else {
       log(state, `The reserve deck is empty — ${triggerLabel} finds nothing to add.`);
     }
-    return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, 0);
+    return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, 0);
   }
-  state.reaverReveal = { playerId, candidates, allRevealed: revealed, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, trigger };
+  state.reaverReveal = { playerId, candidates, allRevealed: revealed, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, trigger };
   state.turnPhase = 'AWAIT_REAVER_REVEAL';
   log(state, `${triggerLabel}'s reveal turns up ${revealed.length} card(s) from the reserve deck — choose one to add to the attack.`);
   return ok(state);
@@ -828,13 +828,13 @@ function startReaverPhase(
   forcedPlay: boolean,
   totalValue: number,
   arcaneBonus: number,
-  arcaneSuits: Suit[],
+  arcaneCards: SuitedCard[],
   arcaneImmuneSuits: Suit[],
 ): EngineResult {
   const reaverTrigger = state.ruleset === 'legacy' ? cards.find(isReaverCard) : undefined;
   if (reaverTrigger) {
     if (state.tavernDeck.length === 0) {
-      return revealForReaver(state, player.id, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, totalValue, reaverTrigger);
+      return revealForReaver(state, player.id, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, totalValue, reaverTrigger);
     }
     state.reaverRevealCountChoice = {
       playerId: player.id,
@@ -843,7 +843,7 @@ function startReaverPhase(
       forcedPlay,
       totalValue,
       arcaneBonus,
-      arcaneSuits,
+      arcaneCards,
       arcaneImmuneSuits,
       trigger: reaverTrigger,
       maxCount: totalValue,
@@ -853,7 +853,7 @@ function startReaverPhase(
     log(state, `${triggerLabel} opens a reveal — choose how many cards (1-${totalValue}) to pull from the reserve deck.`);
     return ok(state);
   }
-  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, 0);
+  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, 0);
 }
 
 /**
@@ -870,10 +870,10 @@ function resolveReaverRevealCount(state: GameState, action: Extract<GameAction, 
     return fail(`Choose a count between 1 and ${window.maxCount}.`);
   }
 
-  const { playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, trigger } = window;
+  const { playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, trigger } = window;
   state.reaverRevealCountChoice = null;
   state.turnPhase = 'AWAIT_PLAY';
-  return revealForReaver(state, playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, action.count, trigger);
+  return revealForReaver(state, playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, action.count, trigger);
 }
 
 /** Resolves the AWAIT_REAVER_REVEAL window opened by revealForReaver (see GameState.reaverReveal). */
@@ -889,11 +889,11 @@ function resolveReaverRevealChoice(state: GameState, action: Extract<GameAction,
   banishCards(state, window.allRevealed);
   log(state, `${chosen.name ?? `the ${chosen.rank}`} is torn from the reserve deck — banished, +${reaverBonus} damage.`);
 
-  const { playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits } = window;
+  const { playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits } = window;
   state.reaverReveal = null;
   state.turnPhase = 'AWAIT_PLAY';
   const player = state.players.find((p) => p.id === playerId)!;
-  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, reaverBonus);
+  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, reaverBonus);
 }
 
 /**
@@ -912,11 +912,11 @@ function declineReaverReveal(state: GameState, action: Extract<GameAction, { typ
   const triggerLabel = window.trigger.name ?? `the ${window.trigger.rank}`;
   log(state, `${triggerLabel}'s reveal is declined — ${window.allRevealed.length} card(s) banished, no bonus.`);
 
-  const { playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits } = window;
+  const { playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits } = window;
   state.reaverReveal = null;
   state.turnPhase = 'AWAIT_PLAY';
   const player = state.players.find((p) => p.id === playerId)!;
-  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, 0);
+  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, 0);
 }
 
 /**
@@ -936,7 +936,7 @@ function revealForMage(
   totalValue: number,
   queue: Card[],
   arcaneBonus: number,
-  arcaneSuits: Suit[],
+  arcaneCards: SuitedCard[],
   arcaneImmuneSuits: Suit[],
   count: number,
   trigger: Card,
@@ -962,9 +962,9 @@ function revealForMage(
   }
   if (candidates.length === 0) {
     log(state, revealed.length > 0 ? "Nothing's left in the reveal to add to the attack." : 'The reserve deck is empty — the reveal finds nothing.');
-    return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneSuits, arcaneImmuneSuits);
+    return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneCards, arcaneImmuneSuits);
   }
-  state.mageReveal = { playerId, candidates, queue, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, trigger };
+  state.mageReveal = { playerId, candidates, queue, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, trigger };
   state.turnPhase = 'AWAIT_MAGE_REVEAL';
   log(state, `${triggerLabel}'s reveal turns up ${revealed.length} card(s) from the reserve deck — choose one to add to the attack.`);
   return ok(state);
@@ -980,16 +980,16 @@ function advanceMageQueue(
   totalValue: number,
   queue: Card[],
   arcaneBonus: number,
-  arcaneSuits: Suit[],
+  arcaneCards: SuitedCard[],
   arcaneImmuneSuits: Suit[],
 ): EngineResult {
   if (queue.length > 0) {
     const [trigger] = queue;
     const rest = queue.slice(1);
-    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, rest, arcaneBonus, arcaneSuits, arcaneImmuneSuits, mageRevealCount(trigger, totalValue), trigger);
+    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, rest, arcaneBonus, arcaneCards, arcaneImmuneSuits, mageRevealCount(trigger, totalValue), trigger);
   }
   const player = state.players.find((p) => p.id === playerId)!;
-  return startReaverPhase(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneSuits, arcaneImmuneSuits);
+  return startReaverPhase(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits);
 }
 
 /** Resolves the AWAIT_MAGE_REVEAL window opened by revealForMage (see GameState.mageReveal). */
@@ -1009,12 +1009,18 @@ function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, {
   // mission-3.md, which described it that way): the chosen card is banished the instant it's picked, same as
   // a Reaver's reveal (see resolveReaverRevealChoice) — it never enters enemy.tableCards, so it isn't subject
   // to the attackIncludesMage overkill/exact-kill discard-vs-banish branch in finishEnemyDefeatTail. Its suit
-  // power still fires despite being banished rather than played — see arcaneSuits below, folded into
-  // continueResolveCommittedPlay's effectiveSuits independently of tableCards membership.
+  // power still fires despite being banished rather than played — see arcaneCards below, folded into
+  // continueResolveCommittedPlay's class/suit resolution independently of tableCards membership.
   const chosenValue = cardValue(chosen);
   banishCards(state, [chosen]);
   const arcaneBonus = window.arcaneBonus + chosenValue;
-  const arcaneSuits = Array.from(new Set([...window.arcaneSuits, ...cardSuits(chosen)]));
+  // Carried whole rather than reduced to its suits (John's ruling, correcting the suits-only reading this
+  // replaced): the chosen card resolves whatever class power it would have resolved had it been played from
+  // hand. For an ordinary suited card that IS just its suit power, unchanged; but a revealed Druid now channels
+  // Regrowth instead of firing its printed suit's power, a revealed Guardian raises its shield, a Chanter leads
+  // its chant, and so on — see continueResolveCommittedPlay, which applies the same class-vs-suit split to these
+  // as it does to the played cards. (A revealed Mage still chains instead, just below.)
+  const arcaneCards = [...window.arcaneCards, chosen];
   // John's house rule: a corrupted ("cursed") Mage's reveal passes its own immunity-ignoring property on to
   // whatever card it pulls up — window.trigger is whichever Mage card opened THIS round of the reveal (see
   // revealForMage's own doc comment), which already paid the corrupted cost above if it was corrupted.
@@ -1033,9 +1039,9 @@ function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, {
 
   if (isMageCard(chosen)) {
     log(state, `${chosen.name ?? 'The chosen card'} is itself a Mage — the reveal chains at its own strength.`);
-    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneSuits, arcaneImmuneSuits, mageRevealCount(chosen, chosenValue), chosen);
+    return revealForMage(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneCards, arcaneImmuneSuits, mageRevealCount(chosen, chosenValue), chosen);
   }
-  return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneSuits, arcaneImmuneSuits);
+  return advanceMageQueue(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneCards, arcaneImmuneSuits);
 }
 
 /**
@@ -2105,7 +2111,7 @@ function continueResolveCommittedPlay(
   forcedPlay: boolean,
   totalValue: number,
   arcaneBonus: number,
-  arcaneSuits: Suit[],
+  arcaneCards: SuitedCard[],
   arcaneImmuneSuits: Suit[],
   reaverBonus: number,
 ): EngineResult {
@@ -2120,11 +2126,20 @@ function continueResolveCommittedPlay(
   // is excluded for a different reason than the rest — it doesn't substitute its own effect, it genuinely has
   // none — which is also what keeps it out of immunity-blocking, since that's computed only from cards that reach
   // this filter.
-  const nonArcaneCards = cards.filter(
-    (c): c is Extract<Card, { kind: 'suited' }> =>
-      c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.chanter && !c.evergreen && !c.noSuitPower,
-  );
-  const nonArcaneSuits = Array.from(new Set(nonArcaneCards.flatMap(cardSuits)));
+  const resolvesOwnSuitPower = (c: Card): c is Extract<Card, { kind: 'suited' }> =>
+    c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.chanter && !c.evergreen && !c.noSuitPower;
+  const nonArcaneCards = cards.filter(resolvesOwnSuitPower);
+
+  // A Mage's chosen reveal card(s) resolve exactly as if they'd been played from hand (John's ruling — see
+  // resolveMageRevealChoice's arcaneCards), so they join the played cards for every class-power check below
+  // rather than only contributing their printed suits. Running them through the same resolvesOwnSuitPower
+  // filter is the half that fixes John's live report: a revealed Druid used to fire its printed suit's power
+  // (a Bard draw, say) and never channel Regrowth — now the filter excludes it from the suit pass and the
+  // druidCards check below picks it up instead. The one part of "as if played" that can't apply is a revealed
+  // Reaver's own reveal-and-add: that's a pre-attack step already past by the time this runs, so such a card
+  // contributes its damage doubling only.
+  const resolvingCards: Card[] = [...cards, ...arcaneCards];
+  const nonArcaneSuits = Array.from(new Set([...nonArcaneCards, ...arcaneCards.filter(resolvesOwnSuitPower)].flatMap(cardSuits)));
 
   // Corrupted cards: their class power always ignores immunity, at the cost of banishing the top of the
   // reserve deck the instant they're played (see SuitedCard.corrupted) — unless the Evergreen Mother relic is
@@ -2153,7 +2168,7 @@ function continueResolveCommittedPlay(
   // Warrior (Clubs) card compounds into quadruple damage. Reuses isReaverCard (not a raw `.reaver` check) so a
   // secondClassReaver sticker card (Mission 5's reaverStickerChoice reward) gets the same doubling, not just the
   // reveal — the whole "Reveal and Add" package, exactly like a pure Reaver card.
-  const reaverCards = cards.filter(isReaverCard);
+  const reaverCards = resolvingCards.filter(isReaverCard);
   const reaverMultiplier = state.ruleset === 'legacy' && reaverCards.length > 0 ? 2 : 1;
 
   // Guardians (Mission 6): playing one raises an absolute shield that blocks the enemy's very next attack
@@ -2163,7 +2178,7 @@ function continueResolveCommittedPlay(
   // Mission 6 reward, sourced fix: a secondClassGuardian card (the Guardian sticker granted to an existing
   // rank-8 party card, see party.ts's applyGuardianSticker) fires this same shield ability on top of its own
   // suit power, exactly like a secondClassArcane card's bonus arcane bolt fires on top of its own suit power.
-  const guardianCards = cards.filter(
+  const guardianCards = resolvingCards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian || c.secondClassGuardian),
   );
   let guardianBlocksNextAttack = false;
@@ -2184,7 +2199,7 @@ function continueResolveCommittedPlay(
   // resolve inline here — it opens after the attack lands (see beginRegrowth below). A card carrying only a
   // bonus Druid sticker (secondClassDruid) opens the same window on top of resolving its own suit power, exactly
   // as a secondClassGuardian card still raises a shield.
-  const druidCards = cards.filter(
+  const druidCards = resolvingCards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.druid || c.secondClassDruid),
   );
   const regrowthActive = state.ruleset === 'legacy' && druidCards.length > 0;
@@ -2195,7 +2210,7 @@ function continueResolveCommittedPlay(
   // Chanters (Mission 8): playing one opens a chant worth its own card value — every player at the table draws
   // that many cards at once, even past their hand limit, then whoever ended up over the limit trims back down
   // one at a time (see beginChant). Encore doubles that card's contribution.
-  const chanterCards = cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.chanter));
+  const chanterCards = resolvingCards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.chanter));
   let chantCount = 0;
   if (state.ruleset === 'legacy' && chanterCards.length > 0) {
     for (const c of chanterCards) {
@@ -2210,16 +2225,20 @@ function continueResolveCommittedPlay(
   // Gøran's Evergreen (Mission 9): playing his card resolves all four base class powers at once — heal, draw,
   // double damage, reduce enemy strength — and always ignores enemy immunity, regardless of which suits are
   // actually in the play or what the enemy is immune to.
-  const evergreenActive = state.ruleset === 'legacy' && cards.some((c) => c.kind === 'suited' && c.evergreen);
+  const evergreenActive = state.ruleset === 'legacy' && resolvingCards.some((c) => c.kind === 'suited' && c.evergreen);
   if (evergreenActive) {
-    log(state, `${(cards.find((c) => c.kind === 'suited' && c.evergreen) as Extract<Card, { kind: 'suited' }> | undefined)?.name ?? 'Evergreen'} surges — all four powers resolve at once, ignoring immunity.`);
+    log(state, `${(resolvingCards.find((c) => c.kind === 'suited' && c.evergreen) as Extract<Card, { kind: 'suited' }> | undefined)?.name ?? 'Evergreen'} surges — all four powers resolve at once, ignoring immunity.`);
   }
-  // A Mage's chosen reveal card independently triggers its own suit power on top of buffing the play's total value
-  // (John's call — see the mage-mechanics thread): its suit joins the combined suit-power resolution below exactly
-  // as if it had been played directly, using the same effectiveTotalValue as every other suit in the play.
-  const suitsWithArcane = Array.from(new Set([...nonArcaneSuits, ...arcaneSuits]));
-  const effectiveSuits: Suit[] = evergreenActive ? Array.from(new Set([...suitsWithArcane, 'H', 'D', 'C', 'S'])) : suitsWithArcane;
-  const ignoreImmunityForPlay = Boolean(claimedJester) || evergreenActive;
+  // nonArcaneSuits already carries the reveal cards' suits (see resolvingCards above), at the same
+  // effectiveTotalValue as every other suit in the play.
+  const effectiveSuits: Suit[] = evergreenActive ? Array.from(new Set([...nonArcaneSuits, 'H', 'D', 'C', 'S'])) : nonArcaneSuits;
+  // John's ruling from live play (a cursed Ace comboed with a Paladin 10 that stayed blocked): a corrupted or
+  // restored card's immunity-ignoring carries across the whole play it's part of, not just its own suit — every
+  // card thrown in alongside it rides on that. This replaces the older per-suit reading below, which is now
+  // redundant for played cards and kept only for arcaneImmuneSuits (a corrupted MAGE'S chosen reveal card, whose
+  // trigger is itself a played corrupted card and so already covered — belt and braces).
+  const playIncludesImmunityIgnoringCard = resolvingCards.some((c) => c.kind === 'suited' && (c.corrupted || c.restored));
+  const ignoreImmunityForPlay = Boolean(claimedJester) || evergreenActive || playIncludesImmunityIgnoringCard;
 
   // Corrupted and restored cards ignore immunity, per-suit only (not the whole play) — see SuitedCard.corrupted /
   // SuitedCard.restored. John's house rule: arcaneImmuneSuits extends the same per-suit exemption to whatever a

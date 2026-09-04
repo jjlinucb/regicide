@@ -673,6 +673,57 @@ describe('legacy: mission playthrough', () => {
     expect(state.victoryMedal).toBeNull(); // Legacy doesn't use Regicide's solo victory-medal scoring
   });
 
+  it("BUG FIX: a Mage's chosen reveal card resolves its own CLASS power, not its printed suit's — a revealed Druid channels Regrowth", () => {
+    // John's live report from Mission 7: "I used a level 2 mage into a 5 druid — but I never got to use the
+    // druid's power, the mage did not chain that suit." The reveal card used to be reduced to its suits on the
+    // way into the play's resolution, so a Druid's printed Diamonds fired a Bard draw and Regrowth never opened.
+    const enemy: LegacyEnemySpec = { name: 'Warded Foe', suit: 'S', health: 60, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const mage2: SuitedCard = { ...suited('H', '2'), arcane: true };
+    state = rig(state, [mage2]);
+    const druid5: SuitedCard = { ...suited('D', '5'), name: 'Maya', druid: true };
+    state.tavernDeck = [druid5, suited('C', '2')];
+    state.discardPile = [suited('S', '9'), suited('C', '9')];
+    const handBefore = state.players[0].hand.length;
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage2.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: druid5.id }));
+    state = res.state;
+    // The value still lands (2 + 5), exactly as before.
+    expect(state.currentEnemy?.damageTaken).toBe(7);
+    // The Druid's own power fires: Regrowth deals the discard pile out and opens the per-player window.
+    expect(state.turnPhase).toBe('AWAIT_REGROWTH');
+    expect(state.druidWindow).not.toBeNull();
+    // And its printed Diamonds does NOT also fire a Bard draw, the way it wrongly used to.
+    expect(state.players[0].hand.length).toBe(handBefore - 1);
+  });
+
+  it('BUG FIX: a corrupted card carries its immunity-ignoring across the whole play, not just its own suit', () => {
+    // John's live report from Mission 7: a cursed Ace comboed with a Paladin 10 against a Paladin-immune enemy —
+    // the Paladin shield was still blocked, so the enemy's 15 attack landed in full instead of being cut to 5.
+    const enemy: LegacyEnemySpec = { name: 'Deep: Ironscale', suit: 'S', health: 60, attack: 15 };
+    let state = startMission(1, [enemy]);
+    const cursedAce: SuitedCard = { ...suited('D', 'A'), name: 'Tilly the Lark', corrupted: true };
+    const paladin10 = suited('S', '10');
+    state = rig(state, [cursedAce, paladin10]);
+    // A corrupted card banishes the reserve deck's top as its cost.
+    state.tavernDeck = [suited('C', '2'), ...state.tavernDeck];
+
+    const res = ensureOk(applyAction(state, {
+      type: 'PLAY_CARDS',
+      playerId: state.players[0].id,
+      cardIds: [cursedAce.id, paladin10.id],
+    }));
+    state = res.state;
+    // Spades rides on the cursed Ace's exemption. The shield is worth the whole play's value (Ace 1 + 10 = 11),
+    // not just the Paladin card's own 10 — that's how a Spades shield has always been scored, so the enemy's 15
+    // attack is cut to 4 rather than the 5 John estimated.
+    expect(state.currentEnemy?.spadesShield).toBe(11);
+  });
+
   it("a Mage's reveal lets the player tuck a chosen card under the attack, adding its value and bypassing its own suit's immunity", () => {
     // Enemy is immune to Hearts (its own suit) — the Mage card is Hearts-suited, so a base Cleric play would be
     // blocked, but a Mage's power isn't a suit power, so its reveal (and the chosen card's bonus) lands anyway.

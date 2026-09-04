@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { CLASS_THEME, classForSuit, MERCENARY_CATALOG, mercenaryCoinsForLosses } from '@regicide/shared';
 import type { MercenaryProgress, MercenaryTypeId, Suit } from '@regicide/shared';
 
@@ -21,19 +21,33 @@ export function MercenaryCamp({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(true);
+  // Guards against an out-of-order save landing last when the host clicks the steppers quickly: only the newest
+  // dispatched selection is allowed to write the "saved"/error state.
+  const latestSave = useRef(0);
 
   const budget = mercenaryCoinsForLosses(progress.lossCount);
   const totalCost = MERCENARY_CATALOG.reduce((sum, spec) => sum + spec.cost * (selection[spec.id] ?? 0), 0);
 
+  // BUG FIX (John's live report: "for mission 7, I selected 2 jesters with 10 coins, but the mission begins with
+  // 2, not 4"): the picks used to live in local state until the host clicked a separate "Save Loadout" button, so
+  // setting the steppers and then going straight to "Begin Mission N" silently threw the whole purchase away —
+  // the server never heard about it, and the mission started with only its own base Jesters. Nothing in the UI
+  // said the hires weren't committed yet. Every stepper click now commits immediately; the button is gone, and
+  // the line below it just reports what the server has. The call is a full re-pick each time and re-validates
+  // against the budget server-side (see RoomManager.setMercenaryLoadout), so firing it per click is safe.
   function setQty(id: MercenaryTypeId, qty: number) {
-    setSelection((prev) => ({ ...prev, [id]: qty }));
+    const next = { ...selection, [id]: qty };
+    setSelection(next);
     setSaved(false);
     setSaveError(null);
+    void commit(next);
   }
 
-  async function handleSave() {
+  async function commit(loadout: Partial<Record<MercenaryTypeId, number>>) {
+    const ticket = ++latestSave.current;
     setSaving(true);
-    const res = await onSave(selection);
+    const res = await onSave(loadout);
+    if (ticket !== latestSave.current) return;
     setSaving(false);
     if (res.ok) setSaved(true);
     else setSaveError(res.error);
@@ -95,9 +109,9 @@ export function MercenaryCamp({
 
       {isHost ? (
         <>
-          <button className="btn" onClick={handleSave} disabled={saving || saved}>
-            {saving ? 'Saving...' : saved ? 'Saved' : 'Save Loadout'}
-          </button>
+          <p style={{ fontSize: '0.85rem', color: saved ? 'var(--ink-dim)' : 'var(--ink)', margin: 0 }}>
+            {saving ? 'Saving...' : saved ? 'Hired — they ride along on your next attempt.' : 'Saving...'}
+          </p>
           {saveError && <p style={{ color: 'var(--danger)', fontSize: '0.85rem', margin: 0 }}>{saveError}</p>}
         </>
       ) : (
