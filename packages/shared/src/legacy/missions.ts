@@ -1117,7 +1117,17 @@ export const MISSIONS: Mission[] = [
     extraReserveCards: pilgrimDeck(),
     // Reward: the Evergreen Mother relic (a corrupted card's cost becomes another player banishing from their
     // own hand instead of the reserve deck's top card, or your own hand solo) and a second Mage sticker for one
-    // more lucky party member — both unchanged, not part of this pass's confirmed mismatches.
+    // more lucky party member.
+    //
+    // JOHN, 2026-09-04 (live play): the Mage sticker is RANK-RESTRICTED and only half a player choice. "Either a
+    // rank 4 or a rank 8 gets the Mage ability at the end of Mission 9. The player chooses which rank, 4 or 8.
+    // Within that rank the recipient is random — you do not get to pick which specific 4, or which specific 8."
+    // So this is now `mageStickerRankChoice`, not the old `mageSticker` (which drew uniformly from the WHOLE
+    // party at any rank, auto-applied inside applyReward). Two steps: the player picks the rank on
+    // CampaignLobbyPage, then the server draws a random eligible card of that rank — see party.ts's
+    // mageStickerEligible/mageStickerRankOptions/applyMageStickerRankChoice and RoomManager's
+    // chooseMageStickerRank, which re-validates the rank rather than trusting the client. NOT a card picker,
+    // unlike Missions 5-8's Reaver/Guardian/Druid/Chanter stickers.
     //
     // SOURCED CORRECTION (fan-reimplementation rules doc: "Goran now ignores all immunities... but NOT considered
     // restored" — i.e. gains the same all-four-suits, immunity-ignoring behavior this codebase already models as
@@ -1160,7 +1170,7 @@ export const MISSIONS: Mission[] = [
     reward: {
       recruits: [],
       relics: ['EVERGREEN_MOTHER'],
-      mageSticker: true,
+      mageStickerRankChoice: true,
       upgradeEvergreenCard: 'Goran',
     },
   },

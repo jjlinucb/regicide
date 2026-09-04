@@ -3,7 +3,7 @@ import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engi
 import { redactStateFor } from '../game/redact.js';
 import { makeRng } from '../game/deck.js';
 import { cardSuits, missionZoneValueSum } from '../game/rules.js';
-import type { Card, EngineResult, GameAction, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
+import type { Card, EngineResult, GameAction, GameState, LegacyEnemySpec, Rank, SuitedCard } from '../game/types.js';
 import { CLASS_THEME } from './classes.js';
 import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs, type MissionEnemySpec } from './missions.js';
@@ -18,7 +18,10 @@ import {
   applyGuardianStickerChoice,
   chanterStickerEligible,
   druidStickerEligible,
-  applyMageSticker,
+  applyMageStickerRankChoice,
+  mageStickerEligible,
+  mageStickerRankOptions,
+  MAGE_STICKER_RANKS,
   applyReaverStickerChoice,
   applyReward,
   applyRestoredPartyCards,
@@ -1101,10 +1104,10 @@ describe('legacy: party.ts reward randomness accepts a seeded rng (determinism)'
     expect(a).toEqual(b);
   });
 
-  it('applyMageSticker is reproducible under the same seed', () => {
+  it('applyMageStickerRankChoice is reproducible under the same seed', () => {
     const party = buildInitialParty();
-    const a = applyMageSticker(party, makeRng('mage-seed'));
-    const b = applyMageSticker(party, makeRng('mage-seed'));
+    const a = applyMageStickerRankChoice(party, '8', makeRng('mage-seed'));
+    const b = applyMageStickerRankChoice(party, '8', makeRng('mage-seed'));
     expect(a).toEqual(b);
   });
 
@@ -5009,11 +5012,145 @@ describe('legacy: bonus Mage sticker (secondClassArcane — keeps its own suit p
     expect(s.currentEnemy?.damageTaken).toBe(12);
   });
 
-  it('applyMageSticker gives one random eligible party member secondClassArcane, skipping Mage/Reaver/Guardian/Druid/Evergreen cards', () => {
+  it('applyMageStickerRankChoice gives exactly one eligible party member of the chosen rank secondClassArcane', () => {
     const party = buildInitialParty();
-    const next = applyMageSticker(party);
-    const stickered = next.filter((c) => c.kind === 'suited' && c.secondClassArcane);
-    expect(stickered.length).toBe(1);
+    for (const rank of ['4', '8'] as Rank[]) {
+      const next = applyMageStickerRankChoice(party, rank);
+      const stickered = next.filter((c) => c.kind === 'suited' && c.secondClassArcane);
+      expect(stickered.length).toBe(1);
+      expect(stickered[0].kind === 'suited' && stickered[0].rank).toBe(rank);
+    }
+  });
+});
+
+/**
+ * John's ruling from live play, 2026-09-04 (see party.ts's MissionReward.mageStickerRankChoice): "Either a rank 4
+ * or a rank 8 gets the Mage ability at the end of Mission 9. The player chooses which rank, 4 or 8. Within that
+ * rank the recipient is random." Two halves, and both matter: the rank restriction, and the fact that the CARD is
+ * never the player's to pick.
+ */
+describe("legacy: Mission 9's Mage sticker is a rank choice, with a random recipient inside that rank", () => {
+  it('offers exactly ranks 4 and 8 — no other rank is ever eligible or applicable', () => {
+    expect(MAGE_STICKER_RANKS).toEqual(['4', '8']);
+    const party = buildInitialParty();
+    expect(mageStickerRankOptions(party)).toEqual(['4', '8']);
+
+    // Every other rank in a full starting party is a legal card in every other respect, and still refused.
+    for (const rank of ['2', '3', '5', '6', '7', '9', '10', 'A'] as Rank[]) {
+      expect(party.some((c) => c.kind === 'suited' && c.rank === rank)).toBe(true); // the rank really is present
+      expect(party.some((c) => mageStickerEligible(c, rank))).toBe(false);
+      expect(applyMageStickerRankChoice(party, rank)).toBe(party); // same reference — a no-op, not a silent widening
+    }
+  });
+
+  it('the recipient is random WITHIN the chosen rank, and never from the other rank', () => {
+    const party = buildInitialParty(); // 4 eligible 4s and 4 eligible 8s, one per suit
+    for (const rank of ['4', '8'] as Rank[]) {
+      const picks = new Set<string>();
+      for (const roll of [0, 0.3, 0.6, 0.99]) {
+        const next = applyMageStickerRankChoice(party, rank, () => roll);
+        const stickered = next.filter((c) => c.kind === 'suited' && c.secondClassArcane);
+        expect(stickered.length).toBe(1);
+        expect(stickered[0].kind === 'suited' && stickered[0].rank).toBe(rank);
+        picks.add(stickered[0].id);
+      }
+      // Four distinct rolls across four eligible cards must reach all four — this is what "you do not get to pick
+      // which specific 4" actually means, and it's the assertion that would fail if the draw ever became fixed.
+      expect(picks.size).toBe(4);
+    }
+  });
+
+  it('still excludes every card the sticker could never land on before the rank rule existed', () => {
+    // Rank 4 and 8 both, so nothing here passes or fails merely because of its rank.
+    const cases: [string, SuitedCard][] = [
+      ['corrupted', { ...suited('C', '4'), corrupted: true }],
+      ['already a Mage', { ...suited('D', '8'), arcane: true }],
+      ['already a Reaver', { ...suited('H', '4'), reaver: true }],
+      ['already a Guardian', { ...suited('S', '8'), guardian: true }],
+      ['already a Druid', { ...suited('C', '4'), druid: true }],
+      ['already a Chanter', { ...suited('D', '8'), chanter: true }],
+      ['already Evergreen', { ...suited('H', '4'), evergreen: true }],
+      ['already carrying this sticker', { ...suited('S', '8'), secondClassArcane: true }],
+    ];
+    for (const [label, card] of cases) {
+      expect([label, mageStickerEligible(card, card.rank)]).toEqual([label, false]);
+    }
+    // Sanity: the same cards stripped of the disqualifying flag ARE eligible, so the above can't be passing for
+    // some unrelated reason (a wrong rank, say).
+    expect(mageStickerEligible(suited('C', '4'), '4')).toBe(true);
+    expect(mageStickerEligible(suited('S', '8'), '8')).toBe(true);
+  });
+
+  it("Goran needs no by-name exclusion: Mission 9's own reward makes him Evergreen before the pick is offered", () => {
+    // guardianStickerEligible excludes him by name because that sticker is picked at Mission 6, three missions
+    // before `evergreen` is ever set. This one is picked at Mission 9, in the same breath as the upgrade.
+    let party = applyReward(buildInitialParty(), getMission(4)!.reward);
+    party = applyReward(party, getMission(9)!.reward);
+    const goran = party.find((c) => c.kind === 'suited' && c.name === 'Goran')!;
+    expect(goran.kind === 'suited' && goran.rank).toBe('8'); // he IS at a Mage-sticker rank — the exclusion is load-bearing
+    expect(mageStickerEligible(goran, '8')).toBe(false);
+  });
+
+  it('EDGE CASE — a rank with no eligible card is never offered, and applying it anyway is a no-op', () => {
+    // Every 8 is spoken for; the 4s are fine.
+    const party: Card[] = [
+      { ...suited('C', '8'), corrupted: true },
+      { ...suited('D', '8'), guardian: true },
+      suited('H', '4'),
+      suited('S', '4'),
+    ];
+    expect(mageStickerRankOptions(party)).toEqual(['4']);
+    expect(applyMageStickerRankChoice(party, '8', () => 0)).toBe(party);
+    expect(party.every((c) => c.kind === 'suited' && !c.secondClassArcane)).toBe(true);
+  });
+
+  it('EDGE CASE — only one rank eligible still yields a one-option prompt, not a silent auto-grant', () => {
+    // The reward is NOT resolved by applyReward, so a party with a single viable rank sits in exactly the same
+    // "waiting for the player" state as a party with two. The client renders that one option (see
+    // MageStickerRankPicker); nothing is stickered behind the player's back.
+    const party: Card[] = [suited('C', '8'), suited('D', '8'), { ...suited('H', '4'), corrupted: true }];
+    expect(mageStickerRankOptions(party)).toEqual(['8']);
+    expect(applyReward(party, getMission(9)!.reward).some((c) => c.kind === 'suited' && c.secondClassArcane)).toBe(false);
+  });
+
+  it('EDGE CASE — neither rank eligible leaves the reward ungranted rather than landing somewhere illegal', () => {
+    const party: Card[] = [
+      { ...suited('C', '4'), corrupted: true },
+      { ...suited('D', '8'), corrupted: true },
+      suited('H', '5'), // a perfectly healthy card at the WRONG rank — must not be a fallback target
+      suited('S', '9'),
+    ];
+    expect(mageStickerRankOptions(party)).toEqual([]);
+    for (const rank of MAGE_STICKER_RANKS) {
+      expect(applyMageStickerRankChoice(party, rank, () => 0)).toBe(party);
+    }
+    expect(party.every((c) => c.kind === 'suited' && !c.secondClassArcane)).toBe(true);
+  });
+
+  it('JUMP PATH — a party that jumped straight to Mission 9 still has eligible 4s AND 8s', () => {
+    // John routinely skips ahead, so the party arriving at Mission 9 is whatever back-granting Missions 1-8's
+    // rewards produces (see RoomManager's startLegacyMission), not a hand-curated roster. Those rewards corrupt a
+    // card at Missions 1/5/6/7/8 and hand out stickers at 5/6/7/8 — this pins that none of that can starve the
+    // Mage sticker of both ranks. Mission 9's own reward is included because that is exactly when the pick is
+    // offered: its Goran-to-Evergreen upgrade lands first, in the same grantMissionReward call. Several seeds,
+    // since the corruption picks are rng-driven.
+    for (const seed of ['jump-a', 'jump-b', 'jump-c', 'jump-d']) {
+      const rng = makeRng(seed);
+      let party = buildInitialParty();
+      for (let id = 1; id <= 9; id++) {
+        const reward = getMission(id)!.reward;
+        // Beast Companion recruits go to a separate pool, never the party (see RoomManager's grantMissionReward).
+        party = applyReward(party, { ...reward, recruits: reward.recruits.filter((r) => !r.beast) }, rng);
+      }
+      expect([seed, mageStickerRankOptions(party)]).toEqual([seed, ['4', '8']]);
+      for (const rank of ['4', '8'] as Rank[]) {
+        const stickered = applyMageStickerRankChoice(party, rank, rng).filter((c) => c.kind === 'suited' && c.secondClassArcane);
+        expect(stickered.length).toBe(1);
+        expect(stickered[0].kind === 'suited' && stickered[0].rank).toBe(rank);
+        expect(stickered[0].kind === 'suited' && stickered[0].corrupted).toBeFalsy();
+        expect(stickered[0].kind === 'suited' && stickered[0].name).not.toBe('Goran'); // he's Evergreen by now
+      }
+    }
   });
 });
 
@@ -5079,7 +5216,7 @@ describe('legacy: mission 9 reward (Evergreen Mother relic, Goran upgraded to Ev
     const mission4 = getMission(4)!;
     const mission9 = getMission(9)!;
     expect(mission9.reward.relics).toEqual(['EVERGREEN_MOTHER']);
-    expect(mission9.reward.mageSticker).toBe(true);
+    expect(mission9.reward.mageStickerRankChoice).toBe(true);
     expect(mission9.reward.recruits.length).toBe(0); // no brand-new recruit — sourced correction
     expect(mission9.reward.upgradeEvergreenCard).toBe('Goran');
 
@@ -5096,7 +5233,9 @@ describe('legacy: mission 9 reward (Evergreen Mother relic, Goran upgraded to Ev
       expect(goranCard.evergreen).toBe(true);
     }
     expect(party.filter((c) => c.kind === 'suited' && c.evergreen).length).toBe(1);
-    expect(party.filter((c) => c.kind === 'suited' && c.secondClassArcane).length).toBe(1);
+    // The Mage sticker is a PLAYER CHOICE of rank now (John, live play 2026-09-04), so applyReward deliberately
+    // grants none of it — nothing is stickered until the player picks 4 or 8 in the lobby.
+    expect(party.filter((c) => c.kind === 'suited' && c.secondClassArcane).length).toBe(0);
   });
 
   it('matching by name (not suit+rank) matters: Goran\'s suit+rank identity (Spades, 8) is already claimed by a pre-existing starting party member, who must NOT be the one upgraded', () => {
@@ -6751,22 +6890,25 @@ describe('legacy: the other direction — an already-corrupted card can never GA
   const corruptedCard = (suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard => ({ ...suited(suit, rank), corrupted: true });
 
   it("BUG FIX: Mission 9's Mage sticker skips a card corrupted by an earlier mission", () => {
-    // Every card here is otherwise a legal Mage-sticker target; the only thing ruling them out is corruption.
-    const party: Card[] = [corruptedCard('C', '5'), corruptedCard('H', '7'), corruptedCard('D', '3')];
-    expect(applyMageSticker(party, () => 0)).toEqual(party);
+    // Every card here is at a legal Mage-sticker rank; the only thing ruling them out is corruption.
+    const party: Card[] = [corruptedCard('C', '4'), corruptedCard('H', '8'), corruptedCard('D', '4')];
+    for (const rank of ['4', '8'] as Rank[]) {
+      expect(applyMageStickerRankChoice(party, rank, () => 0)).toEqual(party);
+    }
+    expect(mageStickerRankOptions(party)).toEqual([]);
     expect(party.every((c) => c.kind === 'suited' && !c.secondClassArcane)).toBe(true);
   });
 
   it('BUG FIX, end to end: corrupting a card at one mission never makes it a Mage at the next', () => {
     let party: Card[] = [
-      { ...suited('C', '5'), name: 'Grael Stormbreaker' },
-      { ...suited('H', '7'), name: 'Brother Coen' },
+      { ...suited('C', '4'), name: 'Kessa Ironjaw' },
+      { ...suited('H', '4'), name: 'Ysolde Dawnkeeper' },
     ];
     party = applyCorruptAnotherCard(party, new Set(), () => 0);
     const corruptedId = party.find((c) => c.kind === 'suited' && c.corrupted)!.id;
 
     for (const roll of [0, 0.5, 0.99]) {
-      const after = applyMageSticker(party, () => roll);
+      const after = applyMageStickerRankChoice(party, '4', () => roll);
       const stuck = after.find((c) => c.id === corruptedId)!;
       expect(stuck.kind === 'suited' && stuck.secondClassArcane).toBeFalsy();
       // And no card anywhere ends up both corrupted and Mage.

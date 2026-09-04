@@ -3,8 +3,15 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Server } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
-import type { Card, ClientGameState, ClientToServerEvents, LegacyStatePayload, ServerToClientEvents } from '@regicide/shared';
-import { chanterStickerEligible, druidStickerEligible, guardianStickerEligible, reaverStickerEligible } from '@regicide/shared';
+import type { Card, ClientGameState, ClientToServerEvents, LegacyStatePayload, Rank, ServerToClientEvents } from '@regicide/shared';
+import {
+  chanterStickerEligible,
+  druidStickerEligible,
+  guardianStickerEligible,
+  mageStickerEligible,
+  mageStickerRankOptions,
+  reaverStickerEligible,
+} from '@regicide/shared';
 import { RoomManager } from './rooms/RoomManager.js';
 import { registerSocketHandlers } from './socket/handlers.js';
 import { InMemoryCampaignStore } from './db/campaigns.js';
@@ -628,6 +635,117 @@ describe('legacy campaign integration', () => {
       const again = await rooms.chooseChanterSticker(created.code, created.playerId, eligible[1].id);
       expect('error' in again).toBe(true);
     }
+
+    client.close();
+  });
+
+  /**
+   * Mission 9's Mage sticker (John, live play 2026-09-04 — see shared party.ts's
+   * MissionReward.mageStickerRankChoice). The one sticker reward that is NOT a card picker: the player sends a
+   * RANK, the server draws the recipient. These jump straight to Mission 10, which is how John actually reaches
+   * this reward — a jump back-grants Missions 1-9, corruption steps and all, so nothing here can hardcode which
+   * cards survive.
+   */
+  it("Mission 9's Mage sticker takes a RANK, draws the card itself, and re-validates the rank server-side", async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Nadia' });
+
+    // Jump past mission 9 (auto-grants missions 1-9's rewards, including this one). stopForPendingChoices keeps
+    // the room in the lobby so the picker is reachable at all — the same path CampaignLobbyPage's jump button
+    // takes, and the reason mageStickerRankChoice had to join startLegacyMission's pending-choice list.
+    const result = rooms.startLegacyMission(created.code, created.playerId, 10, { stopForPendingChoices: true });
+    if ('error' in result) throw new Error(result.error);
+    expect(result.room.gameState.phase).toBe('LOBBY'); // stopped for the pick instead of launching Mission 10
+    expect(result.room.legacy?.currentMission).toBe(10);
+    expect(result.room.legacy?.party.some((c) => c.kind === 'suited' && c.secondClassArcane)).toBe(false);
+
+    // JUMP PATH: a party that skipped the campaign still reaches both ranks. Missions 1/5/6/7/8 each corrupt a
+    // random card (unseeded), so this is asserted, not assumed.
+    const options = mageStickerRankOptions(result.room.legacy!.party);
+    expect(options).toEqual(['4', '8']);
+
+    const notHost = await rooms.chooseMageStickerRank(created.code, 'not-the-host', '8');
+    expect('error' in notHost).toBe(true);
+
+    // A rank outside 4/8 is refused even though the party is full of perfectly healthy cards at those ranks —
+    // the client does not get to widen the reward.
+    for (const rank of ['2', '5', '9', 'A'] as Rank[]) {
+      const bad = await rooms.chooseMageStickerRank(created.code, created.playerId, rank);
+      expect([rank, 'error' in bad]).toEqual([rank, true]);
+    }
+    expect(result.room.legacy?.party.some((c) => c.kind === 'suited' && c.secondClassArcane)).toBe(false);
+
+    // The real pick, over the socket, so the handler and its awardedCardId callback are exercised too.
+    const chosen = await emitAsync<{ ok: true; awardedCardId: string } | { ok: false; error: string }>(client, 'legacy:chooseMageStickerRank', {
+      code: created.code,
+      rank: '4',
+    });
+    if (!chosen.ok) throw new Error(chosen.error);
+
+    const party = rooms.getRoom(created.code)!.legacy!.party;
+    const stickered = party.filter((c) => c.kind === 'suited' && c.secondClassArcane);
+    expect(stickered.length).toBe(1);
+    expect(stickered[0].id).toBe(chosen.awardedCardId); // the server names who it landed on
+    expect(stickered[0].kind === 'suited' && stickered[0].rank).toBe('4'); // the chosen rank, never the other one
+    expect(stickered[0].kind === 'suited' && stickered[0].corrupted).toBeFalsy();
+
+    // One-time only — the other rank is rejected once the sticker's been used.
+    const again = await rooms.chooseMageStickerRank(created.code, created.playerId, '8');
+    expect('error' in again).toBe(true);
+
+    client.close();
+  });
+
+  it("Mission 9's Mage sticker fails loudly when neither rank has an eligible member, instead of no-op'ing", async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Oksana' });
+
+    const result = rooms.startLegacyMission(created.code, created.playerId, 10, { stopForPendingChoices: true });
+    if ('error' in result) throw new Error(result.error);
+
+    // Starve the reward: knock out every remaining rank-4 and rank-8 candidate. Reached by hand because no
+    // sequence of real missions produces it — which is exactly why it needs pinning, since the failure mode is
+    // the reward evaporating unnoticed.
+    const legacy = rooms.getRoom(created.code)!.legacy!;
+    legacy.party = legacy.party.map((c) => (c.kind === 'suited' && (c.rank === '4' || c.rank === '8') ? { ...c, corrupted: true } : c));
+    expect(mageStickerRankOptions(legacy.party)).toEqual([]);
+
+    for (const rank of ['4', '8'] as Rank[]) {
+      const res = await rooms.chooseMageStickerRank(created.code, created.playerId, rank);
+      expect('error' in res).toBe(true);
+      if ('error' in res) expect(res.error).toContain('Mage sticker');
+    }
+    // And nothing was quietly stickered on the way past — least of all a card at some other rank.
+    expect(legacy.party.some((c) => c.kind === 'suited' && c.secondClassArcane)).toBe(false);
+
+    client.close();
+  });
+
+  it("Mission 9's Mage sticker offers only the surviving rank when the other one is wiped out", async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Petra' });
+
+    const result = rooms.startLegacyMission(created.code, created.playerId, 10, { stopForPendingChoices: true });
+    if ('error' in result) throw new Error(result.error);
+
+    const legacy = rooms.getRoom(created.code)!.legacy!;
+    legacy.party = legacy.party.map((c) => (c.kind === 'suited' && c.rank === '4' ? { ...c, corrupted: true } : c));
+    expect(mageStickerRankOptions(legacy.party)).toEqual(['8']);
+
+    // The dead rank is refused; the live one still resolves — one option is still a prompt, not an auto-grant,
+    // so nothing happened until this call.
+    const dead = await rooms.chooseMageStickerRank(created.code, created.playerId, '4');
+    expect('error' in dead).toBe(true);
+    expect(legacy.party.some((c) => c.kind === 'suited' && c.secondClassArcane)).toBe(false);
+
+    const applied = await rooms.chooseMageStickerRank(created.code, created.playerId, '8');
+    if ('error' in applied) throw new Error(applied.error);
+    const awarded = applied.room.legacy!.party.find((c) => c.id === applied.awardedCardId)!;
+    expect(awarded.kind === 'suited' && awarded.rank).toBe('8');
+    expect(mageStickerEligible(awarded, '8')).toBe(false); // it carries the sticker now, so it's out of the pool
 
     client.close();
   });

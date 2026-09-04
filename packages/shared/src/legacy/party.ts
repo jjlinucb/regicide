@@ -127,8 +127,20 @@ export interface MissionReward {
   relics?: string[];
   /** Dual-class Stickers reward: gives this many random, eligible existing party members a second class icon. */
   dualClassStickers?: number;
-  /** Mission 9's "second Mage sticker" reward: gives one random eligible existing party member a bonus Mage sticker (see applyMageSticker). */
-  mageSticker?: boolean;
+  /**
+   * Mission 9's "second Mage sticker" reward, John's ruling (live play 2026-09-04): after the mission, the
+   * player picks a RANK — 4 or 8 — and one random eligible party member OF THAT RANK permanently gains a bonus
+   * Mage sticker (SuitedCard.secondClassArcane — see mageStickerEligible/mageStickerRankOptions/
+   * applyMageStickerRankChoice below). A two-step reward, and deliberately only half a choice: the player picks
+   * the rank, the rng picks the card within it. That makes it unlike Missions 5-8's
+   * reaverStickerChoice/guardianStickerChoice/druidStickerChoice/chanterStickerChoice, which all let the player
+   * pick the exact CARD — do not model this one as a card picker. It replaces the previous `mageSticker`
+   * behavior (a random pick across the WHOLE party, at any rank, auto-applied inside applyReward).
+   *
+   * Like the other four sticker choices, deliberately NOT auto-applied by applyReward below: there is no rank to
+   * roll against until the player says which one.
+   */
+  mageStickerRankChoice?: boolean;
   /**
    * A mixed-bag reward step several missions' sourced material calls for (first implemented for Mission 5, see
    * legacy/missions.ts): permanently corrupts one random EXISTING party member (never a card this same reward
@@ -143,7 +155,7 @@ export interface MissionReward {
    * Mission 6's reward, confirmed live (2026-09-02): after the mission, the player picks ONE of their existing
    * eligible rank-8 party members to permanently gain a bonus Guardian sticker (SuitedCard.secondClassGuardian —
    * see guardianStickerEligible/applyGuardianStickerChoice below) on top of its own class power, the same "keeps
-   * its own suit power AND gets the bonus mechanic" shape as applyMageSticker. Like Mission 5's
+   * its own suit power AND gets the bonus mechanic" shape as applyMageStickerRankChoice. Like Mission 5's
    * reaverStickerChoice, this is a PLAYER CHOICE, not an automatic random pick (an earlier reading had this
    * auto-applied at random — see RoomManager's chooseGuardianSticker/CampaignLobbyPage's picker for the corrected
    * version). Deliberately NOT auto-applied by applyReward below (there is no card to target yet without the
@@ -205,8 +217,9 @@ export interface MissionReward {
    * their existing eligible rank-6 Bard/Cleric/or Paladin party members (never Warrior) to permanently gain a
    * bonus Reaver sticker (SuitedCard.secondClassReaver — see engine.ts's isReaverCard/reaverStickerEligible
    * below) on top of its own class power, the same "keeps its own suit power AND gets the bonus mechanic" shape
-   * as applyMageSticker/applyGuardianSticker. Unlike those two, this one is a PLAYER CHOICE, not an automatic
-   * random pick — see RoomManager's chooseReaverSticker/CampaignLobbyPage's picker. Deliberately NOT auto-applied
+   * as applyMageStickerRankChoice/applyGuardianSticker. Unlike the shipped Mage sticker this was first written
+   * against (a fully automatic random pick, since replaced by mageStickerRankChoice), this one is a PLAYER
+   * CHOICE — see RoomManager's chooseReaverSticker/CampaignLobbyPage's picker. Deliberately NOT auto-applied
    * by applyReward below (there is no card to target yet without the player's own input).
    */
   reaverStickerChoice?: boolean;
@@ -274,20 +287,74 @@ export function applyDualClassStickers(party: Card[], count: number, rng: () => 
   });
 }
 
+/** The only two ranks Mission 9's Mage sticker can ever land on — the player picks ONE of these (see MissionReward.mageStickerRankChoice). */
+export const MAGE_STICKER_RANKS: Rank[] = ['4', '8'];
+
 /**
- * Mission 9's "second Mage sticker" reward: picks one random eligible existing party member (suited, not
- * corrupted — see canGainSpecialClass — and not already Mage/Reaver/Guardian/Druid/Evergreen or already
- * stickered) and gives it a bonus Mage sticker — unlike
- * a pure Mage recruit's `arcane` flag, the card keeps resolving its own suit power AND triggers its own Mage
- * reveal (see SuitedCard.secondClassArcane, engine.ts's revealForMage). Unlike Dual-class Stickers' "Lucky 4" ranks,
- * the physical game picks uniformly across the whole party (by revealing shuffled cards until an eligible one
- * turns up) — we don't track the "race" it also filters by, so this just draws uniformly from every eligible
- * rank instead. `rng` defaults to Math.random; see applyDualClassStickers's doc for why/when to pass a seeded one.
+ * Whether `card` is a legal recipient of Mission 9's bonus Mage sticker AT `rank` (see
+ * MissionReward.mageStickerRankChoice): the card must be at that rank, and `rank` itself must be one of
+ * MAGE_STICKER_RANKS — passing any other rank returns false rather than quietly widening the reward. Exported so
+ * RoomManager's server-side validation, the client's rank picker, and applyMageStickerRankChoice's own draw all
+ * filter on the exact same rule.
+ *
+ * The class/state half of this predicate is the filter applyMageSticker already used before John's 2026-09-04
+ * rank ruling, carried over unchanged: suited, not `corrupted` (canGainSpecialClass — see its doc for the bug
+ * that put it here), not already a Mage/Reaver/Guardian/Druid/Evergreen of its own, and not already stickered
+ * with this same bonus. `chanter` is the one addition — every sibling predicate
+ * (guardianStickerEligible/druidStickerEligible/chanterStickerEligible) already excluded the Chanter class and
+ * this one simply predated it, which matters now that Mission 8 (one mission earlier) recruits one.
+ *
+ * NOT excluded by name, unlike guardianStickerEligible's Goran clause: Goran is rank 8, but Mission 9's own
+ * reward upgrades him to `evergreen` in the same grantMissionReward call that grants this sticker, so the
+ * `evergreen` check below has already ruled him out by the time the player is asked to pick a rank.
+ *
+ * No colour-family class exclusion either (the rule that keeps the Reaver off Warriors, the Guardian off
+ * Paladins, the Druid off Clerics and the Chanter off Bards): John's ruling named a rank restriction and nothing
+ * else, and the pre-existing Mage sticker never had one. Inventing one here would be unsourced.
  */
-export function applyMageSticker(party: Card[], rng: () => number = Math.random): Card[] {
-  const eligible = party.filter(
-    (c) => c.kind === 'suited' && canGainSpecialClass(c) && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.evergreen && !c.secondClassArcane,
+export function mageStickerEligible(card: Card, rank: Rank): card is Extract<Card, { kind: 'suited' }> {
+  return (
+    MAGE_STICKER_RANKS.includes(rank) &&
+    card.kind === 'suited' &&
+    card.rank === rank &&
+    canGainSpecialClass(card) &&
+    !card.arcane &&
+    !card.reaver &&
+    !card.guardian &&
+    !card.druid &&
+    !card.chanter &&
+    !card.evergreen &&
+    !card.secondClassArcane
   );
+}
+
+/**
+ * Which of MAGE_STICKER_RANKS can actually produce a recipient from `party`, in MAGE_STICKER_RANKS order. The
+ * single source of truth for "what may the player pick", shared by the client's picker and RoomManager's
+ * validation, so a rank that cannot yield a card is never offered and never accepted.
+ *
+ * An EMPTY result is the reward's genuine dead end (no eligible 4s and no eligible 8s left) — callers must
+ * surface that, not swallow it: the client renders the picker's "cannot be granted" state instead of hiding the
+ * panel, and RoomManager rejects with an explicit error. See MissionReward.mageStickerRankChoice.
+ */
+export function mageStickerRankOptions(party: Card[]): Rank[] {
+  return MAGE_STICKER_RANKS.filter((rank) => party.some((c) => mageStickerEligible(c, rank)));
+}
+
+/**
+ * Applies Mission 9's Mage-sticker reward once the player has chosen a rank (see
+ * MissionReward.mageStickerRankChoice): draws one RANDOM eligible card of that rank and permanently gives it
+ * SuitedCard.secondClassArcane — unlike a pure Mage recruit's `arcane` flag, the card keeps resolving its own
+ * suit power AND triggers its own Mage reveal (see engine.ts's revealForMage).
+ *
+ * Half player choice, half rng: the rank is the player's, the card inside it is not. A no-op (same reference) if
+ * `rank` has no eligible card — callers should check mageStickerRankOptions first and surface an error rather
+ * than rely on this silently doing nothing, exactly as the four card-picking stickers' apply* functions ask.
+ *
+ * `rng` defaults to Math.random; see applyDualClassStickers's doc for why/when to pass a seeded one.
+ */
+export function applyMageStickerRankChoice(party: Card[], rank: Rank, rng: () => number = Math.random): Card[] {
+  const eligible = party.filter((c) => mageStickerEligible(c, rank));
   if (eligible.length === 0) return party;
   const pick = eligible[Math.floor(rng() * eligible.length)];
   return party.map((c) => (c.id === pick.id ? { ...c, secondClassArcane: true } : c));
@@ -360,7 +427,8 @@ export function canBeCorrupted(card: Card): card is Extract<Card, { kind: 'suite
  *
  * WHY THIS EXISTS (bug found 2026-09-04): blocking only the corrupt-a-card direction is not enough to make
  * John's "a Mage can never be corrupted" rule true. Missions 1/5/6/7/8 each corrupt a random party member;
- * Mission 9 then hands a random eligible member a bonus Mage sticker. applyMageSticker excluded every special
+ * Mission 9 then hands a random eligible member a bonus Mage sticker. That draw (applyMageSticker at the time,
+ * now mageStickerEligible's rank-restricted successor) excluded every special
  * class but NOT `corrupted` — so it could land on a card corrupted three missions earlier and manufacture a
  * corrupted Mage, exactly the state John says is impossible. The other four stickers had the same hole.
  *
@@ -652,7 +720,7 @@ export function reaverStickerEligible(card: Card): card is Extract<Card, { kind:
 
 /**
  * Applies the player's chosen target (see reaverStickerEligible) for Mission 5's Reaver-sticker reward —
- * permanently gives that one card SuitedCard.secondClassReaver, mirroring applyMageSticker/applyGuardianSticker's
+ * permanently gives that one card SuitedCard.secondClassReaver, mirroring applyMageStickerRankChoice/applyGuardianSticker's
  * "keeps its own suit power AND gets the bonus mechanic" shape, but for a player-picked `cardId` instead of an
  * `rng` pick. A no-op (same reference) if `cardId` doesn't match an eligible card — callers should validate with
  * reaverStickerEligible first and surface an error rather than rely on this silently doing nothing.
@@ -668,10 +736,12 @@ export function applyReaverStickerChoice(party: Card[], cardId: string): Card[] 
 }
 
 /**
- * Adds a mission's reward — recruits, any Dual-class Stickers, any Mage sticker, any corrupt-another-card effect,
- * any sidelined-card or existing-card evergreen upgrade, and any targeted second suit — to the campaign's
- * permanent party roster. Relics are tracked separately (see RoomManager's permanentRules).
- * `reaverStickerChoice`/`guardianStickerChoice` are deliberately NOT applied here — see their own doc comments.
+ * Adds a mission's reward — recruits, any Dual-class Stickers, any corrupt-another-card effect, any
+ * sidelined-card or existing-card evergreen upgrade, and any targeted second suit — to the campaign's
+ * permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). Every player-driven
+ * sticker reward (`reaverStickerChoice`/`guardianStickerChoice`/`druidStickerChoice`/`chanterStickerChoice`/
+ * `mageStickerRankChoice` — the Mage one only since John's 2026-09-04 rank ruling) is deliberately NOT applied
+ * here: see their own doc comments.
  *
  * `rng` defaults to Math.random, matching every live call site (mission rewards don't need to be reproducible
  * in actual play) — pass a seeded source (e.g. deck.ts's `makeRng`) from a campaign simulation/test that needs
@@ -681,7 +751,6 @@ export function applyReward(party: Card[], reward: MissionReward, rng: () => num
   const newRecruits = reward.recruits.map(buildRecruitCard);
   let next = [...party, ...newRecruits];
   if (reward.dualClassStickers) next = applyDualClassStickers(next, reward.dualClassStickers, rng);
-  if (reward.mageSticker) next = applyMageSticker(next, rng);
   if (reward.corruptAnotherCard) next = applyCorruptAnotherCard(next, new Set(newRecruits.map((c) => c.id)), rng);
   if (reward.upgradeSidelinedCard) next = applyEvergreenUpgrade(next, reward.upgradeSidelinedCard);
   if (reward.upgradeEvergreenCard) next = applyEvergreenUpgradeByName(next, reward.upgradeEvergreenCard);

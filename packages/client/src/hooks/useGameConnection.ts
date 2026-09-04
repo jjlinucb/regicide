@@ -8,6 +8,7 @@ import type {
   LegacySavePayload,
   LegacyStatePayload,
   MercenaryTypeId,
+  Rank,
   RoomStatePayload,
   ServerToClientEvents,
 } from '@regicide/shared';
@@ -248,6 +249,21 @@ export function useGameConnection() {
     [session],
   );
 
+  // Mission 9's reward: a RANK (4 or 8), not a card id — the server draws the recipient and reports it back (see
+  // shared socketEvents' legacy:chooseMageStickerRank).
+  const chooseMageStickerRank = useCallback(
+    (rank: Rank): Promise<{ ok: true; awardedCardId: string } | { ok: false; error: string }> => {
+      return new Promise((resolve) => {
+        if (!session) return resolve({ ok: false, error: 'Not in a session.' });
+        socketRef.current?.emit('legacy:chooseMageStickerRank', { code: session.code, rank }, (res) => {
+          if (!res.ok) setError(res.error);
+          resolve(res);
+        });
+      });
+    },
+    [session],
+  );
+
   const startGame = useCallback((): void => {
     if (!session) return;
     socketRef.current?.emit('room:start', { code: session.code }, (res) => {
@@ -306,6 +322,7 @@ export function useGameConnection() {
     chooseGuardianSticker,
     chooseDruidSticker,
     chooseChanterSticker,
+    chooseMageStickerRank,
     loadEndlessSave,
   };
 }

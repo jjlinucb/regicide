@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { applyAction, createLobbyState, ENDLESS_MODE_MAX_LOOP } from '@regicide/shared';
-import type { Card, GameAction, GameState, LegacySavePayload, MercenaryProgress, MercenaryTypeId, SuitedCard } from '@regicide/shared';
+import type { Card, GameAction, GameState, LegacySavePayload, MercenaryProgress, MercenaryTypeId, Rank, SuitedCard } from '@regicide/shared';
 import {
   applyChanterStickerChoice,
   applyDruidStickerChoice,
   applyGuardianStickerChoice,
+  applyMageStickerRankChoice,
   applyReaverStickerChoice,
   applyRestoredPartyCards,
   applyReward,
@@ -16,6 +17,7 @@ import {
   druidStickerEligible,
   guardianStickerEligible,
   LEGACY_JESTER_COUNT,
+  mageStickerRankOptions,
   mercenaryCoinsForLosses,
   missionEnemiesToSpecs,
   reaverStickerEligible,
@@ -457,6 +459,17 @@ export class RoomManager {
     if (!legacy.missionsCompleted.includes(mission.id)) {
       legacy.missionsCompleted = [...legacy.missionsCompleted, mission.id];
     }
+    // Mission 9's Mage-sticker rank choice (see shared party.ts's MissionReward.mageStickerRankChoice) can be a
+    // genuine dead end: if neither rank 4 nor rank 8 has an eligible card left, the reward simply cannot be
+    // granted. Say so out loud. This codebase has been bitten before by a by-name reward that silently matched
+    // nothing (see MissionReward.upgradeEvergreenCard's doc), and a reward that quietly evaporates is far worse
+    // than one that complains — the client renders the same dead end visibly (CampaignLobbyPage's
+    // MageStickerRankPicker), this is the server-side half of the same alarm.
+    if (mission.reward.mageStickerRankChoice && mageStickerRankOptions(legacy.party).length === 0) {
+      console.warn(
+        `Regicide Legacy: mission ${mission.id}'s Mage sticker could not be granted — no eligible rank-4 or rank-8 party member remains.`,
+      );
+    }
   }
 
   /**
@@ -483,8 +496,9 @@ export class RoomManager {
     // full strength.
     if (missionId > room.legacy.currentMission) {
       // BUG FIX: a skipped mission can grant an interactive reward choice — Mission 4's Beast Companion pool
-      // pick (BeastCompanionPicker), Mission 5's Reaver sticker pick (ReaverStickerPicker), or Mission 6's
-      // Guardian sticker pick (GuardianStickerPicker) — all of which only ever render on CampaignLobbyPage.
+      // pick (BeastCompanionPicker), Mission 5's Reaver sticker pick (ReaverStickerPicker), Mission 6's
+      // Guardian sticker pick (GuardianStickerPicker), or Mission 9's Mage sticker RANK pick
+      // (MageStickerRankPicker) — all of which only ever render on CampaignLobbyPage.
       // Granting the reward and starting the target mission in this same call
       // used to fuse those two steps atomically, so the client never got routed back through the lobby screen to
       // show the picker before gameplay began (the pool/choice was still there server-side, just unreachable
@@ -509,7 +523,8 @@ export class RoomManager {
             skipped.reward.reaverStickerChoice ||
             skipped.reward.guardianStickerChoice ||
             skipped.reward.druidStickerChoice ||
-            skipped.reward.chanterStickerChoice
+            skipped.reward.chanterStickerChoice ||
+            skipped.reward.mageStickerRankChoice
           )
             introducesInteractiveChoice = true;
         }
@@ -773,5 +788,46 @@ export class RoomManager {
     room.legacy.party = applyChanterStickerChoice(room.legacy.party, cardId);
     await this.campaignStore.save(toRecord(room));
     return { room };
+  }
+
+  /**
+   * Resolves Mission 9's Mage-sticker reward (see shared MissionReward.mageStickerRankChoice's doc, John's ruling
+   * from live play 2026-09-04). Deliberately NOT shaped like chooseChanterSticker and its three siblings: those
+   * take a `cardId` the player picked, this takes a RANK. The player chooses 4 or 8; the server draws a random
+   * eligible card of that rank and reports back which one it landed on, so the recipient can be shown rather than
+   * silently appearing in the roster. A client that sends a card id gets nothing — there is no card id to send.
+   *
+   * `rank` is re-validated against mageStickerRankOptions (never trusted from the client), which also closes the
+   * edge case that matters most here: a rank with no eligible member left is neither offered nor accepted, and if
+   * NEITHER rank has one, this rejects with a plain-language error instead of no-op'ing quietly. "Is this still
+   * available" is derived exactly the way chooseReaverSticker's doc describes — has a completed mission granted
+   * it, and does no party card carry the sticker yet.
+   */
+  async chooseMageStickerRank(
+    code: string,
+    requestingPlayerId: string,
+    rank: Rank,
+  ): Promise<{ room: Room; awardedCardId: string } | { error: string }> {
+    const room = this.getRoom(code);
+    if (!room || !room.legacy) return { error: 'Campaign not found.' };
+    if (room.hostPlayerId !== requestingPlayerId) return { error: 'Only the host can choose the Mage sticker rank.' };
+    if (room.legacy.party.some((c) => c.kind === 'suited' && c.secondClassArcane)) {
+      return { error: 'The Mage sticker has already been used.' };
+    }
+    const options = mageStickerRankOptions(room.legacy.party);
+    if (options.length === 0) {
+      return { error: 'No eligible rank-4 or rank-8 party member remains — the Mage sticker cannot be granted.' };
+    }
+    if (!options.includes(rank)) {
+      return { error: `Rank ${rank} has no eligible party member for the Mage sticker.` };
+    }
+    const next = applyMageStickerRankChoice(room.legacy.party, rank);
+    const awarded = next.find((c) => c.kind === 'suited' && c.secondClassArcane);
+    // Unreachable given the mageStickerRankOptions guard above — but this reward's whole failure mode is
+    // disappearing without a trace, so refuse to report success without a real recipient.
+    if (!awarded) return { error: 'The Mage sticker could not be granted to any party member.' };
+    room.legacy.party = next;
+    await this.campaignStore.save(toRecord(room));
+    return { room, awardedCardId: awarded.id };
   }
 }
