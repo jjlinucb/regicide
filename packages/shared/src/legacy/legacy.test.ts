@@ -673,6 +673,57 @@ describe('legacy: mission playthrough', () => {
     expect(state.victoryMedal).toBeNull(); // Legacy doesn't use Regicide's solo victory-medal scoring
   });
 
+  it("BUG FIX: a Mage's chosen reveal card resolves its own CLASS power, not its printed suit's — a revealed Druid channels Regrowth", () => {
+    // John's live report from Mission 7: "I used a level 2 mage into a 5 druid — but I never got to use the
+    // druid's power, the mage did not chain that suit." The reveal card used to be reduced to its suits on the
+    // way into the play's resolution, so a Druid's printed Diamonds fired a Bard draw and Regrowth never opened.
+    const enemy: LegacyEnemySpec = { name: 'Warded Foe', suit: 'S', health: 60, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const mage2: SuitedCard = { ...suited('H', '2'), arcane: true };
+    state = rig(state, [mage2]);
+    const druid5: SuitedCard = { ...suited('D', '5'), name: 'Maya', druid: true };
+    state.tavernDeck = [druid5, suited('C', '2')];
+    state.discardPile = [suited('S', '9'), suited('C', '9')];
+    const handBefore = state.players[0].hand.length;
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage2.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: druid5.id }));
+    state = res.state;
+    // The value still lands (2 + 5), exactly as before.
+    expect(state.currentEnemy?.damageTaken).toBe(7);
+    // The Druid's own power fires: Regrowth deals the discard pile out and opens the per-player window.
+    expect(state.turnPhase).toBe('AWAIT_REGROWTH');
+    expect(state.druidWindow).not.toBeNull();
+    // And its printed Diamonds does NOT also fire a Bard draw, the way it wrongly used to.
+    expect(state.players[0].hand.length).toBe(handBefore - 1);
+  });
+
+  it('BUG FIX: a corrupted card carries its immunity-ignoring across the whole play, not just its own suit', () => {
+    // John's live report from Mission 7: a cursed Ace comboed with a Paladin 10 against a Paladin-immune enemy —
+    // the Paladin shield was still blocked, so the enemy's 15 attack landed in full instead of being cut to 5.
+    const enemy: LegacyEnemySpec = { name: 'Deep: Ironscale', suit: 'S', health: 60, attack: 15 };
+    let state = startMission(1, [enemy]);
+    const cursedAce: SuitedCard = { ...suited('D', 'A'), name: 'Tilly the Lark', corrupted: true };
+    const paladin10 = suited('S', '10');
+    state = rig(state, [cursedAce, paladin10]);
+    // A corrupted card banishes the reserve deck's top as its cost.
+    state.tavernDeck = [suited('C', '2'), ...state.tavernDeck];
+
+    const res = ensureOk(applyAction(state, {
+      type: 'PLAY_CARDS',
+      playerId: state.players[0].id,
+      cardIds: [cursedAce.id, paladin10.id],
+    }));
+    state = res.state;
+    // Spades rides on the cursed Ace's exemption. The shield is worth the whole play's value (Ace 1 + 10 = 11),
+    // not just the Paladin card's own 10 — that's how a Spades shield has always been scored, so the enemy's 15
+    // attack is cut to 4 rather than the 5 John estimated.
+    expect(state.currentEnemy?.spadesShield).toBe(11);
+  });
+
   it("a Mage's reveal lets the player tuck a chosen card under the attack, adding its value and bypassing its own suit's immunity", () => {
     // Enemy is immune to Hearts (its own suit) — the Mage card is Hearts-suited, so a base Cleric play would be
     // blocked, but a Mage's power isn't a suit power, so its reveal (and the chosen card's bonus) lands anyway.
@@ -3372,7 +3423,27 @@ describe('legacy: Druid class power (Regrowth — deal out the discard pile)', (
 });
 
 describe('legacy: mission 8 setup (Winds of Chaos)', () => {
-  it('is a 12-enemy 2-wave gauntlet (6 dual-immune Trolls, 6 dual-immune Wyverns), ascendingZone enabled, with 9 Pilgrims + 1 wildcard + 4 fight-setup Chanters as extra reserve cards, and a preset Puppy anchor', () => {
+  it("BUG FIX: every Mission 8 Pilgrim is suitless — the seeded anchor rendered as a Cleric Ace", () => {
+    // John's live report: "for mission 8, the first card there is actually a pilgrim, so it has no suit, right
+    // now it's marked as cleric." Mission 8's pilgrim() used to deliberately omit noSuitPower (its own comment
+    // said so), unlike Mission 7's pilgrimDeck(). A Pilgrim is a stranded villager in both missions; the suit
+    // is only there to keep card ids distinct.
+    const mission8 = getMission(8)!;
+    const pilgrims = [...(mission8.presetMissionZone ?? []), ...(mission8.extraReserveCards ?? [])].filter(
+      (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.pilgrim),
+    );
+    expect(pilgrims.length).toBeGreaterThan(0);
+    expect(pilgrims.every((c) => c.noSuitPower)).toBe(true);
+    // Including the anchor seeded into the zone, which is what John was looking at.
+    const anchor = mission8.presetMissionZone![0] as Extract<Card, { kind: 'suited' }>;
+    expect(anchor.name).toBe('Scrap');
+    // noSuitPower is what keeps it out of the engine's suit-power resolution and out of immunity-blocking (see
+    // continueResolveCommittedPlay's nonArcaneCards filter); cardSuits() itself still reports the bookkeeping
+    // suit, which is only ever used to keep card ids distinct here.
+    expect(anchor.noSuitPower).toBe(true);
+  });
+
+  it('is a 12-enemy 2-wave gauntlet (6 dual-immune Trolls, 6 dual-immune Wyverns), ascendingZone enabled, with 6 Pilgrims + 4 fight-setup Chanters as extra reserve cards, and a preset Puppy anchor', () => {
     const mission8 = getMission(8)!;
     expect(mission8.enemies.length).toBe(12);
     expect(mission8.enemies.every((e) => e.secondClass !== undefined)).toBe(true); // every enemy, both waves, is dual-immune
@@ -3381,10 +3452,21 @@ describe('legacy: mission 8 setup (Winds of Chaos)', () => {
     expect(new Set(mission8.enemies.slice(0, 6).map(pairKey)).size).toBe(6);
     expect(new Set(mission8.enemies.slice(6, 12).map(pairKey)).size).toBe(6);
     expect(mission8.ascendingZone).toBe(true);
-    expect(mission8.extraReserveCards?.length).toBe(14);
-    expect(mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.pilgrim).length).toBe(9);
+    expect(mission8.extraReserveCards?.length).toBe(10);
+    // Pilgrims run 1-7 only (John's live play): the seeded Ace anchor plus 2-7 in the deck. Slots 8, 9 and 10
+    // have no Pilgrim by design — the chain's last three placements must be ordinary party cards, each buffing
+    // the enemy's attack while it sits there. The old 2-10 run of nine made every placement free.
+    const deckPilgrims = mission8.extraReserveCards!.filter(
+      (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.pilgrim),
+    );
+    expect(deckPilgrims.length).toBe(6);
+    expect(deckPilgrims.map((c) => c.rank).sort()).toEqual(['2', '3', '4', '5', '6', '7']);
+    // And no Pilgrim impersonating Goran at rank 10 — he's a rank 8 everywhere else in the campaign.
+    expect(deckPilgrims.some((c) => c.name === 'Goran')).toBe(false);
     expect(mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.chanter).length).toBe(4);
-    expect(mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.flexibleComboRank).length).toBe(1);
+    // No wildcard card of its own (John: "there is no wandering coin"). The 2/5 placement RULE still works —
+    // it's just that the only 2/5 cards in play are ones bought from the Mercenary Camp.
+    expect(mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.flexibleComboRank).length).toBe(0);
     expect(mission8.presetMissionZone?.length).toBe(1);
     expect(mission8.presetMissionZone?.[0]).toMatchObject({ rank: 'A', pilgrim: true });
   });
@@ -3407,8 +3489,8 @@ describe('legacy: mission 8 setup (Winds of Chaos)', () => {
     expect(state.ascendingZone).toBe(true);
     expect(state.missionZone.length).toBe(1);
     const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
-    // 40 party + 14 extras (9 Pilgrims + 1 wildcard + 4 fight-setup Chanters) = 54 total in circulation.
-    expect(handCount + state.tavernDeck.length).toBe(54);
+    // 40 party + 10 extras (6 Pilgrims + 4 fight-setup Chanters) = 50 total in circulation.
+    expect(handCount + state.tavernDeck.length).toBe(50);
   });
 });
 

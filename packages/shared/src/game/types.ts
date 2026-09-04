@@ -469,10 +469,15 @@ export interface GameState {
     forcedPlay: boolean;
     totalValue: number;
     arcaneBonus: number;
-    /** Suits of every reveal card tucked under the attack so far — merged into the play's own suit-power resolution, see continueResolveCommittedPlay. */
-    arcaneSuits: Suit[];
     /**
-     * John's house rule: suits (a subset of arcaneSuits) whose reveal was triggered by a corrupted Mage — these
+     * Every reveal card tucked under the attack so far. Carried as whole cards, not just their suits, because a
+     * chosen card resolves its class power exactly as if it had been played directly (John's ruling) — so a
+     * revealed Druid channels Regrowth rather than firing its printed suit's power. See
+     * continueResolveCommittedPlay, which folds these into the same class/suit resolution as the played cards.
+     */
+    arcaneCards: SuitedCard[];
+    /**
+     * John's house rule: suits (those of a subset of arcaneCards) whose reveal was triggered by a corrupted Mage — these
      * ignore enemy immunity, same as SuitedCard.corrupted's own suit, at the cost of the corrupted Mage banishing
      * the reserve deck's top card when its reveal fires (see engine.ts's revealForMage/continueResolveCommittedPlay).
      */
@@ -498,7 +503,7 @@ export interface GameState {
     forcedPlay: boolean;
     totalValue: number;
     arcaneBonus: number;
-    arcaneSuits: Suit[];
+    arcaneCards: SuitedCard[];
     arcaneImmuneSuits: Suit[];
     trigger: SuitedCard;
     maxCount: number;
@@ -528,7 +533,7 @@ export interface GameState {
     forcedPlay: boolean;
     totalValue: number;
     arcaneBonus: number;
-    arcaneSuits: Suit[];
+    arcaneCards: SuitedCard[];
     arcaneImmuneSuits: Suit[];
     trigger: SuitedCard;
   } | null;
@@ -1159,7 +1164,7 @@ export interface ClientGameState {
     forcedPlay: boolean;
     totalValue: number;
     arcaneBonus: number;
-    arcaneSuits: Suit[];
+    arcaneCards: SuitedCard[];
     arcaneImmuneSuits: Suit[];
     trigger: Card;
   } | null;
@@ -1171,7 +1176,7 @@ export interface ClientGameState {
     forcedPlay: boolean;
     totalValue: number;
     arcaneBonus: number;
-    arcaneSuits: Suit[];
+    arcaneCards: SuitedCard[];
     arcaneImmuneSuits: Suit[];
     trigger: SuitedCard;
     maxCount: number;
@@ -1186,7 +1191,7 @@ export interface ClientGameState {
     forcedPlay: boolean;
     totalValue: number;
     arcaneBonus: number;
-    arcaneSuits: Suit[];
+    arcaneCards: SuitedCard[];
     arcaneImmuneSuits: Suit[];
     trigger: SuitedCard;
   } | null;
