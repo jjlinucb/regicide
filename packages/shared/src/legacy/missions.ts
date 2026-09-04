@@ -46,6 +46,14 @@ export interface Mission {
   sidelineHighArcana?: boolean;
   /** See GameState.standingJesters. */
   standingJesters?: boolean;
+  /**
+   * Relic ids this mission hands the party at SETUP, in a corrupted (inert) state — see
+   * GameState.corruptedRelics. Distinct from `reward.relics`, which grants a relic permanently at mission END:
+   * these are in play for this mission only, and are not persisted to the campaign by themselves.
+   *
+   * Mission 9 only today, per John (2026-09-04): "you do get the Evergreen relic, but it's corrupted."
+   */
+  startingCorruptedRelics?: string[];
   /** See GameState.discardTopBuffsAttack. */
   discardTopBuffsAttack?: boolean;
   /** See GameState.exactKillToReserveDeck. */
@@ -1122,6 +1130,30 @@ export const MISSIONS: Mission[] = [
     // caught by this pass's own regression test).
     standingJesters: true,
     sidelineHighArcana: true,
+    // JOHN, 2026-09-04 (the whole of what he specified): "one, you do get the Evergreen relic, but it's
+    // corrupted." So Mission 9 now SETS OUT with the Evergreen Mother already on the table, corrupted, rather
+    // than only meeting it in the reward below. He flagged this as one item of a Mission 9 setup he hasn't
+    // finished dictating ("one, ..."), so nothing else about this mission's opening setup was touched.
+    //
+    // THREE THINGS HE DID NOT SAY, decided here and deliberately kept to the least destructive option each —
+    // all three are cheap to reverse, and none is buried in the engine:
+    //  1. WHAT A CORRUPTED RELIC DOES. Modelled as fully inert: present and visible, no powers (see
+    //     selectors.ts's relicActive, the single gate). This is the only choice that changes nothing about how
+    //     Mission 9 actually plays — before this, the relic simply wasn't in play during Mission 9, so the
+    //     corrupted-card cost already fell through to "banish the reserve deck's top card", and it still does.
+    //     A weakened-but-working or works-at-a-price relic would silently re-tune this mission's difficulty on a
+    //     guess; inert does not. Change relicActive if he rules otherwise.
+    //  2. WHETHER MISSION 9 CAN CLEANSE IT. No in-mission cleanse exists — nothing clears corruptedRelics
+    //     mid-mission, and no action was invented to do so. The campaign already has two cleansing mechanics it
+    //     could borrow if he wants one (Mission 10's exact-kill restoration, Mission 12's restored cards), but
+    //     neither is wired to relics and neither was assumed here.
+    //  3. WHETHER IT'S NEW HERE OR CORRUPTED FROM EARLIER. The reward below is UNCHANGED, so the relic is still
+    //     granted permanently on a Mission 9 win and still works normally from Mission 10 on. Combined with the
+    //     per-mission corruption above, that reads as: it's corrupted while you fight for it, and clean once the
+    //     mission is won. It also means missions 10-12 are untouched by this change. If the party has already
+    //     won Mission 9 and replays it, the mission's corrupted state deliberately wins (see engine.ts's
+    //     startLegacyMission) — the relic is corrupted AT Mission 9, every time.
+    startingCorruptedRelics: ['EVERGREEN_MOTHER'],
     reward: {
       recruits: [],
       relics: ['EVERGREEN_MOTHER'],
