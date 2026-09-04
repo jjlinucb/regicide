@@ -1,12 +1,20 @@
 import { useState } from 'react';
-import { MISSIONS, chanterStickerEligible, druidStickerEligible, guardianStickerEligible, reaverStickerEligible } from '@regicide/shared';
-import type { LegacySavePayload, LegacyStatePayload, MercenaryTypeId, RoomStatePayload } from '@regicide/shared';
+import {
+  MISSIONS,
+  chanterStickerEligible,
+  druidStickerEligible,
+  guardianStickerEligible,
+  mageStickerRankOptions,
+  reaverStickerEligible,
+} from '@regicide/shared';
+import type { LegacySavePayload, LegacyStatePayload, MercenaryTypeId, Rank, RoomStatePayload } from '@regicide/shared';
 import { MercenaryCamp } from '../components/MercenaryCamp';
 import { BeastCompanionPicker } from '../components/BeastCompanionPicker';
 import { ReaverStickerPicker } from '../components/ReaverStickerPicker';
 import { GuardianStickerPicker } from '../components/GuardianStickerPicker';
 import { DruidStickerPicker } from '../components/DruidStickerPicker';
 import { ChanterStickerPicker } from '../components/ChanterStickerPicker';
+import { MageStickerRankPicker } from '../components/MageStickerRankPicker';
 
 /** Downloads the campaign's current progress as a JSON save file — a local backup independent of server persistence. */
 function downloadSave(legacyState: LegacyStatePayload): void {
@@ -38,6 +46,7 @@ export function CampaignLobbyPage({
   onChooseGuardianSticker,
   onChooseDruidSticker,
   onChooseChanterSticker,
+  onChooseMageStickerRank,
   onLeave,
 }: {
   roomState: RoomStatePayload;
@@ -50,6 +59,7 @@ export function CampaignLobbyPage({
   onChooseGuardianSticker: (cardId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   onChooseDruidSticker: (cardId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   onChooseChanterSticker: (cardId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onChooseMageStickerRank: (rank: Rank) => Promise<{ ok: true; awardedCardId: string } | { ok: false; error: string }>;
   onLeave: () => void;
 }) {
   const isHost = roomState.players.find((p) => p.id === myPlayerId)?.isHost ?? false;
@@ -72,6 +82,17 @@ export function CampaignLobbyPage({
   const chanterStickerGranted = MISSIONS.some((m) => legacyState.missionsCompleted.includes(m.id) && m.reward.chanterStickerChoice);
   const chanterStickerUsed = legacyState.party.some((c) => c.kind === 'suited' && c.secondClassChanter);
   const chanterStickerEligibleCards = legacyState.party.filter(chanterStickerEligible);
+  // Mission 9's reward, John's ruling 2026-09-04: NOT the same shape as the four above. The player picks a RANK
+  // (4 or 8) and the server draws a random eligible card of that rank — so what's derived here is the list of
+  // ranks that can still produce a recipient, not a list of clickable cards (see party.ts's
+  // mageStickerRankOptions). "Granted / not yet used" is derived exactly as the others are.
+  const mageStickerGranted = MISSIONS.some((m) => legacyState.missionsCompleted.includes(m.id) && m.reward.mageStickerRankChoice);
+  const mageStickerUsed = legacyState.party.some((c) => c.kind === 'suited' && c.secondClassArcane);
+  const mageStickerRanks = mageStickerRankOptions(legacyState.party);
+  // Held here rather than inside the picker so the "here's who got it" result survives `mageStickerUsed` flipping
+  // true on the very next legacy:state broadcast — otherwise the panel would vanish the instant it had something
+  // worth showing.
+  const [mageStickerAwardedId, setMageStickerAwardedId] = useState<string | null>(null);
   // MISSIONS.length is not the highest built mission id — the list currently has a gap (Mission 7 isn't in yet),
   // so "all missions complete" must compare against the actual max id, not the array's count.
   const maxMissionId = Math.max(...MISSIONS.map((m) => m.id));
@@ -91,7 +112,8 @@ export function CampaignLobbyPage({
           m.reward.reaverStickerChoice ||
           m.reward.guardianStickerChoice ||
           m.reward.druidStickerChoice ||
-          m.reward.chanterStickerChoice),
+          m.reward.chanterStickerChoice ||
+          m.reward.mageStickerRankChoice),
     );
 
   return (
@@ -170,6 +192,22 @@ export function CampaignLobbyPage({
           <ChanterStickerPicker eligible={chanterStickerEligibleCards} isHost={isHost} onChoose={onChooseChanterSticker} />
         )}
 
+        {/* Renders even with zero eligible ranks — that dead end has to be visible, not hidden (see the picker's
+            own doc). Stays mounted after resolution while it still has an awarded card to show. */}
+        {mageStickerGranted && (!mageStickerUsed || mageStickerAwardedId !== null) && (
+          <MageStickerRankPicker
+            party={legacyState.party}
+            rankOptions={mageStickerRanks}
+            awardedCardId={mageStickerAwardedId}
+            isHost={isHost}
+            onChoose={async (rank) => {
+              const res = await onChooseMageStickerRank(rank);
+              if (res.ok) setMageStickerAwardedId(res.awardedCardId);
+              return res;
+            }}
+          />
+        )}
+
         {selectedMission && (
           <div className="legacy-mission-brief">
             <h3>{selectedMission.title}</h3>
@@ -180,11 +218,11 @@ export function CampaignLobbyPage({
                 {legacyState.currentMission}–{selectedMission.id - 1} will be granted automatically first.
                 {/* BUG FIX: a jump that crosses Mission 4, 5, 6, 7, or 8's reward now stops right after granting
                     instead of launching straight into the target mission, so the Beast Companion / Reaver sticker /
-                    Guardian sticker / Druid sticker / Chanter sticker picker below actually gets a chance to render
-                    before gameplay begins — click again once you're ready (see RoomManager.startLegacyMission's
+                    Guardian sticker / Druid sticker / Chanter sticker / Mage sticker rank picker below actually
+                    gets a chance to render before gameplay begins — click again once you're ready (see RoomManager.startLegacyMission's
                     stopForPendingChoices). */}
                 {jumpIntroducesPendingChoice &&
-                  ' This jump also grants a Beast Companion, Reaver sticker, Guardian sticker, Druid sticker, or Chanter sticker pick — clicking below will stop here first so you can choose, then click again to actually begin.'}
+                  ' This jump also grants a Beast Companion, Reaver sticker, Guardian sticker, Druid sticker, Chanter sticker, or Mage sticker rank pick — clicking below will stop here first so you can choose, then click again to actually begin.'}
               </p>
             )}
             {isHost ? (

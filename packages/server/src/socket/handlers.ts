@@ -215,6 +215,17 @@ export function registerSocketHandlers(io: IOServer, socket: IOSocket, rooms: Ro
     broadcastRoom(io, result.room);
   });
 
+  // Mission 9's Mage sticker: a RANK, not a card id — the server draws the recipient (see
+  // RoomManager.chooseMageStickerRank) and hands its id back so the picker can name who got it.
+  socket.on('legacy:chooseMageStickerRank', async ({ code, rank }, cb) => {
+    const found = rooms.findPlayerBySocket(socket.id);
+    if (!found) return cb({ ok: false, error: 'Not in a room.' });
+    const result = await rooms.chooseMageStickerRank(code, found.player.id, rank);
+    if ('error' in result) return cb({ ok: false, error: result.error });
+    cb({ ok: true, awardedCardId: result.awardedCardId });
+    broadcastRoom(io, result.room);
+  });
+
   socket.on('disconnect', () => {
     const found = rooms.findPlayerBySocket(socket.id);
     if (!found) return;

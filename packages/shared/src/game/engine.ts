@@ -961,7 +961,7 @@ function revealForMage(
   // special class onto one, enforces that (party.ts's canBeCorrupted / canGainSpecialClass). Kept anyway, for
   // two reasons:
   //   1. SAVE FILES. A campaign's party is persisted verbatim (RoomManager's loadSave) and older saves predate
-  //      those guards — applyMageSticker could land on an already-corrupted card. Deleting this doesn't make
+  //      those guards — the Mage-sticker draw could land on an already-corrupted card. Deleting this doesn't make
   //      such a card safe, it makes it WORSE: it would still ignore immunity (see continueResolveCommittedPlay's
   //      playIncludesImmunityIgnoringCard, which reads `corrupted` off any resolving card) but would now pay
   //      nothing for it, because the ordinary corrupted-card cost skips arcane cards.

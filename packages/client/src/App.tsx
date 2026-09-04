@@ -49,6 +49,7 @@ export function App() {
     chooseGuardianSticker,
     chooseDruidSticker,
     chooseChanterSticker,
+    chooseMageStickerRank,
     loadEndlessSave,
   } = useGameConnection();
 
@@ -131,6 +132,7 @@ export function App() {
           onChooseGuardianSticker={chooseGuardianSticker}
           onChooseDruidSticker={chooseDruidSticker}
           onChooseChanterSticker={chooseChanterSticker}
+          onChooseMageStickerRank={chooseMageStickerRank}
           onLeave={handleLeave}
         />
       );
