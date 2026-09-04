@@ -4647,40 +4647,40 @@ describe('legacy: mission 9 mechanics (captured piles)', () => {
     return res.state;
   }
 
-  it('UNSOURCED BALANCE FIX: scales the pile split down for a solo game (6/pile, 18 total) instead of the fixed 30, leaving much more of the party in the reserve deck', () => {
+  it('splits a flat 30 (10 per pile) at every player count — the sourced figure, with no player-count scaling', () => {
     const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 20, attack: 10 };
-    const state = startTempleMission(1, [boss]);
-
-    expect(state.capturedPiles.length).toBe(3);
-    for (const pile of state.capturedPiles) {
-      expect(pile.faceUp).not.toBeNull();
-      expect(pile.faceDown.length).toBe(5);
+    for (const n of [1, 2, 3, 4]) {
+      const state = startTempleMission(n, [boss]);
+      expect(state.capturedPiles.length).toBe(3);
+      for (const pile of state.capturedPiles) {
+        expect(pile.faceUp).not.toBeNull();
+        expect(pile.faceDown.length).toBe(9); // 10 per pile, one of them flipped face-up
+      }
+      const totalCaptured = state.capturedPiles.reduce((sum, p) => sum + p.faceDown.length + (p.faceUp ? 1 : 0), 0);
+      expect(totalCaptured).toBe(30);
     }
-    const totalCaptured = state.capturedPiles.reduce((sum, p) => sum + p.faceDown.length + (p.faceUp ? 1 : 0), 0);
-    expect(totalCaptured).toBe(18); // Math.min(10, 4 + 2*1) = 6 per pile, not the sourced fixed 10/pile
-    // 40-card starting party minus 18 captured = 22 leftover, dealt to the hand and/or left in the reserve deck —
-    // versus only 10 under the old fixed-30 split (see legacy-mission-playtest-findings' Mission 9 note).
-    const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
-    expect(handCount + state.tavernDeck.length).toBe(22);
   });
 
-  it('SECOND-PASS BALANCE FIX: caps the pile split for a 4-player game well below the sourced 30-card figure, since this engine\'s own hand-size table means the opening deal alone would otherwise drain the tavern deck to 0', () => {
+  it('leaves a workable tavern deck at every player count once the full 24-card pilgrim deck is folded in', () => {
+    // The whole reason the pile size used to scale by player count was that Mission 9 only folded in 8 of the 24
+    // Pilgrims the source calls for, leaving its reserve deck 16 cards short (see missions.ts's Mission 9
+    // extraReserveCards). With the real 24 in, the sourced flat 30-card carve-out holds up everywhere.
+    //
+    // buildInitialParty() is 40 cards — the FLOOR for this mission, since a real campaign reaching Mission 9 has
+    // recruited more, and every extra party card lands in the tavern deck once the 30 are taken out. So:
+    //   40 party - 30 captured = 10 leftover, + 24 Pilgrims = 34 in the reserve deck before the deal.
+    // The opening deal is n * the per-count hand limit (8/7/6/5), i.e. 8/14/18/20 cards.
     const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 20, attack: 10 };
-    // No extras/jesters here (see startTempleMission's own jesterCount: 0 and unset extraReserveCards) — the real
-    // Mission 9 has 8 Pilgrim extras + 2 jesters at 4p to help absorb the opening deal, so this synthetic
-    // no-extras scenario needs an even smaller pile than the real mission does to keep the same reserve buffer.
-    const state = startTempleMission(4, [boss]);
+    const pilgrims = getMission(9)!.extraReserveCards!;
+    expect(pilgrims.length).toBe(24);
 
-    const totalCaptured = state.capturedPiles.reduce((sum, p) => sum + p.faceDown.length + (p.faceUp ? 1 : 0), 0);
-    // The first pass's Math.min(10, 4+2*4)=10/pile (30 total) left the tavern deck at exactly 0 cards after the
-    // opening 4-player deal (4 * 5-card hand limit = 20 cards, against a 40-card party with none of this
-    // scenario's extras/jesters to help) — see the mission-9-recheck sim (deleted after use). This mission's
-    // actual reserve-deck math now also caps the pile size so at least 10 cards remain in the tavern deck after
-    // the opening deal.
-    const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
-    expect(handCount + state.tavernDeck.length).toBe(40 - totalCaptured);
-    expect(state.tavernDeck.length).toBeGreaterThanOrEqual(10);
-    expect(totalCaptured).toBeLessThan(30);
+    const expectedTavernDeck: Record<number, number> = { 1: 26, 2: 20, 3: 16, 4: 14 };
+    for (const n of [1, 2, 3, 4]) {
+      const state = startTempleMission(n, [boss], { extraReserveCards: pilgrims });
+      const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
+      expect(handCount + state.tavernDeck.length).toBe(34); // 40 - 30 + 24
+      expect(state.tavernDeck.length).toBe(expectedTavernDeck[n]);
+    }
   });
 
   it('shuffles extraReserveCards into the ordinary reserve deck, not the captured piles', () => {
@@ -4724,6 +4724,29 @@ describe('legacy: mission 9 mechanics (captured piles)', () => {
     expect(res.state.capturedPiles[0].faceUp?.id).toBe('next-1');
     expect(res.state.capturedPiles[0].faceDown.length).toBe(0);
     expect(res.state.turnPhase).toBe('AWAIT_PLAY'); // turn advanced
+  });
+
+  it("BANISH_FOR_RESCUE puts the rescued card on the genuine TOP of the discard pile, above whatever was already there", () => {
+    // John's wording: the rescued card goes "on top of my discard pile". In this codebase the discard pile's top
+    // is the array's LAST element — that's the end .pop() takes (resolveCorruptedEnemyEndOfTurnEffect's Cleric
+    // drag, the beast pool's Warrior flip) and the end rules.ts's discardPileTopValue reads — so this pins the
+    // rescued card there rather than at index 0.
+    const boss: LegacyEnemySpec = { name: 'Loreguard', suit: 'S', health: 100, attack: 0 };
+    let state = startTempleMission(1, [boss]);
+    state.turnPhase = 'AWAIT_END_OF_TURN';
+    state.discardPile = [suited('C', '2'), suited('C', '3')]; // already-discarded cards the rescue must land above
+    const rescued: Card = { id: 'rescued-top', kind: 'suited', suit: 'H', rank: '5', name: 'Rescued Hero' };
+    state.capturedPiles = [{ faceUp: rescued, faceDown: [] }, { faceUp: null, faceDown: [] }, { faceUp: null, faceDown: [] }];
+    const banishCard = state.players[0].hand[0];
+
+    const res = ensureOk(
+      applyAction(state, { type: 'BANISH_FOR_RESCUE', playerId: state.players[0].id, cardId: banishCard.id, pileIndex: 0 }),
+    );
+
+    const pile = res.state.discardPile;
+    expect(pile.length).toBe(3);
+    expect(pile[pile.length - 1].id).toBe('rescued-top'); // the top, by this codebase's own convention
+    expect(pile[0].id).not.toBe('rescued-top');
   });
 
   it('DECLINE_RESCUE cycles every face-up pile card to the bottom of its own pile and reveals the next one', () => {
@@ -4778,7 +4801,10 @@ describe('legacy: Evergreen class power (Gøran — all four powers at once, ign
   }
 
   it('resolves heal, draw, double damage, and reduce-strength all at once, even against an enemy immune to that suit', () => {
-    const boss: LegacyEnemySpec = { name: 'Myla', suit: 'H', health: 100, attack: 20 }; // immune to Hearts
+    // Deliberately NOT named Myla: she is the one enemy whose immunity Evergreen can't pierce (see
+    // rules.ts's hasUnpierceableImmunity and this file's own Mission 9 unpierceable-immunity suite). This case
+    // covers the ordinary rule, so it needs an ordinary enemy.
+    const boss: LegacyEnemySpec = { name: 'Lorekeeper', suit: 'H', health: 100, attack: 20 }; // immune to Hearts
     let state = startMission(1, [boss]);
     state.discardPile = [suited('C', '2'), suited('C', '3')]; // something for the heal to shuffle back
     state = rig(state, [evergreenCard('H', '4')]); // printed suit is Hearts, the enemy's own immunity
@@ -4791,6 +4817,110 @@ describe('legacy: Evergreen class power (Gøran — all four powers at once, ign
     expect(s.currentEnemy?.spadesShield).toBe(4); // Spades: reduces the enemy's attack
     // Diamonds: drew cards up to the hand limit (started at maxHandSize - 1 after playing the Evergreen card).
     expect(s.players[0].hand.length).toBeGreaterThan(0);
+  });
+});
+
+describe("legacy: mission 9 folds in the whole 24-card pilgrim deck (John, 2026-09-04)", () => {
+  it('seeds all 24 Pilgrims — 4 copies each of values 2-7 — not the 8 hand-written stand-ins it used to', () => {
+    const mission9 = getMission(9)!;
+    const pilgrims = mission9.extraReserveCards!;
+    expect(pilgrims.length).toBe(24);
+    expect(pilgrims.every((c) => c.kind === 'suited' && c.pilgrim && c.noSuitPower)).toBe(true);
+    for (const rank of ['2', '3', '4', '5', '6', '7']) {
+      const copies = pilgrims.filter((c) => c.kind === 'suited' && c.rank === rank);
+      expect(copies.length).toBe(4);
+      expect(new Set(copies.map((c) => (c as SuitedCard).suit)).size).toBe(4); // one per suit
+    }
+    expect(new Set(pilgrims.map((c) => c.id)).size).toBe(24); // ids still unique within this mission
+  });
+
+  it('gets its OWN pilgrim card objects, sharing no references with Mission 7 (this codebase never clones a mission template per game)', () => {
+    const mission7Pilgrims = getMission(7)!.pilgrimCards!;
+    const mission9Pilgrims = getMission(9)!.extraReserveCards!;
+    expect(mission7Pilgrims.length).toBe(24);
+    const m7 = new Set<unknown>(mission7Pilgrims);
+    expect(mission9Pilgrims.some((c) => m7.has(c))).toBe(false);
+    // Same array identity would be just as bad as sharing individual cards.
+    expect(mission9Pilgrims).not.toBe(mission7Pilgrims);
+    // Mutating one mission's template must not touch the other's.
+    (mission9Pilgrims[0] as SuitedCard).suit = 'S';
+    expect(mission7Pilgrims.filter((c) => (c as SuitedCard).suit === 'S').length).toBe(6);
+    (mission9Pilgrims[0] as SuitedCard).suit = 'H'; // restore — MISSIONS is module-level shared state
+  });
+});
+
+describe("legacy: Myla's immunity can never be pierced (Mission 9 boss — John, 2026-09-04)", () => {
+  // Myla wards Bard (Diamonds) and Paladin (Spades). Hearts and Clubs are her open flanks, kept in each case as
+  // the control: if a power that should still land stops landing, the block is too wide.
+  const myla: LegacyEnemySpec = { name: 'Myla', suit: 'D', secondSuit: 'S', health: 200, attack: 20 };
+  const lorekeeper: LegacyEnemySpec = { name: 'Lorekeeper: Emberclaw', suit: 'D', secondSuit: 'S', health: 200, attack: 20 };
+
+  function playOne(state: GameState, card: Card): GameState {
+    const rigged = rig(state, [card]);
+    return ensureOk(
+      applyAction(rigged, { type: 'PLAY_CARDS', playerId: rigged.players[0].id, cardIds: [card.id] }),
+    ).state;
+  }
+
+  it("Gøran's Evergreen resolves all four powers but never breaks her immunity — Cleric and Warrior land, Bard and Paladin stay blocked", () => {
+    let state = startMission(1, [myla]);
+    state.discardPile = [suited('C', '2'), suited('C', '3')];
+    const s = playOne(state, { ...suited('H', '4'), evergreen: true });
+
+    expect(s.discardPile.length).toBe(0); // Cleric (Hearts): not warded, still heals
+    expect(s.currentEnemy?.damageTaken).toBe(8); // Warrior (Clubs): not warded, still doubles 4 -> 8
+    expect(s.currentEnemy?.spadesShield).toBe(0); // Paladin (Spades): WARDED — no shield despite Evergreen
+    expect(s.currentEnemy?.blockedSpadesShield).toBe(4); // banked, and (in Legacy) never redeemable
+    expect(s.currentEnemy?.immunityBroken).toBe(false);
+  });
+
+  it('a corrupted card never breaks her immunity, on its own suit or across the play', () => {
+    const state = startMission(1, [myla]);
+    const s = playOne(state, { ...suited('S', '6'), corrupted: true });
+    expect(s.currentEnemy?.spadesShield).toBe(0);
+    expect(s.currentEnemy?.damageTaken).toBe(6); // damage lands as normal — immunity only ever gated the power
+  });
+
+  it('CONTROL: the same corrupted card DOES break an ordinary Mission 9 enemy\'s identical immunity', () => {
+    const state = startMission(1, [lorekeeper]);
+    const s = playOne(state, { ...suited('S', '6'), corrupted: true });
+    expect(s.currentEnemy?.spadesShield).toBe(6); // pierced, as everywhere else in the campaign
+  });
+
+  it('a claimed Jester still deals its 8 damage and still skips her counter-attack — it just never strips the immunity', () => {
+    // Note on what this can and can't observe: a Jester attack resolves as a lone suit-less synthetic card (see
+    // resolveJesterAttack's noSuitPower), so no class power is in flight for the immunity to block or let
+    // through. The rule is encoded at the same choke point as the other routes; the log line is the only place
+    // it currently surfaces. What matters mechanically is that the rest of the Jester is untouched.
+    const state = startMission(2, [myla], 2);
+    const [p1, p2] = state.players;
+    const j = jester();
+    const rigged = rig(state, [j]);
+    let res = ensureOk(applyAction(rigged, { type: 'PLAY_JESTER', playerId: p1.id, cardId: j.id }));
+    res = ensureOk(applyAction(res.state, { type: 'CLAIM_JESTER', playerId: p2.id }));
+
+    expect(res.state.currentEnemy?.damageTaken).toBe(8); // damage unchanged
+    expect(res.state.pendingDamage).toBe(0); // counter-attack still skipped
+    expect(res.state.currentEnemy?.immunityBroken).toBe(false); // but the immunity holds
+    expect(res.state.log.map((e) => e.message).join('\n')).not.toContain('ignoring immunity');
+  });
+
+  it('CONTROL: a claimed Jester still breaks immunity against every other enemy', () => {
+    const state = startMission(2, [lorekeeper], 2);
+    const [p1, p2] = state.players;
+    const j = jester();
+    const rigged = rig(state, [j]);
+    let res = ensureOk(applyAction(rigged, { type: 'PLAY_JESTER', playerId: p1.id, cardId: j.id }));
+    res = ensureOk(applyAction(res.state, { type: 'CLAIM_JESTER', playerId: p2.id }));
+    expect(res.state.log.map((e) => e.message).join('\n')).toContain('ignoring immunity');
+  });
+
+  it('is scoped to Myla as an ENEMY — Missions 5 and 6 only ever seed her as a card, and their enemies are untouched', () => {
+    // She is a zoneCompanion card in Mission 5's banish pile and Mission 6's mission zone, never an enemy there.
+    for (const id of [5, 6]) {
+      expect(getMission(id)!.enemies.some((e) => e.name === 'Myla')).toBe(false);
+    }
+    expect(getMission(9)!.enemies.some((e) => e.name === 'Myla')).toBe(true);
   });
 });
 

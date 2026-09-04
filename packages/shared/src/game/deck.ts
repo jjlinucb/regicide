@@ -167,22 +167,16 @@ export function buildLegacyReserveDeck(party: Card[], jesterCount: number, rng: 
  * actual reserve deck via buildLegacyReserveDeck.
  *
  * `pileSize` defaults to the sourced fan-reimplementation figure (10 per pile, 30 total, fixed regardless of
- * player count in that source). UNSOURCED BALANCE JUDGMENT CALL: real playtesting (see
- * legacy-mission-playtest-findings) found the fixed 30-card carve-out left a SOLO game with almost nothing in the
- * tavern deck for the whole fight (40-card fresh party minus 30 captured minus a full hand leaves ~2 cards) — no
- * source specifies scaling this by player count, so callers (see engine.ts's startLegacyMission) pass a smaller
- * `pileSize` for fewer players instead of always using the sourced default.
+ * player count in that source), and engine.ts's startLegacyMission — the only caller — always takes that default.
  *
- * SECOND-PASS BALANCE FIX (2026-08-28, unsourced — see engine.ts's startLegacyMission for the full reasoning and
- * the mission-9-recheck sim, deleted after use): the first pass's fix capped `pileSize` so it grew back up to the
- * sourced 10/pile "once there are enough players (3-4)" — but re-simulating found that this engine's own
- * per-player-count hand-size table means MORE players deal MORE total cards into hands up front even though each
- * hand is individually smaller, while the leftover-party pool the first pass computed actually shrinks as player
- * count grows. The two effects compound: a 3-player mission-9 game was left with exactly 1 card in the tavern
- * deck after the opening deal, and a 4-player game with exactly 0 — the entire reserve deck consumed before a
- * single turn was played, at precisely the player counts the sourced 30-card split was supposedly tested at.
- * Callers now cap `pileSize` further so the tavern deck keeps a real buffer after the opening deal, not just a
- * positive "leftover party" count — see engine.ts's own pileSize computation for the actual formula.
+ * HISTORY (2026-09-04): two earlier passes had that caller pass a SMALLER `pileSize` scaled by player count,
+ * because playtesting found the fixed 30-card carve-out drained the tavern deck to near zero after the opening
+ * deal (first at 1 player, then, after the first fix, at 3-4). Both were compensating for a bug elsewhere:
+ * Mission 9 was folding in only 8 of Mission 7's 24 Pilgrims, leaving its reserve deck 16 cards short of what
+ * the source calls for. With the full 24 restored (see missions.ts's Mission 9 extraReserveCards), the sourced
+ * flat 30 leaves a real post-deal buffer at every player count, so the scaling is gone and `pileSize` has no
+ * non-default caller left. Kept as a parameter rather than inlined: it's the one knob for re-tuning this split if
+ * John's live play says otherwise, and it keeps the sourced figure named in exactly one place.
  */
 export function buildCapturedPiles(party: Card[], rng: () => number, pileSize = 10): { piles: CapturedPile[]; leftoverParty: Card[] } {
   const shuffled = shuffle(party, rng);

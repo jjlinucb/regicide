@@ -148,6 +148,26 @@ export function isSuitBlockedByImmunity(suit: Suit, enemy: EnemyState): boolean 
   return (suit === enemy.suit || suit === enemy.secondSuit) && !enemy.immunityBroken;
 }
 
+/**
+ * Legacy-only, JOHN 2026-09-04: true for an enemy whose immunity can never be pierced by anything. Today that is
+ * exactly one enemy — Myla, Mission 9's boss, immune to Bard and Paladin (Diamonds + Spades) for the whole fight
+ * with, as that mission's own comment already put it, "no Jester-breakable weak point to lean on". Every route
+ * this engine has for ignoring immunity is switched off against her (see engine.ts's
+ * continueResolveCommittedPlay): a claimed Jester, Gøran's Evergreen, a played corrupted/restored card, and a
+ * corrupted Mage's revealed suit.
+ *
+ * A Jester is otherwise unaffected — it still lands its flat 8 damage and still spares the claimant the enemy's
+ * counter-attack — and it still cancels immunity against every other enemy in the campaign.
+ *
+ * Matched by enemy NAME rather than by mission number so the rule travels with the enemy, the same way
+ * engine.ts's Mission 6 zone-relief step already excludes the Myla CARD by name. She is a live enemy in Mission 9
+ * only: Missions 5 and 6 seed a `zoneCompanion('Myla', ...)` card into the banish pile / mission zone, which is a
+ * different thing entirely and is not touched by this.
+ */
+export function hasUnpierceableImmunity(enemy: EnemyState): boolean {
+  return enemy.name === 'Myla';
+}
+
 export function currentEnemyAttack(enemy: EnemyState): number {
   return Math.max(0, enemy.baseAttack - enemy.spadesShield);
 }
