@@ -210,6 +210,40 @@ function pilgrimDeck(): Card[] {
 }
 
 /**
+ * Mission 8's actual Pilgrim cards (see extraReserveCards below): 24 of them — 4 copies each of values 2-7 —
+ * drawn from the exact same physical "P-Box" component Mission 7's own pilgrimDeck() above already uses
+ * correctly. SOURCED (2026-09-04, John's live play): the earlier single-card-per-value version only ever fixed
+ * how HIGH the run went (see this mission's own "pilgrims are 1-7 only" comment, dated a day earlier) — it
+ * missed this same quantity correction even though both missions draw from the identical box. Unlike Mission
+ * 7's anonymous, never-drawn pilgrimDeck() cards, these are ordinary playable/discardable reserve-deck cards
+ * (see pilgrim()'s own doc comment), so Mission 8 keeps its own established per-value character names — the 4
+ * copies of a given value just share that value's one name, one per suit, the same way any other deck-builder
+ * can hold several identical copies of one card.
+ */
+function mission8PilgrimCards(): Card[] {
+  const suits: Suit[] = ['H', 'D', 'C', 'S'];
+  const namesByRank: Record<'2' | '3' | '4' | '5' | '6' | '7', string> = {
+    '2': 'Old Yarrow',
+    '3': 'Little Mireille',
+    '4': 'Bosk the Carter',
+    '5': 'Sister Halvard',
+    '6': 'Corin Drizzlecoat',
+    '7': 'Fenna Longrope',
+  };
+  return (Object.keys(namesByRank) as (keyof typeof namesByRank)[]).flatMap((rank) =>
+    suits.map((suit) => ({
+      id: `pilgrim8-${rank}-${suit}`,
+      kind: 'suited' as const,
+      suit,
+      rank,
+      name: namesByRank[rank],
+      pilgrim: true,
+      noSuitPower: true,
+    })),
+  );
+}
+
+/**
  * Mission 8's own fight SETUP (not a reward — see this mission's own comment below): 4 Chanter cards, ranks
  * 3/5/7/9, added straight to the fight's reserve deck via extraReserveCards, same non-persistent "mission-only"
  * shape every other extraReserveCards helper here already has. Sourced fan-reimplementation rules doc ("Setup:
@@ -939,14 +973,17 @@ export const MISSIONS: Mission[] = [
     // placements after the anchor — six of them are now free and three are not, where before all nine were free.
     // This also retires a card that should never have existed: a "Goran" Pilgrim printed at rank 10, contradicting
     // his rank 8 everywhere else in the campaign, invented purely to cap the old 2-10 run.
+    //
+    // FOLLOW-UP CORRECTION (2026-09-04, John's live play): the range fix above only addressed how HIGH the
+    // Pilgrims run, not how MANY of each — this mission draws from the exact same physical "P-Box" component
+    // Mission 7's own pilgrimDeck() already uses correctly (4 copies each of values 2-7, 24 cards total; see
+    // that function's own doc comment), which this mission had missed despite landing the very same day. Fixed
+    // via mission8PilgrimCards() below — same 4-copies-per-value shape, just keeping Mission 8's own established
+    // per-value character names (unlike Mission 7's anonymous pilgrimDeck(), these are ordinary playable/
+    // discardable reserve-deck cards, so the individual naming still matters for this mission's own flavor).
     presetMissionZone: [pilgrim('Scrap', 'H', 'A')],
     extraReserveCards: [
-      pilgrim('Old Yarrow', 'S', '2'),
-      pilgrim('Little Mireille', 'D', '3'),
-      pilgrim('Bosk the Carter', 'C', '4'),
-      pilgrim('Sister Halvard', 'H', '5'),
-      pilgrim('Corin Drizzlecoat', 'S', '6'),
-      pilgrim('Fenna Longrope', 'D', '7'),
+      ...mission8PilgrimCards(),
       chanterCompanion('Sela Windchant', 'D', '3'),
       chanterCompanion('Orin Deepvoice', 'H', '5'),
       chanterCompanion('Ketta Skysong', 'C', '7'),

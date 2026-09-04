@@ -25,6 +25,7 @@ import {
   discardPileTopValue,
   isBeastCompanion,
   isCompanionCard,
+  isMageCard,
   isSuitBlockedByImmunity,
   MAX_SOLO_JESTERS,
   matchesAscendingZoneSlot,
@@ -765,11 +766,6 @@ function applyRestoredHeal(state: GameState, label: string): void {
   }
 }
 
-/** Legacy-only, Mission 3+: a "Mage" for reveal purposes — a pure Mage card, or a card carrying a bonus Mage sticker (Mission 9's secondClassArcane). */
-function isMageCard(c: Card): c is Extract<Card, { kind: 'suited' }> {
-  return c.kind === 'suited' && Boolean(c.arcane || c.secondClassArcane);
-}
-
 /** How many cards a Mage's reveal pulls for a trigger of the given own-value — doubled by the (currently dormant, no recruit sets it) ARCANE_SURGE special ability. */
 function mageRevealCount(trigger: Card, ownValue: number): number {
   return hasSpecial([trigger], 'ARCANE_SURGE') ? ownValue * 2 : ownValue;
@@ -1257,9 +1253,12 @@ function finishDeferredAttackTurn(state: GameState, blockNextAttack: boolean): E
  * GameState.zoneVengeanceOnKill / finishEnemyDefeatTail). Absent for the recursive splash-damage self-call
  * (Mission 5's exactKillSplashDamage — never combined with Mission 6's zoneVengeanceOnKill in practice, but
  * threaded through anyway so a chained kill from the same play stays covered by the same shield).
- * `attackIncludesMage` is Legacy-only (Mission 3+, sourced — see tutorial_vids/summaries/mission-3.md): true when
- * the play that landed this kill included a Mage card — sends the kill's table cards to the banish pile instead
- * of the discard pile (see finishEnemyDefeatTail), same threading pattern as attackIncludesGuardian.
+ * `attackIncludesMage` is Legacy-only (Mission 3+): true when the play that landed this kill included a Mage
+ * card. No longer read by anything downstream of this function (see continueResolveCommittedPlay's
+ * magePlayCards/resolveMagePlayCards, John's house rule 2026-09-04: a Mage's own play-cards are pulled off the
+ * table and banished — or saved via Azure Emblem — unconditionally, BEFORE this function ever runs, so their
+ * fate no longer depends on how this kill itself turns out). Kept as a parameter only for shape-parity with
+ * attackIncludesGuardian and because dealDamageAndCheckDefeat's own callers already compute it regardless.
  * `forcedPlay` — true when the play that landed this hit only happened because YIELD was rejected by
  * allOtherPlayersYieldedLastTurn (every other player at the table had already yielded, leaving the current player
  * no legal way to pass — see playCards/resolveComboAssist, which compute this fresh from state right before
@@ -1411,7 +1410,7 @@ function dealDamageAndCheckDefeat(
       }
       // No card left on the enemy's table to sacrifice this kill (rare) — the zone doesn't grow, straight on to
       // the rest of the defeat resolution.
-      return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian, attackIncludesMage);
+      return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian);
     }
     if (state.pilgrimMechanic && state.pilgrimZone.length > 0) {
       // Mission 7 (see GameState.pilgrimMechanic): every kill charges the party for whichever Pilgrims are still
@@ -1506,7 +1505,7 @@ function dealDamageAndCheckDefeat(
       log(state, `${enemyLabel(enemy)} defeated!`);
     }
   }
-  return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian, attackIncludesMage);
+  return finishEnemyDefeatTail(state, enemy, remaining, attackIncludesGuardian);
 }
 
 /**
@@ -1514,15 +1513,13 @@ function dealDamageAndCheckDefeat(
  * (or, for Mission 6's zoneVengeanceOnKill, once its AWAIT_ZONE_VENGEANCE_CHOICE has been resolved — see
  * chooseZoneVengeanceSacrifice). Split out of dealDamageAndCheckDefeat so that choice can pause mid-resolution
  * and resume here afterward, the same way CHOOSE_EXACT_KILL_RESCUE resumes its own
- * mission's flow from a dedicated resolve function. `attackIncludesGuardian`/`attackIncludesMage` — see
- * dealDamageAndCheckDefeat.
+ * mission's flow from a dedicated resolve function. `attackIncludesGuardian` — see dealDamageAndCheckDefeat.
  */
 function finishEnemyDefeatTail(
   state: GameState,
   enemy: EnemyState,
   remaining: number,
   attackIncludesGuardian: boolean,
-  attackIncludesMage: boolean,
 ): boolean {
   if (state.ruleset === 'legacy' && (state.pileTopEnemyBonus || state.restoredCardMechanic)) {
     // Mission 11: "defeating the enemy always banishes it" — its played cards go to the banish pile instead of
@@ -1537,16 +1534,12 @@ function finishEnemyDefeatTail(
     // immediately; whatever isn't claimed by a placement gets swept to the discard pile once the placement
     // window closes (finishAdvanceToNextPlayer) or the zone purges at 10 (placeInZone).
     state.zoneCommittedPlay.push(...enemy.tableCards);
-  } else if (state.ruleset === 'legacy' && attackIncludesMage && remaining !== 0) {
-    // Mission 3+, HOUSE RULE (John's call, overriding the sourced default — see tutorial_vids/summaries/mission-3.md,
-    // which says every kill banishes regardless of exact/overkill): an attack that included a Mage only banishes
-    // its cards on an OVERKILL; an exact hit sends them to the discard pile as normal instead, same as any other
-    // kill. Lower precedence than the two mission-specific branches above — a Mage recruit, once granted, stays in
-    // the party for every later mission too, so this can in principle coincide with Mission 8/11/12's own more
-    // specific table-cards handling; no source addresses that overlap, so the more specific mission mechanic wins
-    // and this only applies in the plain default case.
-    banishCards(state, enemy.tableCards);
   } else {
+    // A Mage's own attack cards (attackIncludesMage) never reach this pile at all any more — they're pulled off
+    // the table and banished (or saved via Azure Emblem) unconditionally, before this function ever runs, at
+    // continueResolveCommittedPlay's magePlayCards/resolveMagePlayCards (John's house rule, 2026-09-04). Whatever
+    // is still sitting in enemy.tableCards here is everything ELSE — earlier turns' non-Mage plays against this
+    // same enemy — which falls to the plain discard pile like any other kill.
     pushToDiscardPile(state, enemy.tableCards);
   }
   if (state.ruleset === 'legacy' && state.restoredCardMechanic) {
@@ -1585,7 +1578,7 @@ function finishEnemyDefeatTail(
     // kill (and its own effects) if it's strong enough.
     const splash = enemy.baseAttack;
     log(state, `${enemyLabel(enemy)}'s death throes burst outward — ${splash} splash damage crashes into ${enemyLabel(state.currentEnemy)}!`);
-    dealDamageAndCheckDefeat(state, splash, attackIncludesGuardian, attackIncludesMage);
+    dealDamageAndCheckDefeat(state, splash, attackIncludesGuardian);
     return true;
   }
 
@@ -2304,9 +2297,32 @@ function continueResolveCommittedPlay(
   // team-damage step entirely (see finishEnemyDefeatTail) — a documented mechanic missing from the shipped
   // version. Inert on every other mission, since guardianCards is always empty there.
   const attackIncludesMage = state.ruleset === 'legacy' && cards.some(isMageCard);
+  // John's house rule (2026-09-04): a Mage's own attack ALWAYS banishes the cards this specific play used —
+  // win, lose, exact hit, or overkill, no exception — never just the eventual discard an ordinary kill gets.
+  // Pulled off the enemy's table now, before dealDamageAndCheckDefeat runs, so every mission-specific kill
+  // branch below (pileTopEnemyBonus/ascendingZone/restoredCardMechanic/zoneVengeanceOnKill/plain discard) — all
+  // of which sweep whatever's LEFT in enemy.tableCards — naturally never sees these cards at all, the same way
+  // they'd behave if this attack hadn't killed anything. Their actual fate (banished outright, or saved to the
+  // reserve deck's top via Azure Emblem) is decided below, once we know how this play's own resolution ends.
+  const magePlayCards = attackIncludesMage
+    ? cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited')
+    : [];
+  if (magePlayCards.length > 0) {
+    const ids = new Set(magePlayCards.map((c) => c.id));
+    const enemy = state.currentEnemy!;
+    enemy.tableCards = enemy.tableCards.filter((c) => !ids.has(c.id));
+  }
   const defeated = dealDamageAndCheckDefeat(state, damage, guardianCards.length > 0, attackIncludesMage, forcedPlay);
 
-  if (state.phase !== 'IN_PROGRESS') return ok(state);
+  if (state.phase !== 'IN_PROGRESS') {
+    // The mission just ended (WON/LOST) on this exact play — same reasoning as chant/regrowth silently skipping
+    // their own windows here (nothing left to resume into, no more turns coming): Azure Emblem can't open a
+    // pending choice that would never get resolved either, so these cards are banished outright instead, same
+    // as the no-relic case, just for a different reason. Without this, they'd otherwise be pulled off the
+    // enemy's table (above) and then simply vanish from every pile — never banished, never discarded.
+    if (magePlayCards.length > 0) banishCards(state, magePlayCards);
+    return ok(state);
+  }
 
   if (defeated) {
     // Sourced fix: a Chanter's chant fires on ANY play it's part of, including one that also lands the killing
@@ -2324,6 +2340,12 @@ function continueResolveCommittedPlay(
     if (regrowthActive) {
       return beginRegrowth(state, { kind: 'resumeResolved', turnPhase: state.turnPhase, pendingDamage: state.pendingDamage });
     }
+    // Same reasoning again: the Mage's own play-card banish/Azure-Emblem choice fires on ANY play it's part of,
+    // the killing blow included — resuming whatever dealDamageAndCheckDefeat already decided (continuing
+    // against the new enemy, a pending zone-vengeance/rescue/relief choice, etc.) once it's settled.
+    if (magePlayCards.length > 0) {
+      return resolveMagePlayCards(state, player.id, magePlayCards, { kind: 'resumeResolved', turnPhase: state.turnPhase, pendingDamage: state.pendingDamage });
+    }
     return ok(state); // enemy was defeated, same player continues against the next one
   }
 
@@ -2340,17 +2362,11 @@ function continueResolveCommittedPlay(
     return beginRegrowth(state, { kind: 'deferredAttack', blockNextAttack: guardianBlocksNextAttack });
   }
 
-  // Azure Emblem (Mission 6 relic), sourced fix: whenever a Mage joins the attack, the Mage's OWN player gets
-  // one chance to bank one of this play's Mage card(s) onto the reserve deck instead of losing it to the
-  // discard pile whenever the enemy is eventually defeated — the shipped version had this backwards (every
-  // OTHER player silently placing a card from hand). Skipped if a Chanter also fired in the same play (see
-  // chantCount above) — the two mission-specific windows never need to stack in practice, since each faction's
-  // cards are unique.
-  const mageCardIds = state.ruleset === 'legacy' && state.relics.includes('AZURE_EMBLEM')
-    ? cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.arcane)).map((c) => c.id)
-    : [];
-  if (mageCardIds.length > 0) {
-    return beginAzureEmblem(state, player.id, mageCardIds, guardianBlocksNextAttack);
+  // A Mage's own attack always banishes this play's cards (see magePlayCards above) — but if the AZURE_EMBLEM
+  // relic (Mission 6) is unlocked, the Mage's OWN player gets one chance first to redirect ONE of this play's
+  // Mage card(s) onto the top of the reserve deck instead, via RESOLVE_AZURE_EMBLEM (see resolveMagePlayCards).
+  if (magePlayCards.length > 0) {
+    return resolveMagePlayCards(state, player.id, magePlayCards, { kind: 'deferredAttack', blockNextAttack: guardianBlocksNextAttack });
   }
 
   // John's house rule: a claimed/used Jester's own synthetic attack also spares the claimant the enemy's
@@ -3169,41 +3185,52 @@ function resolveRegrowth(state: GameState, action: Extract<GameAction, { type: '
 }
 
 /**
- * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic, sourced fix: opens the Azure Emblem window after a
- * play that included a Mage card — the Mage's OWN player (the attacker, `attackerId`) may bank one of
- * `eligibleCardIds` (this play's Mage card(s), still sitting on the enemy's table) onto the reserve deck via
- * RESOLVE_AZURE_EMBLEM, instead of losing it to the discard pile whenever the enemy eventually falls. The
- * shipped version instead opened this for every OTHER player to place a card from their own hand — backwards on
- * both who benefits and what moves (per the official rules card, see legacy-missions-transcript-mismatches.md).
- * `blockNextAttack` mirrors a Guardian shield raised in the same play.
+ * Legacy-only (Mission 3+), John's ruling (2026-09-04): a Mage's own attack always banishes the cards THIS
+ * SPECIFIC PLAY used — win, lose, exact hit, or overkill, no exception (see continueResolveCommittedPlay's
+ * magePlayCards, already pulled off the enemy's table by the time this runs). If the 'AZURE_EMBLEM' relic
+ * (Mission 6) is unlocked, the Mage's OWN player first gets one chance to redirect ONE of this play's actual
+ * Mage card(s) onto the top of the reserve deck instead, via RESOLVE_AZURE_EMBLEM — whatever isn't saved is
+ * banished regardless. Without the relic, everything is banished immediately with no window at all.
+ * `onResolved` (see ChanterResolution) carries what to do once that choice (if any) is made — the play may have
+ * also landed the killing blow, so this mirrors beginChant/beginRegrowth's own resume pattern exactly.
  */
-function beginAzureEmblem(state: GameState, attackerId: string, eligibleCardIds: string[], blockNextAttack: boolean): EngineResult {
-  state.azureEmblemWindow = { pendingPlayerIds: [attackerId], eligibleCardIds, blockNextAttack };
+function resolveMagePlayCards(
+  state: GameState,
+  playerId: string,
+  cards: Extract<Card, { kind: 'suited' }>[],
+  onResolved: ChanterResolution,
+): EngineResult {
+  if (!state.relics.includes('AZURE_EMBLEM')) {
+    banishCards(state, cards);
+    log(state, `${cards.length > 1 ? 'The cards used in the attack are' : 'The card used in the attack is'} banished.`);
+    return runChantResolution(state, onResolved);
+  }
+  state.azureEmblemWindow = { pendingPlayerIds: [playerId], cards, onResolved };
   state.turnPhase = 'AWAIT_AZURE_EMBLEM';
-  log(state, "Azure Emblem: the Mage's own player may bank one of this play's Mage card(s) onto the reserve deck instead of losing it to the discard pile.");
+  log(state, "Azure Emblem: the Mage's own player may bank one of this play's Mage card(s) onto the reserve deck instead of it being banished.");
   return ok(state);
 }
 
 /** Legacy-only (Mission 6): the attacking player resolves their own open Azure Emblem window (see GameState.azureEmblemWindow). */
 function resolveAzureEmblem(state: GameState, action: Extract<GameAction, { type: 'RESOLVE_AZURE_EMBLEM' }>): EngineResult {
   if (state.turnPhase !== 'AWAIT_AZURE_EMBLEM' || !state.azureEmblemWindow) return fail('There is no open Azure Emblem window to resolve.');
-  const { pendingPlayerIds, eligibleCardIds, blockNextAttack } = state.azureEmblemWindow;
+  const { pendingPlayerIds, cards, onResolved } = state.azureEmblemWindow;
   const [attackerId] = pendingPlayerIds;
   if (action.playerId !== attackerId) return fail("It's not your Azure Emblem window to resolve.");
 
+  let toBanish = cards;
   if (action.cardId) {
-    if (!eligibleCardIds.includes(action.cardId)) return fail('That card is not eligible to bank via the Azure Emblem.');
-    const enemy = state.currentEnemy!;
-    const idx = enemy.tableCards.findIndex((c) => c.id === action.cardId);
-    if (idx === -1) return fail('That card is no longer available to bank.');
-    const [banked] = enemy.tableCards.splice(idx, 1);
+    const banked = cards.find((c) => c.id === action.cardId && isMageCard(c));
+    if (!banked) return fail('That card is not eligible to bank via the Azure Emblem.');
     toReserveDeck(state, [banked], 'top');
-    log(state, `${banked.kind === 'suited' ? banked.name ?? 'A Mage' : 'A Jester'} is banked onto the reserve deck instead of falling to the discard pile (Azure Emblem).`);
+    log(state, `${banked.name ?? 'A Mage'} is banked onto the reserve deck instead of being banished (Azure Emblem).`);
+    toBanish = cards.filter((c) => c.id !== banked.id);
   }
+  if (toBanish.length > 0) banishCards(state, toBanish);
 
   state.azureEmblemWindow = null;
   state.turnPhase = 'AWAIT_PLAY';
-  return finishDeferredAttackTurn(state, blockNextAttack);
+  return runChantResolution(state, onResolved);
 }
 
 /** Mission 9, from AWAIT_END_OF_TURN: declines to banish — every captured pile's face-up card cycles face-down to the bottom of its own pile and the next card flips up, then the turn advances. */
@@ -3271,7 +3298,7 @@ function chooseZoneVengeanceSacrifice(
   log(state, `${sacrificed.kind === 'suited' ? sacrificed.name ?? `the ${sacrificed.rank}` : 'the Jester'} is drawn permanently into the mission zone.`);
 
   state.zoneVengeanceChoice = null;
-  finishEnemyDefeatTail(state, enemy, pending.remaining, pending.attackIncludesGuardian, pending.attackIncludesMage);
+  finishEnemyDefeatTail(state, enemy, pending.remaining, pending.attackIncludesGuardian);
   return ok(state);
 }
 
