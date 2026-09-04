@@ -934,19 +934,74 @@ describe('legacy: mission playthrough', () => {
     expect(state.discardPile.some((c) => c.id === mage4.id)).toBe(false);
   });
 
-  it("HOUSE RULE (2026-09-04): a Mage's own attack banishes THIS PLAY's cards immediately even when it does NOT kill the enemy — no more waiting until the enemy eventually dies", () => {
-    const enemy: LegacyEnemySpec = { name: 'Tough Target', suit: 'S', health: 100, attack: 0 };
+  it("HOUSE RULE (2026-09-04, revised): a Mage's own attack DEFERS the banish — the cards stay in play against the enemy they were spent on and burn only when it falls", () => {
+    const enemy: LegacyEnemySpec = { name: 'Tough Target', suit: 'S', health: 8, attack: 0 };
     let state = startMission(1, [enemy]);
     const mage4: SuitedCard = { ...suited('H', '4'), arcane: true };
     state = rig(state, [mage4]);
     state.tavernDeck = [];
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage4.id] }));
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage4.id] }));
     state = res.state;
-    expect(state.currentEnemy?.damageTaken).toBe(4); // didn't kill (100 hp)
-    expect(state.currentEnemy?.tableCards.some((c) => c.id === mage4.id)).toBe(false); // pulled off the table already
-    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(true); // banished immediately, no relic to save it
+    expect(state.currentEnemy?.damageTaken).toBe(4); // didn't kill (8 hp)
+    // Still on the table, marked — NOT banished yet.
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === mage4.id)).toBe(true);
+    expect(state.currentEnemy?.mageAttackCardIds).toEqual([mage4.id]);
+    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(false);
     expect(state.discardPile.some((c) => c.id === mage4.id)).toBe(false);
+
+    // A second, ordinary card finishes the enemy off: only now does the earlier Mage attack's card burn.
+    const plain = suited('D', '4');
+    state.players[0].hand = [plain];
+    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [plain.id] }));
+    state = res.state;
+    expect(state.phase).toBe('WON');
+    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(true);
+    expect(state.discardPile.some((c) => c.id === mage4.id)).toBe(false);
+    expect(state.discardPile.some((c) => c.id === plain.id)).toBe(true); // the ordinary card discards as always
+  });
+
+  it('HOUSE RULE (2026-09-04, revised): two separate Mage attacks on the same enemy both stay marked, and both burn together on the kill', () => {
+    const enemy: LegacyEnemySpec = { name: 'Tough Target', suit: 'S', health: 12, attack: 0 };
+    let state = startMission(1, [enemy]);
+    const first: SuitedCard = { ...suited('H', '4'), arcane: true };
+    state = rig(state, [first]);
+    state.tavernDeck = [];
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [first.id] }));
+    state = res.state;
+    const second: SuitedCard = { ...suited('D', '4'), arcane: true };
+    state.players[0].hand = [second];
+    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [second.id] }));
+    state = res.state;
+    expect(state.currentEnemy?.damageTaken).toBe(8);
+    expect(state.currentEnemy?.mageAttackCardIds).toEqual([first.id, second.id]);
+
+    const killer = suited('D', '4');
+    state.players[0].hand = [killer];
+    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [killer.id] }));
+    state = res.state;
+    expect(state.phase).toBe('WON');
+    expect(state.banishPile.some((c) => c.id === first.id)).toBe(true);
+    expect(state.banishPile.some((c) => c.id === second.id)).toBe(true);
+    expect(state.discardPile.some((c) => c.id === killer.id)).toBe(true);
+  });
+
+  it("HOUSE RULE (2026-09-04, revised): a mission LOST with a Mage attack's cards still deferred leaves them in play — never banished, since their enemy was never defeated", () => {
+    const enemy: LegacyEnemySpec = { name: 'Tough Target', suit: 'S', health: 100, attack: 9 };
+    let state = startMission(1, [enemy]);
+    const mage4: SuitedCard = { ...suited('H', '4'), arcane: true };
+    state = rig(state, [mage4]);
+    state.tavernDeck = []; // nothing to draw — the play empties the hand, so the counter-attack can't be covered
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage4.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_DEFEND');
+    res = ensureOk(applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: [] }));
+    state = res.state;
+    expect(state.phase).toBe('LOST');
+    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(false);
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === mage4.id)).toBe(true);
   });
 
   it("HOUSE RULE scope (2026-09-04): only the cards THIS SPECIFIC PLAY used are banished — an earlier turn's own non-Mage card against the same enemy still just discards normally once the enemy dies", () => {
@@ -1467,6 +1522,37 @@ describe('legacy: mission 3 mechanics (end-of-turn mission zone)', () => {
     expect(state.missionZone.length).toBe(0);
     expect(state.zoneImmuneSuits.length).toBe(0);
     expect(state.banishPile.length).toBe(2); // both zone cards banished — no exact kill, so nothing saved to discard
+  });
+
+  it("an exactKillOnly overkill recycles the enemy without defeating it — an earlier Mage attack's deferred cards burn there rather than quietly becoming a discard", () => {
+    const boss: LegacyEnemySpec = { name: 'Archive Boss', suit: 'S', health: 20, attack: 0 };
+    const startRes = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'mage-recycle-test',
+      party: buildInitialParty(),
+      enemies: [boss, { name: 'Second Boss', suit: 'C', health: 15, attack: 5 }],
+      jesterCount: 0,
+      exactKillOnly: true,
+    });
+    let state = ensureOk(startRes).state;
+    const mage4: SuitedCard = { ...suited('D', '4'), arcane: true };
+    state = rig(state, [mage4, suited('C', '10')]);
+    state.tavernDeck = [];
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: 'p0', cardIds: [mage4.id] })).state;
+    expect(state.currentEnemy?.mageAttackCardIds).toEqual([mage4.id]); // deferred, still on the table
+
+    // Overkill: the boss shrugs it off and slinks to the back of the line, never actually defeated.
+    const finisher = state.players[0].hand[0];
+    state = rig(state, [finisher], { damageTaken: 15 });
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: 'p0', cardIds: [finisher.id] })).state;
+
+    expect(state.currentEnemy?.name).toBe('Second Boss');
+    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(true); // the deferred banish comes due here
+    expect(state.discardPile.some((c) => c.id === mage4.id)).toBe(false);
+    expect(state.discardPile.some((c) => c.id === finisher.id)).toBe(true); // the ordinary card just discards
+    expect(state.castleDeck.some((e) => e.name === 'Archive Boss' && e.mageAttackCardIds.length === 0)).toBe(true);
   });
 
   it('a corrupted card ignores mission-zone immunity for its own class, at the cost of banishing the top reserve card', () => {
@@ -2311,6 +2397,29 @@ describe('legacy: mission 6 mechanics (zone vengeance on kill)', () => {
     expect(state.discardPile.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '9')).toBe(false);
   });
 
+  it("a deferred Mage-attack card is still in the play area at the kill, so the vengeance sacrifice can claim it into the zone instead of it burning", () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'S', health: 12, attack: 0 };
+    const trailer: LegacyEnemySpec = { name: 'Second Statue', suit: 'S', health: 100, attack: 0 };
+    let state = startGardenMission(1, [boss, trailer], [myla]);
+    const mage4: SuitedCard = { ...suited('D', '4'), arcane: true };
+    state = rig(state, [mage4, suited('D', '8')]);
+    state.tavernDeck = [];
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: 'p0', cardIds: [mage4.id] })).state;
+    expect(state.currentEnemy?.mageAttackCardIds).toEqual([mage4.id]); // deferred, not banished
+
+    const killer = state.players[0].hand[0];
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: 'p0', cardIds: [killer.id] })).state;
+
+    expect(state.turnPhase).toBe('AWAIT_ZONE_VENGEANCE_CHOICE');
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === mage4.id)).toBe(true); // eligible to sacrifice
+    state = chooseSacrifice(state, mage4.id);
+
+    expect(state.missionZone.some((c) => c.id === mage4.id)).toBe(true);
+    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(false); // claimed at the kill, so the deferred banish never lands
+    expect(state.discardPile.some((c) => c.id === killer.id)).toBe(true);
+  });
+
   it('sourced fix: the player may sacrifice ANY card from the play area, not just the lowest-value one', () => {
     // Three separate turns' worth of cards pile up on the boss's table before the killing blow — the shipped
     // auto-sacrifice would always take the lowest (the 3). This proves the player can choose otherwise.
@@ -2961,6 +3070,7 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
     expect(state.azureEmblemWindow).toEqual({
       pendingPlayerIds: [player0Id],
       cards: [played],
+      killedEnemy: false,
       onResolved: { kind: 'deferredAttack', blockNextAttack: false },
     });
     expect(state.currentEnemy?.damageTaken).toBe(8); // 4 from the normal play + 4 from the chosen reveal card, as usual
@@ -2989,7 +3099,7 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
     expect(state.pendingDamage).toBe(10);
   });
 
-  it("lets the Mage's own player decline — the card is banished outright (John's house rule), never left on the table for an eventual discard", () => {
+  it("lets the Mage's own player decline — the card goes back into play against the surviving enemy, marked to burn when it falls (2026-09-04 revision)", () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     let state = startEmblemMission(2, [boss]);
     state = structuredClone(state);
@@ -3004,9 +3114,11 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
     state = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id })).state;
 
     expect(state.azureEmblemWindow).toBeNull();
-    expect(state.banishPile.some((c) => c.id === played.id)).toBe(true); // declined the save — banished, not discarded
+    // Declining no longer burns it on the spot — the banish waits for this enemy's death.
+    expect(state.banishPile.some((c) => c.id === played.id)).toBe(false);
     expect(state.discardPile.some((c) => c.id === played.id)).toBe(false);
-    expect(state.currentEnemy?.tableCards.some((c) => c.id === played.id)).toBe(false); // never left on the table at all
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === played.id)).toBe(true);
+    expect(state.currentEnemy?.mageAttackCardIds).toEqual([played.id]);
     expect(state.turnPhase).toBe('AWAIT_DEFEND');
   });
 
@@ -3796,6 +3908,22 @@ describe('legacy: mission 8 mechanics (ascending mission zone chain)', () => {
     );
   });
 
+  it('the 10-card purge is the last call on a deferred Mage banish — leftovers burn instead of spilling into the discard pile', () => {
+    const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 100, attack: 1 };
+    const ten: Card = { id: 'ten', kind: 'suited', suit: 'H', rank: '10', name: 'Goran', pilgrim: true };
+    const leftover: Card = { id: 'leftover-mage', kind: 'suited', suit: 'D', rank: '3', arcane: true };
+    let state = startEdgeMission(1, [boss], { presetMissionZone: nineCardZone() });
+    state.zoneCommittedPlay = [ten, leftover];
+    state.deferredMageBanishIds = [leftover.id];
+
+    state = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: ten.id })).state;
+
+    expect(state.turnPhase).toBe('AWAIT_ZONE_PURGE');
+    expect(state.banishPile.map((c) => c.id)).toEqual([leftover.id]);
+    expect(state.discardPile.some((c) => c.id === leftover.id)).toBe(false);
+    expect(state.deferredMageBanishIds).toEqual([]);
+  });
+
   it('rejects further placements once the zone has closed', () => {
     const boss: LegacyEnemySpec = { name: 'Troll', suit: 'S', health: 100, attack: 1 };
     const ten: Card = { id: 'ten', kind: 'suited', suit: 'H', rank: '10', pilgrim: true };
@@ -4054,6 +4182,114 @@ describe('legacy: mission 8 ascending run — several placements can share one w
     state.zoneCommittedPlay = [spare];
     const outOfOrder = applyAction(state, { type: 'PLACE_IN_ZONE', playerId: state.players[0].id, cardId: spare.id });
     expect(outOfOrder.ok).toBe(false);
+  });
+});
+
+describe("legacy: mission 8 — a Pilgrim spent in a Mage attack survives to the kill (2026-09-04 deferred-banish rule)", () => {
+  const puppy: Card = { id: 'puppy', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true };
+
+  /** A Troll immune to Hearts (so Diamond/Spade plays always land) with a Trailer behind it so a kill never ends the mission. */
+  function startPilgrimMission(trollHealth: number): GameState {
+    const troll: LegacyEnemySpec = { name: 'Troll', suit: 'H', health: trollHealth, attack: 0 };
+    const trailer: LegacyEnemySpec = { name: 'Trailer', suit: 'H', health: 100, attack: 0 };
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'pilgrim-mage-test',
+      party: buildInitialParty(),
+      enemies: [troll, trailer],
+      jesterCount: 0,
+      ascendingZone: true,
+      presetMissionZone: [puppy], // the chain stands at 1 — the next slot needs a 2
+    });
+    const state = ensureOk(res).state;
+    state.tavernDeck = []; // an empty reserve deck means the Mage's reveal has nothing to turn up, keeping the play deterministic
+    return state;
+  }
+
+  const mage2: SuitedCard = { id: 'mage-2', kind: 'suited', suit: 'D', rank: '2', name: 'Bram', arcane: true };
+  const pilgrim2: Card = { id: 'pilgrim-2', kind: 'suited', suit: 'S', rank: '2', name: 'Old Yarrow', pilgrim: true };
+
+  it('THE MOTIVATING CASE: a Pilgrim comboed into a killing Mage attack is claimable into the ascending chain, and only the leftovers burn', () => {
+    let state = startPilgrimMission(4); // 2 + 2 — the combo is an exact kill
+    state = rig(state, [mage2, pilgrim2, suited('C', '9')]); // the spare 9 just keeps the hand non-empty after the play
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: 'p0', cardIds: [mage2.id, pilgrim2.id] })).state;
+
+    // The kill landed, and the Mage attack's cards did NOT vanish into the banish pile — they're sitting in the
+    // kill's claim pool, marked as owing a banish if nobody takes them.
+    expect(state.currentEnemy?.name).toBe('Trailer');
+    expect(state.zoneOpenForPlacement).toBe(true);
+    expect(state.zoneCommittedPlay.map((c) => c.id).sort()).toEqual(['mage-2', 'pilgrim-2']);
+    expect([...state.deferredMageBanishIds].sort()).toEqual(['mage-2', 'pilgrim-2']);
+    expect(state.banishPile.some((c) => c.id === pilgrim2.id)).toBe(false);
+
+    // Claim the Pilgrim into the chain — under the old immediate-banish rule it was already gone for good here.
+    state = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: 'p0', cardId: pilgrim2.id })).state;
+    expect(state.missionZone.map((c) => c.id)).toEqual(['puppy', 'pilgrim-2']);
+    expect(state.deferredMageBanishIds).toEqual(['mage-2']); // claiming cancels that card's banish
+
+    // Closing the window collects the deferred banish on what's left: the Mage card burns, the Pilgrim stays.
+    state = ensureOk(applyAction(state, { type: 'YIELD', playerId: 'p0' })).state;
+    expect(state.zoneCommittedPlay).toEqual([]);
+    expect(state.deferredMageBanishIds).toEqual([]);
+    expect(state.banishPile.some((c) => c.id === mage2.id)).toBe(true);
+    expect(state.discardPile.some((c) => c.id === mage2.id)).toBe(false); // still a banish, not a discard
+    expect(state.missionZone.map((c) => c.id)).toEqual(['puppy', 'pilgrim-2']);
+    expect(state.banishPile.some((c) => c.id === pilgrim2.id)).toBe(false);
+  });
+
+  it('an unclaimed Mage-attack card still burns when the window closes, while an ordinary card from the same kill only discards', () => {
+    let state = startPilgrimMission(6); // an ordinary 2 first, then the 2+2 Mage combo finishes it
+    const ordinary: Card = { id: 'ordinary-2', kind: 'suited', suit: 'D', rank: '2', pilgrim: true };
+    state = rig(state, [ordinary]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: 'p0', cardIds: [ordinary.id] })).state;
+
+    state = rig(state, [mage2, pilgrim2, suited('C', '9')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: 'p0', cardIds: [mage2.id, pilgrim2.id] })).state;
+    expect(state.zoneCommittedPlay.map((c) => c.id).sort()).toEqual(['mage-2', 'ordinary-2', 'pilgrim-2']);
+
+    state = ensureOk(applyAction(state, { type: 'YIELD', playerId: 'p0' })).state; // claim nothing at all
+    expect(state.banishPile.map((c) => c.id).sort()).toEqual(['mage-2', 'pilgrim-2']);
+    expect(state.discardPile.some((c) => c.id === ordinary.id)).toBe(true); // the non-Mage card discards as always
+  });
+
+  it("a Mage attack that doesn't kill leaves its cards in play on the Troll, and a later kill hands them to the claim window", () => {
+    let state = startPilgrimMission(8); // the 2+2 combo leaves it at 4 damage of 8
+    state = rig(state, [mage2, pilgrim2, suited('C', '9')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: 'p0', cardIds: [mage2.id, pilgrim2.id] })).state;
+
+    // Deferred: still on the Troll's table, marked, and nowhere near the banish pile.
+    expect(state.currentEnemy?.name).toBe('Troll');
+    expect(state.currentEnemy?.tableCards.map((c) => c.id).sort()).toEqual(['mage-2', 'pilgrim-2']);
+    expect([...(state.currentEnemy?.mageAttackCardIds ?? [])].sort()).toEqual(['mage-2', 'pilgrim-2']);
+    expect(state.banishPile).toEqual([]);
+    expect(state.zoneCommittedPlay).toEqual([]); // no kill yet, so no claim window
+
+    // Finish the Troll off on a later turn with an ordinary card.
+    const killer: Card = { id: 'killer-4', kind: 'suited', suit: 'D', rank: '4', pilgrim: true };
+    state = rig(state, [killer]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: 'p0', cardIds: [killer.id] })).state;
+
+    expect(state.currentEnemy?.name).toBe('Trailer');
+    expect(state.zoneCommittedPlay.map((c) => c.id).sort()).toEqual(['killer-4', 'mage-2', 'pilgrim-2']);
+    expect([...state.deferredMageBanishIds].sort()).toEqual(['mage-2', 'pilgrim-2']);
+    // The Pilgrim from that earlier Mage attack is still claimable at this kill.
+    state = ensureOk(applyAction(state, { type: 'PLACE_IN_ZONE', playerId: 'p0', cardId: pilgrim2.id })).state;
+    expect(state.missionZone.map((c) => c.id)).toEqual(['puppy', 'pilgrim-2']);
+  });
+
+  it("outside Mission 8 there's no claim window, so a killing Mage attack banishes its cards then and there", () => {
+    const boss: LegacyEnemySpec = { name: 'Ogre', suit: 'H', health: 4, attack: 0 };
+    const trailer: LegacyEnemySpec = { name: 'Trailer', suit: 'H', health: 100, attack: 0 };
+    let state = startMission(1, [boss, trailer]);
+    state = rig(state, [mage2, pilgrim2, suited('C', '9')]);
+    state.tavernDeck = [];
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage2.id, pilgrim2.id] })).state;
+    expect(state.currentEnemy?.name).toBe('Trailer');
+    expect(state.banishPile.map((c) => c.id).sort()).toEqual(['mage-2', 'pilgrim-2']);
   });
 });
 

@@ -279,6 +279,16 @@ export interface EnemyState {
   /** All cards played against this enemy so far this fight (go to discard together on defeat). */
   tableCards: Card[];
   /**
+   * Legacy-only (Mission 3+), John's ruling (2026-09-04, revised): the ids of the `tableCards` above that came
+   * from a Mage's own attack. A Mage attack no longer banishes its cards on the spot — they stay in the play
+   * area alongside every other card played against THIS enemy (which is why they're tracked per-enemy: two
+   * different enemies can each be sitting on their own deferred set), and are only banished once this enemy is
+   * defeated, AFTER any on-kill claim effect has had its chance at them (see engine.ts's
+   * settleMageAttackCards / finishEnemyDefeatTail). Purely a bookkeeping tag: a tagged card is an ordinary
+   * table card in every other respect, and nothing tallies it differently before the kill.
+   */
+  mageAttackCardIds: string[];
+  /**
    * Legacy-only (Mission 10), set only for enemies built by GameState.corruptedPartyEnemies: the original,
    * pristine party card this enemy was twisted from (see deck.ts's buildCorruptedPartyEnemies). Unrelated to
    * `corrupted` above — a Mission 10 enemy is immune to its own class exactly like any other enemy (per the
@@ -452,14 +462,15 @@ export interface GameState {
    * or lose, exact hit or overkill. The Mage's OWN player (`pendingPlayerIds` holds just that one attacker id,
    * kept as an array for shape-compatibility with every other pending-player-queue field) may bank one of
    * `cards` that's actually a Mage card onto the reserve deck via RESOLVE_AZURE_EMBLEM instead of it being
-   * banished, or decline by omitting a card — whatever isn't saved is banished regardless. `cards` holds the
-   * WHOLE play's own cards directly (not IDs to re-find in enemy.tableCards), since John's house rule
-   * (2026-09-04) pulls them off the table and banishes them unconditionally, even when this same play also
-   * landed the kill and the enemy (and its tableCards) are already gone by the time this window opens. See
-   * ChanterResolution for `onResolved` — this window can open whether or not the play defeated the enemy, the
-   * same as a chant or Regrowth can.
+   * banished, or decline by omitting a card — whatever isn't saved goes on to the play's ordinary deferred fate
+   * (see EnemyState.mageAttackCardIds: back into the play area if the enemy survived, or banished/handed to the
+   * kill's claim window if it didn't). `cards` holds the WHOLE play's own cards directly (not IDs to re-find in
+   * enemy.tableCards), because they're held aside from the table across this window — including when this same
+   * play also landed the kill and the enemy (and its tableCards) are already gone by the time it opens; that's
+   * also why `killedEnemy` is recorded here rather than re-derived on resolution. See ChanterResolution for
+   * `onResolved` — this window can open whether or not the play defeated the enemy, same as a chant or Regrowth.
    */
-  azureEmblemWindow: { pendingPlayerIds: string[]; cards: SuitedCard[]; onResolved: ChanterResolution } | null;
+  azureEmblemWindow: { pendingPlayerIds: string[]; cards: SuitedCard[]; killedEnemy: boolean; onResolved: ChanterResolution } | null;
   /**
    * Legacy-only (Mission 3+), sourced from a full solo playthrough (see tutorial_vids/summaries/mission-3.md —
    * "Meet Me at the Table"): the open Mage reveal window. Playing a Mage card (or a card carrying a bonus Mage
@@ -733,9 +744,20 @@ export interface GameState {
    * placement removes its card from this pool, not from any hand — this is the "at no extra cost" half of the
    * sourced fix (see GameAction's PLACE_IN_ZONE). Multiple kills in the same open window all add to this same
    * pool rather than replacing it. Whatever's left unclaimed once the window closes (finishAdvanceToNextPlayer)
-   * or the zone purges at 10 (placeInZone) falls to the discard pile like an ordinary kill's cards always do.
+   * or the zone purges at 10 (placeInZone) falls to the discard pile like an ordinary kill's cards always do —
+   * except for cards tagged in `deferredMageBanishIds` below, which are banished at that same moment instead.
    */
   zoneCommittedPlay: Card[];
+  /**
+   * Legacy-only (Mission 8), John's ruling (2026-09-04, revised): the ids of `zoneCommittedPlay` cards that came
+   * from a Mage's own attack (see EnemyState.mageAttackCardIds). The kill that freed them is the moment their
+   * deferred banish comes due, but Mission 8's claim window (zoneOpenForPlacement) deliberately outlives the
+   * kill — so they sit here, fully claimable into the ascending chain, and are banished rather than discarded
+   * only once the window closes with them still unclaimed. Claiming one into the zone cancels its banish
+   * outright; this is exactly the case the rule change exists for (a Pilgrim spent in a Mage attack used to be
+   * gone for good, taking the 1-10 chain with it).
+   */
+  deferredMageBanishIds: string[];
   /** Legacy-only (Mission 8): true once the ascending zone has purged at 10 — PLACE_IN_ZONE is rejected for the rest of the mission. */
   zoneClosed: boolean;
   /**
@@ -1191,7 +1213,7 @@ export interface ClientGameState {
   /** See GameState.kinfolkBankedThisTurn. */
   kinfolkBankedThisTurn: boolean;
   /** See GameState.azureEmblemWindow. Public information — it's on the table. */
-  azureEmblemWindow: { pendingPlayerIds: string[]; cards: SuitedCard[]; onResolved: ChanterResolution } | null;
+  azureEmblemWindow: { pendingPlayerIds: string[]; cards: SuitedCard[]; killedEnemy: boolean; onResolved: ChanterResolution } | null;
   /** See GameState.mageReveal. Public information, same as every other pending-choice window. */
   mageReveal: {
     playerId: string;
@@ -1259,6 +1281,8 @@ export interface ClientGameState {
   zoneOpenForPlacement: boolean;
   /** See GameState.zoneCommittedPlay. Public information — it's the cards that were just played, on the table. */
   zoneCommittedPlay: Card[];
+  /** See GameState.deferredMageBanishIds. Public information — which committed cards burn if nobody claims them. */
+  deferredMageBanishIds: string[];
   /** See GameState.zoneClosed. */
   zoneClosed: boolean;
   /** See GameState.zonePurge. Public information — it's on the table. */
