@@ -58,6 +58,7 @@ export function makeEnemy(suit: Suit, rank: 'J' | 'Q' | 'K'): EnemyState {
     blockedSpadesShield: 0,
     immunityBroken: false,
     tableCards: [],
+    mageAttackCardIds: [],
   };
 }
 
@@ -76,6 +77,7 @@ export function makeLegacyEnemy(spec: LegacyEnemySpec): EnemyState {
     blockedSpadesShield: 0,
     immunityBroken: false,
     tableCards: [],
+    mageAttackCardIds: [],
   };
 }
 
@@ -255,6 +257,7 @@ export function buildCorruptedPartyEnemies(
       blockedSpadesShield: 0,
       immunityBroken: false,
       tableCards: [],
+      mageAttackCardIds: [],
       sourceCard: card,
     };
   });

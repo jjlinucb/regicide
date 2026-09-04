@@ -180,9 +180,9 @@ function finishAdvanceToNextPlayer(state: GameState, idleYield = false): void {
   state.zoneOpenForPlacement = false;
   if (state.zoneCommittedPlay.length > 0) {
     // Whatever's left unclaimed from the window's kill(s), once the window closes for good, falls to the
-    // discard pile the same way an ordinary kill's played cards always do (see finishEnemyDefeatTail).
-    pushToDiscardPile(state, state.zoneCommittedPlay);
-    state.zoneCommittedPlay = [];
+    // discard pile the same way an ordinary kill's played cards always do (see finishEnemyDefeatTail) — except
+    // cards spent on a Mage attack, whose deferred banish this is the last moment to collect on.
+    releaseZoneCommittedPlay(state);
   }
   checkForStuckLoss(state, idleYield);
 }
@@ -1285,7 +1285,14 @@ function dealDamageAndCheckDefeat(
     // wounds healed, to be fought again later (see GameState.exactKillOnly). Exempted when forcedPlay is true —
     // see this function's own doc comment.
     log(state, `${enemyLabel(enemy)} shrugs off the overkill and slinks to the back of the line, wounds healed!`);
-    state.discardPile.push(...enemy.tableCards);
+    // This enemy leaves play without ever being defeated, and it comes back as a fresh fight — so its table is
+    // cleared here rather than at a kill. Cards spent on an earlier Mage attack against it can never be claimed
+    // now (nothing will ever "defeat" this instance of the fight), so their deferred banish comes due here
+    // instead of quietly turning into an ordinary discard (see EnemyState.mageAttackCardIds).
+    const marked = new Set(enemy.mageAttackCardIds);
+    state.discardPile.push(...enemy.tableCards.filter((c) => !marked.has(c.id)));
+    banishCards(state, enemy.tableCards.filter((c) => marked.has(c.id)));
+    enemy.mageAttackCardIds = [];
     enemy.damageTaken = 0;
     enemy.spadesShield = 0;
     enemy.blockedSpadesShield = 0;
@@ -1532,15 +1539,25 @@ function finishEnemyDefeatTail(
     // placement no longer costs a fresh hand card — it instead reuses a card already committed to THIS kill's
     // own winning attack, at no extra cost. Hold this kill's played cards here instead of discarding them
     // immediately; whatever isn't claimed by a placement gets swept to the discard pile once the placement
-    // window closes (finishAdvanceToNextPlayer) or the zone purges at 10 (placeInZone).
+    // window closes (finishAdvanceToNextPlayer) or the zone purges at 10 (placeInZone). Cards spent on an
+    // earlier Mage attack against this enemy carry their deferred-banish mark across with them — claimable into
+    // the chain like anything else here, but burned rather than discarded if they're still unclaimed at close.
     state.zoneCommittedPlay.push(...enemy.tableCards);
+    state.deferredMageBanishIds.push(...enemy.mageAttackCardIds);
   } else {
-    // A Mage's own attack cards (attackIncludesMage) never reach this pile at all any more — they're pulled off
-    // the table and banished (or saved via Azure Emblem) unconditionally, before this function ever runs, at
-    // continueResolveCommittedPlay's magePlayCards/resolveMagePlayCards (John's house rule, 2026-09-04). Whatever
-    // is still sitting in enemy.tableCards here is everything ELSE — earlier turns' non-Mage plays against this
-    // same enemy — which falls to the plain discard pile like any other kill.
-    pushToDiscardPile(state, enemy.tableCards);
+    // The kill is the moment an earlier Mage attack's deferred banish comes due (John's ruling, 2026-09-04 as
+    // revised — see EnemyState.mageAttackCardIds). The kill's own claim effects have already run above (Mission
+    // 6's vengeance sacrifice can even pull a marked card out of the table into the mission zone, sparing it),
+    // so whatever's still marked here burns; every other card played against this enemy falls to the plain
+    // discard pile as always. The killing play's OWN cards aren't in this pile — see
+    // continueResolveCommittedPlay's magePlayCards / settleMageAttackCards, which settle them separately.
+    const marked = new Set(enemy.mageAttackCardIds);
+    const toBanish = enemy.tableCards.filter((c) => marked.has(c.id));
+    pushToDiscardPile(state, enemy.tableCards.filter((c) => !marked.has(c.id)));
+    if (toBanish.length > 0) {
+      banishCards(state, toBanish);
+      log(state, `${toBanish.length} card(s) spent on earlier Mage attacks burn away as ${enemyLabel(enemy)} falls.`);
+    }
   }
   if (state.ruleset === 'legacy' && state.restoredCardMechanic) {
     // Mission 12's cleanup, step three: banish the ENTIRE discard pile too — order preserved, right after the
@@ -1734,6 +1751,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.ascendingZone = false;
   state.zoneOpenForPlacement = false;
   state.zoneCommittedPlay = [];
+  state.deferredMageBanishIds = [];
   state.zoneClosed = false;
   state.zonePurge = null;
   state.chanterWindow = null;
@@ -1953,6 +1971,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.ascendingZone = action.ascendingZone ?? false;
   state.zoneOpenForPlacement = false;
   state.zoneCommittedPlay = [];
+  state.deferredMageBanishIds = [];
   state.zoneClosed = false;
   state.zonePurge = null;
   state.chanterWindow = null;
@@ -2297,13 +2316,14 @@ function continueResolveCommittedPlay(
   // team-damage step entirely (see finishEnemyDefeatTail) — a documented mechanic missing from the shipped
   // version. Inert on every other mission, since guardianCards is always empty there.
   const attackIncludesMage = state.ruleset === 'legacy' && cards.some(isMageCard);
-  // John's house rule (2026-09-04): a Mage's own attack ALWAYS banishes the cards this specific play used —
-  // win, lose, exact hit, or overkill, no exception — never just the eventual discard an ordinary kill gets.
-  // Pulled off the enemy's table now, before dealDamageAndCheckDefeat runs, so every mission-specific kill
-  // branch below (pileTopEnemyBonus/ascendingZone/restoredCardMechanic/zoneVengeanceOnKill/plain discard) — all
-  // of which sweep whatever's LEFT in enemy.tableCards — naturally never sees these cards at all, the same way
-  // they'd behave if this attack hadn't killed anything. Their actual fate (banished outright, or saved to the
-  // reserve deck's top via Azure Emblem) is decided below, once we know how this play's own resolution ends.
+  // John's ruling (2026-09-04, revised): a Mage's own attack still costs this play's cards, but the banish is
+  // DEFERRED — they stay in the play area until the enemy they were spent on is defeated, and only then are
+  // they banished, after any on-kill claim effect has had its chance at them (see settleMageAttackCards).
+  // They're held aside from the table across the play's own resolution — before dealDamageAndCheckDefeat runs —
+  // purely so the Azure Emblem window (which may still bank one of them) resolves before they're committed
+  // anywhere; settleMageAttackCards then puts them back on the enemy's table (tagged, if it survived) or hands
+  // them to the kill's own cleanup (if it didn't). Every mission-specific kill branch below therefore still
+  // sees only the cards this play DIDN'T contribute, exactly as before.
   const magePlayCards = attackIncludesMage
     ? cards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited')
     : [];
@@ -2317,10 +2337,11 @@ function continueResolveCommittedPlay(
   if (state.phase !== 'IN_PROGRESS') {
     // The mission just ended (WON/LOST) on this exact play — same reasoning as chant/regrowth silently skipping
     // their own windows here (nothing left to resume into, no more turns coming): Azure Emblem can't open a
-    // pending choice that would never get resolved either, so these cards are banished outright instead, same
-    // as the no-relic case, just for a different reason. Without this, they'd otherwise be pulled off the
-    // enemy's table (above) and then simply vanish from every pile — never banished, never discarded.
-    if (magePlayCards.length > 0) banishCards(state, magePlayCards);
+    // pending choice that would never get resolved either, so the cards settle straight away with no window.
+    // A WON settles as a kill (the last enemy died, so the deferred banish is due); a LOST settles as a
+    // survival — the enemy was never defeated, so its play area, deferred cards and all, is simply where the
+    // mission ended.
+    settleMageAttackCards(state, magePlayCards, defeated);
     return ok(state);
   }
 
@@ -2344,7 +2365,7 @@ function continueResolveCommittedPlay(
     // the killing blow included — resuming whatever dealDamageAndCheckDefeat already decided (continuing
     // against the new enemy, a pending zone-vengeance/rescue/relief choice, etc.) once it's settled.
     if (magePlayCards.length > 0) {
-      return resolveMagePlayCards(state, player.id, magePlayCards, { kind: 'resumeResolved', turnPhase: state.turnPhase, pendingDamage: state.pendingDamage });
+      return resolveMagePlayCards(state, player.id, magePlayCards, true, { kind: 'resumeResolved', turnPhase: state.turnPhase, pendingDamage: state.pendingDamage });
     }
     return ok(state); // enemy was defeated, same player continues against the next one
   }
@@ -2362,11 +2383,12 @@ function continueResolveCommittedPlay(
     return beginRegrowth(state, { kind: 'deferredAttack', blockNextAttack: guardianBlocksNextAttack });
   }
 
-  // A Mage's own attack always banishes this play's cards (see magePlayCards above) — but if the AZURE_EMBLEM
-  // relic (Mission 6) is unlocked, the Mage's OWN player gets one chance first to redirect ONE of this play's
-  // Mage card(s) onto the top of the reserve deck instead, via RESOLVE_AZURE_EMBLEM (see resolveMagePlayCards).
+  // This play's Mage-attack cards go back into the play area, marked for the deferred banish (see
+  // magePlayCards above) — but if the AZURE_EMBLEM relic (Mission 6) is unlocked, the Mage's OWN player gets one
+  // chance first to pull ONE of this play's Mage card(s) out to the top of the reserve deck instead, via
+  // RESOLVE_AZURE_EMBLEM (see resolveMagePlayCards).
   if (magePlayCards.length > 0) {
-    return resolveMagePlayCards(state, player.id, magePlayCards, { kind: 'deferredAttack', blockNextAttack: guardianBlocksNextAttack });
+    return resolveMagePlayCards(state, player.id, magePlayCards, false, { kind: 'deferredAttack', blockNextAttack: guardianBlocksNextAttack });
   }
 
   // John's house rule: a claimed/used Jester's own synthetic attack also spares the claimant the enemy's
@@ -2930,6 +2952,29 @@ function banishForRescue(state: GameState, action: Extract<GameAction, { type: '
 }
 
 /**
+ * Legacy-only (Mission 8): empties the placement window's pool (see GameState.zoneCommittedPlay) once the window
+ * closes for good — at the end of the turn it was opened on (finishAdvanceToNextPlayer) or the instant the chain
+ * completes at 10 (placeInZone). Unclaimed cards fall to the discard pile like any ordinary kill's played cards,
+ * EXCEPT those spent on a Mage attack (see GameState.deferredMageBanishIds): this is the last moment their
+ * deferred banish can come due, since nobody claimed them into the chain.
+ */
+function releaseZoneCommittedPlay(state: GameState): void {
+  if (state.zoneCommittedPlay.length === 0) {
+    state.deferredMageBanishIds = [];
+    return;
+  }
+  const marked = new Set(state.deferredMageBanishIds);
+  const toBanish = state.zoneCommittedPlay.filter((c) => marked.has(c.id));
+  pushToDiscardPile(state, state.zoneCommittedPlay.filter((c) => !marked.has(c.id)));
+  if (toBanish.length > 0) {
+    banishCards(state, toBanish);
+    log(state, `${toBanish.length} unclaimed card(s) from the Mage attack burn away.`);
+  }
+  state.zoneCommittedPlay = [];
+  state.deferredMageBanishIds = [];
+}
+
+/**
  * Mission 8 only: the ascending mission zone's 10-card purge. The zone's cards already spilled into the
  * discard pile by the caller; this just closes the zone for good and opens the Ultimate Banishment window for
  * `player` to resolve via RESOLVE_ZONE_PURGE.
@@ -2974,6 +3019,9 @@ function placeInZone(state: GameState, action: Extract<GameAction, { type: 'PLAC
   }
 
   state.zoneCommittedPlay = state.zoneCommittedPlay.filter((c) => c.id !== card.id);
+  // Claiming a card into the chain cancels the deferred banish it was carrying, if any — the whole point of
+  // holding a Mage attack's cards in play until the kill (see GameState.deferredMageBanishIds).
+  state.deferredMageBanishIds = state.deferredMageBanishIds.filter((id) => id !== card.id);
   state.missionZone.push(card);
   state.lastActionWasYield[state.currentPlayerIndex] = false;
 
@@ -2986,9 +3034,11 @@ function placeInZone(state: GameState, action: Extract<GameAction, { type: 'PLAC
   }
 
   if (required === 10) {
-    state.discardPile.push(...state.missionZone, ...state.zoneCommittedPlay);
+    // The window closes here too, so anything still unclaimed settles now (Mage-attack leftovers burn rather
+    // than spilling — see releaseZoneCommittedPlay) before the zone's own cards spill for the purge.
+    releaseZoneCommittedPlay(state);
+    state.discardPile.push(...state.missionZone);
     state.missionZone = [];
-    state.zoneCommittedPlay = [];
     state.zoneImmuneSuits = [];
     return beginZonePurge(state, player);
   }
@@ -3224,48 +3274,102 @@ function resolveRegrowth(state: GameState, action: Extract<GameAction, { type: '
 }
 
 /**
- * Legacy-only (Mission 3+), John's ruling (2026-09-04): a Mage's own attack always banishes the cards THIS
- * SPECIFIC PLAY used — win, lose, exact hit, or overkill, no exception (see continueResolveCommittedPlay's
- * magePlayCards, already pulled off the enemy's table by the time this runs). If the 'AZURE_EMBLEM' relic
- * (Mission 6) is unlocked, the Mage's OWN player first gets one chance to redirect ONE of this play's actual
- * Mage card(s) onto the top of the reserve deck instead, via RESOLVE_AZURE_EMBLEM — whatever isn't saved is
- * banished regardless. Without the relic, everything is banished immediately with no window at all.
- * `onResolved` (see ChanterResolution) carries what to do once that choice (if any) is made — the play may have
- * also landed the killing blow, so this mirrors beginChant/beginRegrowth's own resume pattern exactly.
+ * Legacy-only (Mission 3+), John's ruling (2026-09-04, revised): settles the cards a Mage's own attack spent
+ * (see continueResolveCommittedPlay's magePlayCards, held aside from the enemy's table by the time this runs).
+ * The banish is DEFERRED, not immediate:
+ *
+ * - `killedEnemy` false — the enemy survived this attack, so the cards go back into the play area on its table,
+ *   tagged in `mageAttackCardIds`. They're ordinary table cards until that enemy dies (nothing tallies them
+ *   differently, and further Mage attacks on the same enemy just add to the same tag list); the tag only decides
+ *   discard-vs-banish at the eventual kill (see finishEnemyDefeatTail). If the enemy is never defeated at all —
+ *   the mission is lost, or it's recycled out of play by some other effect — the play area is simply where they
+ *   stay.
+ * - `killedEnemy` true — this very attack landed the kill, so the deferred banish comes due immediately, routed
+ *   exactly the way finishEnemyDefeatTail routes the same kill's other table cards: into Mission 8's open
+ *   claim window (zoneCommittedPlay, still claimable into the ascending chain — banished only if nobody takes
+ *   them), or straight to the banish pile everywhere else.
+ *
+ * `cards` is the whole play's own cards, not just its Mage card(s) — a Pilgrim or any other card comboed into a
+ * Mage attack pays the same price, which is exactly why the claim window matters (a Mission 8 Pilgrim spent this
+ * way used to be gone for good, taking the 1-10 chain with it).
+ */
+function settleMageAttackCards(state: GameState, cards: Extract<Card, { kind: 'suited' }>[], killedEnemy: boolean): void {
+  if (cards.length === 0) return;
+  const label = cards.length > 1 ? 'The cards used in the Mage attack' : 'The card used in the Mage attack';
+  if (!killedEnemy) {
+    const enemy = state.currentEnemy;
+    if (!enemy) {
+      // Defensive: no enemy left to hold them (shouldn't happen — a play that empties the castle deck always
+      // reports killedEnemy). Banishing beats letting them vanish from every pile.
+      banishCards(state, cards);
+      return;
+    }
+    enemy.tableCards.push(...cards);
+    enemy.mageAttackCardIds.push(...cards.map((c) => c.id));
+    log(state, `${label} stay in play, marked — they burn only once ${enemyLabel(enemy)} falls.`);
+    return;
+  }
+  if (state.ruleset === 'legacy' && state.ascendingZone && !state.zoneClosed && state.zoneOpenForPlacement) {
+    // Mission 8: the kill opened the placement window, so these join the pool it draws from — claimable into
+    // the ascending chain first, banished (not discarded, unlike the rest of the pool) if nobody claims them.
+    state.zoneCommittedPlay.push(...cards);
+    state.deferredMageBanishIds.push(...cards.map((c) => c.id));
+    log(state, `${label} are free to be placed in the mission zone by this kill — whatever is left over burns.`);
+    return;
+  }
+  banishCards(state, cards);
+  log(state, `${label} ${cards.length > 1 ? 'are' : 'is'} banished as the enemy falls.`);
+}
+
+/**
+ * Legacy-only (Mission 3+): hands this play's Mage-attack cards to settleMageAttackCards, first offering the
+ * 'AZURE_EMBLEM' relic's (Mission 6) window if the campaign has it — the Mage's OWN player gets one chance to
+ * pull ONE of this play's actual Mage card(s) out to the top of the reserve deck, via RESOLVE_AZURE_EMBLEM,
+ * before the rest go on to their deferred fate. Without the relic there's no window at all.
+ *
+ * JUDGMENT CALL (see the PR that deferred the banish): the emblem's window still opens per PLAY, where it
+ * always has, rather than moving to the kill where the banish now lands — that keeps its one-save-per-Mage-play
+ * allowance and its existing UI intact, and a card it banks is saved outright rather than merely deferred.
+ *
+ * `killedEnemy` — see settleMageAttackCards; recorded on the window so it still settles correctly once the
+ * player answers. `onResolved` (see ChanterResolution) carries what to do once that choice (if any) is made —
+ * the play may have also landed the killing blow, so this mirrors beginChant/beginRegrowth's resume pattern.
  */
 function resolveMagePlayCards(
   state: GameState,
   playerId: string,
   cards: Extract<Card, { kind: 'suited' }>[],
+  killedEnemy: boolean,
   onResolved: ChanterResolution,
 ): EngineResult {
   if (!state.relics.includes('AZURE_EMBLEM')) {
-    banishCards(state, cards);
-    log(state, `${cards.length > 1 ? 'The cards used in the attack are' : 'The card used in the attack is'} banished.`);
+    settleMageAttackCards(state, cards, killedEnemy);
     return runChantResolution(state, onResolved);
   }
-  state.azureEmblemWindow = { pendingPlayerIds: [playerId], cards, onResolved };
+  state.azureEmblemWindow = { pendingPlayerIds: [playerId], cards, killedEnemy, onResolved };
   state.turnPhase = 'AWAIT_AZURE_EMBLEM';
-  log(state, "Azure Emblem: the Mage's own player may bank one of this play's Mage card(s) onto the reserve deck instead of it being banished.");
+  log(state, "Azure Emblem: the Mage's own player may bank one of this play's Mage card(s) onto the reserve deck, sparing it the attack's eventual banish.");
   return ok(state);
 }
 
 /** Legacy-only (Mission 6): the attacking player resolves their own open Azure Emblem window (see GameState.azureEmblemWindow). */
 function resolveAzureEmblem(state: GameState, action: Extract<GameAction, { type: 'RESOLVE_AZURE_EMBLEM' }>): EngineResult {
   if (state.turnPhase !== 'AWAIT_AZURE_EMBLEM' || !state.azureEmblemWindow) return fail('There is no open Azure Emblem window to resolve.');
-  const { pendingPlayerIds, cards, onResolved } = state.azureEmblemWindow;
+  const { pendingPlayerIds, cards, killedEnemy, onResolved } = state.azureEmblemWindow;
   const [attackerId] = pendingPlayerIds;
   if (action.playerId !== attackerId) return fail("It's not your Azure Emblem window to resolve.");
 
-  let toBanish = cards;
+  let rest = cards;
   if (action.cardId) {
     const banked = cards.find((c) => c.id === action.cardId && isMageCard(c));
     if (!banked) return fail('That card is not eligible to bank via the Azure Emblem.');
     toReserveDeck(state, [banked], 'top');
-    log(state, `${banked.name ?? 'A Mage'} is banked onto the reserve deck instead of being banished (Azure Emblem).`);
-    toBanish = cards.filter((c) => c.id !== banked.id);
+    log(state, `${banked.name ?? 'A Mage'} is banked onto the reserve deck, spared the attack's banish entirely (Azure Emblem).`);
+    rest = cards.filter((c) => c.id !== banked.id);
   }
-  if (toBanish.length > 0) banishCards(state, toBanish);
+  // Everything not banked goes on to the ordinary deferred fate — back into play against a surviving enemy, or
+  // settled now if this play was itself the killing blow (see settleMageAttackCards).
+  settleMageAttackCards(state, rest, killedEnemy);
 
   state.azureEmblemWindow = null;
   state.turnPhase = 'AWAIT_PLAY';
@@ -3425,6 +3529,7 @@ export function createLobbyState(): GameState {
     ascendingZone: false,
     zoneOpenForPlacement: false,
     zoneCommittedPlay: [],
+    deferredMageBanishIds: [],
     zoneClosed: false,
     zonePurge: null,
     chanterCountChoice: null,

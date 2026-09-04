@@ -105,6 +105,8 @@ export function MissionZonePanel({
             <div className="mission-zone-header">
               <span className="mission-zone-caption">
                 Free from the kill just landed — place one below instead of attacking, at no extra cost:
+                {state.deferredMageBanishIds.length > 0 &&
+                  ` ${state.deferredMageBanishIds.length} of these came from a Mage attack and burn for good if nobody claims them this turn.`}
               </span>
             </div>
           )}

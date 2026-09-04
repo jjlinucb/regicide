@@ -586,7 +586,10 @@ export function GamePage({
 
       {isMyAzureEmblemTurn && (
         <div className="jester-picker">
-          <span>🔷 Azure Emblem: pick one of your Mage card(s) below to bank onto the reserve deck, or decline — everything used in this attack is banished either way.</span>
+          <span>
+            🔷 Azure Emblem: pick one of your Mage card(s) below to bank onto the reserve deck, or decline — anything you don't bank stays in
+            play against this enemy and is banished when it falls.
+          </span>
           <EnemyCardPicker
             cards={azureEmblemEligibleCards}
             onChoose={(cardId) => sendAction({ type: 'RESOLVE_AZURE_EMBLEM', playerId: myPlayerId, cardId })}

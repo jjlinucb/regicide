@@ -51,6 +51,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     ascendingZone: state.ascendingZone,
     zoneOpenForPlacement: state.zoneOpenForPlacement,
     zoneCommittedPlay: state.zoneCommittedPlay,
+    deferredMageBanishIds: state.deferredMageBanishIds,
     zoneClosed: state.zoneClosed,
     zonePurge: state.zonePurge,
     chanterCountChoice: state.chanterCountChoice,
