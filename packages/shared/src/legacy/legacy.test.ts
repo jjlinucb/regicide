@@ -701,6 +701,26 @@ describe('legacy: mission playthrough', () => {
     expect(state.players[0].hand.length).toBe(handBefore - 1);
   });
 
+  it("John's house rule, live-play report: a Beast Companion pulled by a Mage's reveal copies the Mage's own strength, not its flat printed value (1)", () => {
+    const enemy: LegacyEnemySpec = { name: 'Warded Foe', suit: 'S', health: 60, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const mage5: SuitedCard = { ...suited('H', '5'), arcane: true };
+    state = rig(state, [mage5]);
+    // Hearts, not Clubs — a Clubs suit here would also double the whole play's damage (Warrior's own power),
+    // which would obscure whether the Beast's value-copy fix is what actually produced the total below.
+    const beast: SuitedCard = { ...suited('H', 'A'), beast: true };
+    state.tavernDeck = [beast, ...state.tavernDeck];
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage5.id] }));
+    state = res.state;
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: beast.id }));
+    state = res.state;
+    // Mage's own 5 + the Beast copying that same 5 = 10 — not 5 + 1 = 6.
+    expect(state.currentEnemy?.damageTaken).toBe(10);
+  });
+
   it('BUG FIX: a corrupted card carries its immunity-ignoring across the whole play, not just its own suit', () => {
     // John's live report from Mission 7: a cursed Ace comboed with a Paladin 10 against a Paladin-immune enemy —
     // the Paladin shield was still blocked, so the enemy's 15 attack landed in full instead of being cut to 5.
@@ -1851,6 +1871,28 @@ describe('legacy: mission 5 mechanics (Reaver reveal-and-add, rolling banish-pil
     expect(state.tavernDeck.length).toBe(reserveBefore - 4);
     expect(state.banishPile.filter((c) => c.kind === 'suited' && c.rank === '2').length).toBe(3);
     expect(state.banishPile.some((c) => c.kind === 'suited' && c.rank === '6')).toBe(true);
+  });
+
+  it("John's house rule, live-play report: a Beast Companion pulled by a Reaver's reveal copies the Reaver card's own strength, not its flat printed value (1)", () => {
+    // Otherwise a Beast Companion torn up by a reveal (no partner card to copy the normal way) would be a
+    // strictly WORSE pull than any other card worth more than 1 — the opposite of how a Beast Companion is
+    // supposed to compare to a plain Animal Companion.
+    const boss: LegacyEnemySpec = { name: 'Sporeling', suit: 'S', health: 100, attack: 1 };
+    let state = startCrimsonMission(1, [boss]);
+    const beast: SuitedCard = { ...suited('C', 'A'), beast: true };
+    state.tavernDeck = [beast, ...state.tavernDeck];
+    state = rig(state, [reaverCard('D', '4')]);
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    state = res.state;
+    state = chooseMaxReaverRevealCount(state);
+    expect(state.turnPhase).toBe('AWAIT_REAVER_REVEAL');
+
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: beast.id }));
+    state = res.state;
+
+    // (4 + 4 copied from the Reaver) * 2 (Reaver's own doubling) = 16 — not (4 + 1) * 2 = 10.
+    expect(state.currentEnemy?.damageTaken).toBe(16);
   });
 
   it('lets the player decline the reveal\'s bonus entirely (John\'s house rule) — revealed cards are still banished, but no value is added', () => {
