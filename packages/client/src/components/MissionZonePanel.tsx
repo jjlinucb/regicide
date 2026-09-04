@@ -5,12 +5,18 @@ import { CardPile } from './CardPile';
 
 function ZoneCardRow({
   cards,
-  placeableCardId,
+  placeableCardIds,
   onPlaceInZone,
 }: {
   cards: Card[];
-  /** The one zoneCommittedPlay card (if any) that currently fills the ascending zone's next slot — see GamePage's placeableZoneCard. */
-  placeableCardId?: string | null;
+  /**
+   * EVERY zoneCommittedPlay card that currently fills the ascending zone's next slot — see GamePage's
+   * placeableZoneCards. More than one can match at once (e.g. a Pilgrim card and an ordinary card of the same
+   * value both freed by the same kill) — each must stay individually clickable so the player can choose the
+   * Pilgrim one (no attack buff) over the ordinary one (buffs the enemy), rather than the game silently picking
+   * whichever one happened to come first.
+   */
+  placeableCardIds?: ReadonlySet<string>;
   onPlaceInZone?: (cardId: string) => void;
 }) {
   if (cards.length === 0) return <span className="mission-zone-empty">empty</span>;
@@ -21,7 +27,7 @@ function ZoneCardRow({
           key={c.id}
           card={c}
           small
-          onClick={onPlaceInZone && c.id === placeableCardId ? () => onPlaceInZone(c.id) : undefined}
+          onClick={onPlaceInZone && placeableCardIds?.has(c.id) ? () => onPlaceInZone(c.id) : undefined}
         />
       ))}
     </div>
@@ -37,12 +43,12 @@ function ZoneCardRow({
  */
 export function MissionZonePanel({
   state,
-  placeableCardId,
+  placeableCardIds,
   onPlaceInZone,
 }: {
   state: ClientGameState;
-  /** See GamePage's placeableZoneCard/canPlaceInZone — null/undefined when no placement is currently legal. */
-  placeableCardId?: string | null;
+  /** See GamePage's placeableZoneCards/canPlaceInZone — empty/undefined when no placement is currently legal. */
+  placeableCardIds?: ReadonlySet<string>;
   onPlaceInZone?: (cardId: string) => void;
 }) {
   // Mission 5's rolling zone (see GameState.rollingZoneCards) is a separate pile from the static missionZone every
@@ -103,7 +109,7 @@ export function MissionZonePanel({
             </div>
           )}
           {state.ascendingZone && state.zoneCommittedPlay.length > 0 && (
-            <ZoneCardRow cards={state.zoneCommittedPlay} placeableCardId={placeableCardId} onPlaceInZone={onPlaceInZone} />
+            <ZoneCardRow cards={state.zoneCommittedPlay} placeableCardIds={placeableCardIds} onPlaceInZone={onPlaceInZone} />
           )}
         </div>
       )}
