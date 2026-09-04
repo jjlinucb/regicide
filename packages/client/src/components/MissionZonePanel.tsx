@@ -3,12 +3,26 @@ import { cardValue } from '@regicide/shared';
 import { PlayingCard } from './PlayingCard';
 import { CardPile } from './CardPile';
 
-function ZoneCardRow({ cards }: { cards: Card[] }) {
+function ZoneCardRow({
+  cards,
+  placeableCardId,
+  onPlaceInZone,
+}: {
+  cards: Card[];
+  /** The one zoneCommittedPlay card (if any) that currently fills the ascending zone's next slot — see GamePage's placeableZoneCard. */
+  placeableCardId?: string | null;
+  onPlaceInZone?: (cardId: string) => void;
+}) {
   if (cards.length === 0) return <span className="mission-zone-empty">empty</span>;
   return (
     <div className="mission-zone-cards">
       {cards.map((c) => (
-        <PlayingCard key={c.id} card={c} small />
+        <PlayingCard
+          key={c.id}
+          card={c}
+          small
+          onClick={onPlaceInZone && c.id === placeableCardId ? () => onPlaceInZone(c.id) : undefined}
+        />
       ))}
     </div>
   );
@@ -21,7 +35,16 @@ function ZoneCardRow({ cards }: { cards: Card[] }) {
  * different mission-specific prose banners with one real, always-in-the-same-place card display, per the physical
  * game's own dedicated "MISSION ZONE" area on the playmat.
  */
-export function MissionZonePanel({ state }: { state: ClientGameState }) {
+export function MissionZonePanel({
+  state,
+  placeableCardId,
+  onPlaceInZone,
+}: {
+  state: ClientGameState;
+  /** See GamePage's placeableZoneCard/canPlaceInZone — null/undefined when no placement is currently legal. */
+  placeableCardId?: string | null;
+  onPlaceInZone?: (cardId: string) => void;
+}) {
   // Mission 5's rolling zone (see GameState.rollingZoneCards) is a separate pile from the static missionZone every
   // other zone mode uses — render whichever one this mission actually feeds, so the card row matches the caption's
   // own total instead of always reading the (permanently empty, for this mission) missionZone.
@@ -79,7 +102,9 @@ export function MissionZonePanel({ state }: { state: ClientGameState }) {
               </span>
             </div>
           )}
-          {state.ascendingZone && state.zoneCommittedPlay.length > 0 && <ZoneCardRow cards={state.zoneCommittedPlay} />}
+          {state.ascendingZone && state.zoneCommittedPlay.length > 0 && (
+            <ZoneCardRow cards={state.zoneCommittedPlay} placeableCardId={placeableCardId} onPlaceInZone={onPlaceInZone} />
+          )}
         </div>
       )}
       {state.pilgrimMechanic && (state.pilgrimZone.length > 0 || state.pilgrimDeckCount > 0) && (

@@ -401,7 +401,15 @@ export function GamePage({
             )}
           </div>
           <div className="z-missionzone">
-            <MissionZonePanel state={state} />
+            <MissionZonePanel
+              state={state}
+              placeableCardId={canPlaceInZone ? placeableZoneCard?.id ?? null : null}
+              onPlaceInZone={
+                canPlaceInZone
+                  ? (cardId) => sendAction({ type: 'PLACE_IN_ZONE', playerId: myPlayerId, cardId })
+                  : undefined
+              }
+            />
           </div>
           <div className="z-players">
             <div className="board-panel">
