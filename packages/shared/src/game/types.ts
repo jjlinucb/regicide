@@ -16,10 +16,12 @@ export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '12' |
  * ARCANE_SURGE doubles a Mage card's own arcane bolt, AEGIS makes a Guardian's shield hold permanently — reducing
  * the enemy's attack to 0 for the rest of the fight instead of blocking just its next attack, WELLSPRING is currently
  * unreachable (Mission 7's sourced reward keeps only the plain rank-7 Druid, so nothing grants it — see
- * legacy/missions.ts's Mission 7 reward and legacy/classes.ts's DRUID entry), ENCORE doubles how many cards everyone
- * draws in a Chanter's chant, and EVERGREEN is Gøran's own signature (see SuitedCard.evergreen) carried here
- * only for type-shape consistency with the other classes. Reaver has no signature ability of its own — its base
- * "Reveal and Add" (see engine.ts's startReaverPhase) already always doubles the play's damage, unconditionally.
+ * legacy/missions.ts's Mission 7 reward and legacy/classes.ts's DRUID entry), and EVERGREEN is Gøran's own
+ * signature (see SuitedCard.evergreen) carried here only for type-shape consistency with the other classes.
+ * Reaver and Chanter have no signature ability of their own: Reaver's base "Reveal and Add" (see engine.ts's
+ * startReaverPhase) already always doubles the play's damage, unconditionally, and Chanter's ENCORE ("doubles how
+ * many cards everyone draws") was removed entirely once the chant's count stopped being tied to any card's
+ * printed value at all (John's house rule, 2026-09-04 — see GameState.chanterCountChoice).
  */
 export type SpecialAbilityId =
   | 'CLEAVE'
@@ -29,7 +31,6 @@ export type SpecialAbilityId =
   | 'ARCANE_SURGE'
   | 'AEGIS'
   | 'WELLSPRING'
-  | 'ENCORE'
   | 'EVERGREEN';
 
 export interface SuitedCard {
@@ -314,6 +315,9 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * resolved via CHOOSE_REAVER_REVEAL_CARD or (declining any bonus) DECLINE_REAVER_REVEAL. AWAIT_SCARLET_WHISTLE_SOLO is Mission 4+ only, gated by the
  * 'SCARLET_WHISTLE' relic (see GameState.scarletWhistleSoloChoice) — opened by a solo player's lone Companion
  * play, resolved via CHOOSE_SCARLET_WHISTLE_DISCARD_CARD or (pairing with nothing) DECLINE_SCARLET_WHISTLE_SOLO.
+ * AWAIT_CHANT_COUNT is Mission 8 only (see GameState.chanterCountChoice), John's house rule (2026-09-04) —
+ * opened by a Chanter card in a play, BEFORE any cards are drawn, resolved via CHOOSE_CHANT_COUNT into
+ * beginChant/AWAIT_CHANT_TRIM.
  */
 export type TurnPhase =
   | 'AWAIT_PLAY'
@@ -324,6 +328,7 @@ export type TurnPhase =
   | 'AWAIT_ZONE_VENGEANCE_CHOICE'
   | 'AWAIT_ZONE_RELIEF_CHOICE'
   | 'AWAIT_ZONE_PURGE'
+  | 'AWAIT_CHANT_COUNT'
   | 'AWAIT_CHANT_TRIM'
   | 'AWAIT_REGROWTH'
   | 'AWAIT_END_OF_TURN'
@@ -732,6 +737,18 @@ export interface GameState {
    */
   zonePurge: { playerId: string } | null;
   /**
+   * Legacy-only (Mission 8), John's house rule (2026-09-04): the open window for choosing HOW MANY cards a
+   * Chanter's chant draws, opened by a Chanter card in a play BEFORE any cards are drawn — same "count chosen
+   * before the effect fires" shape as reaverRevealCountChoice. `playerId` picks any count from 1 up to
+   * `maxCount` (the reserve deck's own current size at the moment the window opened — asking for more
+   * accomplishes nothing, forceDrawCards already stops the instant the deck runs dry) via CHOOSE_CHANT_COUNT,
+   * resolved by resolveChantCount into beginChant. This replaces the old reading where the count was the
+   * Chanter card's own printed value (doubled by the now-removed ENCORE special) — the count has nothing to do
+   * with any card's rank any more. `onResolved` (see ChanterResolution) is carried through to beginChant/
+   * chanterWindow exactly as before.
+   */
+  chanterCountChoice: { playerId: string; onResolved: ChanterResolution; maxCount: number } | null;
+  /**
    * Legacy-only (Mission 8): the open chant window, opened when a Chanter card is played (see SuitedCard.chanter).
    * Every player has already drawn the chant's card count at once, even past their hand limit; `pendingPlayerIds`
    * queues whoever is now over their hand limit and still needs to trim back down via RESOLVE_CHANT, front of
@@ -964,6 +981,14 @@ export type GameAction =
   | { type: 'PLACE_IN_ZONE'; playerId: string; cardId: string }
   /** Legacy-only (Mission 8): resolves an open Ultimate Banishment window after the zone's 10-card purge (see GameState.zonePurge). Any subset of the discard pile (by id) is banished forever; the rest shuffles into the reserve deck. */
   | { type: 'RESOLVE_ZONE_PURGE'; playerId: string; banishCardIds: string[] }
+  /**
+   * Legacy-only (Mission 8), John's house rule (2026-09-04), from AWAIT_CHANT_COUNT: the player whose Chanter
+   * card opened the window (see GameState.chanterCountChoice) picks `count`, from 1 up to the window's own
+   * `maxCount`, for how many cards the chant should actually draw for every player — independent of the
+   * Chanter card's own printed rank. Resolved by resolveChantCount, which then runs beginChant with exactly
+   * that count.
+   */
+  | { type: 'CHOOSE_CHANT_COUNT'; playerId: string; count: number }
   /**
    * Legacy-only (Mission 8): the front-of-queue player in an open chant window (see GameState.chanterWindow)
    * discards exactly enough hand cards to reach their hand limit again, after the chant's mass draw pushed them
@@ -1229,6 +1254,8 @@ export interface ClientGameState {
   zoneClosed: boolean;
   /** See GameState.zonePurge. Public information — it's on the table. */
   zonePurge: { playerId: string } | null;
+  /** See GameState.chanterCountChoice. Public information, same as every other pending-choice window. */
+  chanterCountChoice: { playerId: string; onResolved: ChanterResolution; maxCount: number } | null;
   /** See GameState.chanterWindow. Public information — it's on the table. */
   chanterWindow: { pendingPlayerIds: string[]; onResolved: ChanterResolution } | null;
   /** See GameState.druidWindow. Public information — the dealt cards are face-up on the table. */

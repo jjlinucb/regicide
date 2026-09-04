@@ -2233,20 +2233,15 @@ function continueResolveCommittedPlay(
     log(state, `${druidCards[0].name ?? 'A Druid'} channels Regrowth — the discard pile is dealt out across the table.`);
   }
 
-  // Chanters (Mission 8): playing one opens a chant worth its own card value — every player at the table draws
-  // that many cards at once, even past their hand limit, then whoever ended up over the limit trims back down
-  // one at a time (see beginChant). Encore doubles that card's contribution.
+  // Chanters (Mission 8): playing one opens a chant — every player at the table draws some number of cards at
+  // once, even past their hand limit, then whoever ended up over the limit trims back down one at a time (see
+  // beginChant). John's house rule (2026-09-04): the count is whatever the triggering player freely declares
+  // (see beginChantCountChoice/GameState.chanterCountChoice), with no relation to the Chanter card's own printed
+  // rank at all — this replaces the old "sum of the Chanters' own values, doubled by Encore" reading, which is
+  // why ENCORE no longer exists as a signature ability (see legacy/classes.ts's CHANTER entry). Stacking more
+  // than one Chanter into the same play still opens just the one chant, same as before.
   const chanterCards = resolvingCards.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.chanter));
-  let chantCount = 0;
-  if (state.ruleset === 'legacy' && chanterCards.length > 0) {
-    for (const c of chanterCards) {
-      const base = cardValue(c);
-      const doubled = c.special === 'ENCORE';
-      const amount = doubled ? base * 2 : base;
-      chantCount += amount;
-      log(state, `${c.name ?? 'A Chanter'} leads the chant — every player draws ${amount} card(s) at once${doubled ? ' (Encore)' : ''}.`);
-    }
-  }
+  const chantTriggered = state.ruleset === 'legacy' && chanterCards.length > 0;
 
   // Gøran's Evergreen (Mission 9): playing his card resolves all four base class powers at once — heal, draw,
   // double damage, reduce enemy strength — and always ignores enemy immunity, regardless of which suits are
@@ -2332,8 +2327,8 @@ function continueResolveCommittedPlay(
     // is done rather than resolving a deferred attack against an enemy that's already dead (see
     // ChanterResolution's 'resumeResolved'). The shipped version only ever called beginChant below this early
     // return, so a play that included BOTH a Chanter and the killing blow silently dropped the chant entirely.
-    if (chantCount > 0) {
-      return beginChant(state, chantCount, { kind: 'resumeResolved', turnPhase: state.turnPhase, pendingDamage: state.pendingDamage });
+    if (chantTriggered) {
+      return beginChantCountChoice(state, player.id, { kind: 'resumeResolved', turnPhase: state.turnPhase, pendingDamage: state.pendingDamage });
     }
     // Same reasoning as the chant just above: a Druid's Regrowth fires on ANY play it's part of, the killing
     // blow included, resuming whatever dealDamageAndCheckDefeat already decided once the last player picks.
@@ -2349,8 +2344,8 @@ function continueResolveCommittedPlay(
     return ok(state); // enemy was defeated, same player continues against the next one
   }
 
-  if (chantCount > 0) {
-    return beginChant(state, chantCount, { kind: 'deferredAttack', blockNextAttack: guardianBlocksNextAttack });
+  if (chantTriggered) {
+    return beginChantCountChoice(state, player.id, { kind: 'deferredAttack', blockNextAttack: guardianBlocksNextAttack });
   }
 
   // Mission 7's Regrowth window (see beginRegrowth). Ordered after the chant for the same reason the Azure
@@ -3032,6 +3027,45 @@ function runChantResolution(state: GameState, onResolved: ChanterResolution): En
 }
 
 /**
+ * Legacy-only (Mission 8), John's house rule (2026-09-04): opens the choice for HOW MANY cards a Chanter's
+ * chant should draw, before any cards are actually drawn — the count has nothing to do with the Chanter card's
+ * own printed rank any more (see GameState.chanterCountChoice for why). `playerId` will pick any count from 1
+ * up to the reserve deck's own current size via CHOOSE_CHANT_COUNT / resolveChantCount, which then hands off to
+ * beginChant to actually run the draw. Skipped straight through with no chant at all if the reserve deck is
+ * already empty — there's nothing to choose a count of.
+ */
+function beginChantCountChoice(state: GameState, playerId: string, onResolved: ChanterResolution): EngineResult {
+  if (state.tavernDeck.length === 0) {
+    log(state, 'A Chanter leads the chant, but the reserve deck is empty — nothing to draw.');
+    return runChantResolution(state, onResolved);
+  }
+  state.chanterCountChoice = { playerId, onResolved, maxCount: state.tavernDeck.length };
+  state.turnPhase = 'AWAIT_CHANT_COUNT';
+  log(state, `A Chanter leads the chant — choose how many cards everyone draws (1-${state.tavernDeck.length}).`);
+  return ok(state);
+}
+
+/**
+ * Resolves the AWAIT_CHANT_COUNT window opened by beginChantCountChoice (see GameState.chanterCountChoice):
+ * validates the player's chosen count against [1, maxCount], then hands off to beginChant to actually run the
+ * chant's draw (and any resulting trim window) at exactly that count.
+ */
+function resolveChantCount(state: GameState, action: Extract<GameAction, { type: 'CHOOSE_CHANT_COUNT' }>): EngineResult {
+  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_CHANT_COUNT');
+  if (err) return fail(err);
+  const window = state.chanterCountChoice;
+  if (!window) return fail('There is no open chant to resolve.');
+  if (!Number.isInteger(action.count) || action.count < 1 || action.count > window.maxCount) {
+    return fail(`Choose a count between 1 and ${window.maxCount}.`);
+  }
+
+  const { onResolved } = window;
+  state.chanterCountChoice = null;
+  state.turnPhase = 'AWAIT_PLAY';
+  return beginChant(state, action.count, onResolved);
+}
+
+/**
  * Legacy-only (Mission 8): opens (or immediately clears) a chant — every player at the table draws `count`
  * cards at once, even past their hand limit, then whoever's now over their limit trims back down one player at
  * a time via RESOLVE_CHANT. `onResolved` (see ChanterResolution) is carried through to whenever the chant's tail
@@ -3388,6 +3422,7 @@ export function createLobbyState(): GameState {
     zoneCommittedPlay: [],
     zoneClosed: false,
     zonePurge: null,
+    chanterCountChoice: null,
     chanterWindow: null,
     druidWindow: null,
     capturedPilesActive: false,
@@ -3438,6 +3473,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return placeInZone(draft, action);
     case 'RESOLVE_ZONE_PURGE':
       return resolveZonePurge(draft, action);
+    case 'CHOOSE_CHANT_COUNT':
+      return resolveChantCount(draft, action);
     case 'RESOLVE_CHANT':
       return resolveChant(draft, action);
     case 'RESOLVE_REGROWTH':

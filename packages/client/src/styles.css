@@ -1100,6 +1100,16 @@ button {
   flex-wrap: wrap;
 }
 
+.chanter-count-input {
+  width: 64px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: inherit;
+  font-size: 1rem;
+}
+
 .overlay {
   position: fixed;
   inset: 0;

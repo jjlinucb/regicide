@@ -53,6 +53,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     zoneCommittedPlay: state.zoneCommittedPlay,
     zoneClosed: state.zoneClosed,
     zonePurge: state.zonePurge,
+    chanterCountChoice: state.chanterCountChoice,
     chanterWindow: state.chanterWindow,
     druidWindow: state.druidWindow,
     capturedPilesActive: state.capturedPilesActive,

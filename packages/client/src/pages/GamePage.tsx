@@ -25,6 +25,7 @@ import { ZonePurgePicker } from '../components/ZonePurgePicker';
 import { CapturedPiles } from '../components/CapturedPiles';
 import { EnemyCardPicker } from '../components/EnemyCardPicker';
 import { ReaverRevealCountPicker } from '../components/ReaverRevealCountPicker';
+import { ChanterCountPicker } from '../components/ChanterCountPicker';
 import { RelicsTray } from '../components/RelicsTray';
 import { RegrowthWindow } from '../components/RegrowthWindow';
 
@@ -130,6 +131,12 @@ export function GamePage({
   const placeableZoneCards = state.zoneCommittedPlay.filter((c) => matchesAscendingZoneSlot(c, zoneRequiredValue));
   const placeableZoneCard = placeableZoneCards[0];
   const placeableZoneCardIds = new Set(placeableZoneCards.map((c) => c.id));
+  // John's house rule (2026-09-04): opened by a Chanter card BEFORE anything is drawn — the player freely
+  // declares how many cards the chant draws for everyone, independent of the Chanter card's own printed rank.
+  const isChanterCountWindow = state.turnPhase === 'AWAIT_CHANT_COUNT' && Boolean(state.chanterCountChoice);
+  const chanterCountPlayerId = state.chanterCountChoice?.playerId;
+  const isMyChanterCountWindow = isChanterCountWindow && chanterCountPlayerId === myPlayerId;
+
   const isChantWindow = state.turnPhase === 'AWAIT_CHANT_TRIM' && Boolean(state.chanterWindow);
   const chantTrimmerId = state.chanterWindow?.pendingPlayerIds[0];
   const isMyChantTrim = isChantWindow && chantTrimmerId === myPlayerId;
@@ -293,7 +300,11 @@ export function GamePage({
                   ? isMyMageRevealWindow
                     ? `${mageTriggerLabel}'s reveal${mageTriggerIsCursed ? ' (cursed — the chosen card will ignore immunity)' : ''} — choose one card to banish and add to the attack.${mageQueueRemaining > 0 ? ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)` : ''}`
                     : `${state.players.find((p) => p.id === mageRevealPlayerId)?.name} is choosing a card from ${mageTriggerLabel}'s reveal...`
-                  : isReaverRevealCountWindow
+                  : isChanterCountWindow
+                  ? isMyChanterCountWindow
+                    ? 'A Chanter leads the chant — choose how many cards everyone draws, independent of the card\'s own rank.'
+                    : `${state.players.find((p) => p.id === chanterCountPlayerId)?.name} is choosing how many cards the chant draws...`
+                : isReaverRevealCountWindow
                     ? isMyReaverRevealCountWindow
                       ? `${reaverCountTriggerLabel} opens a reveal — choose how many cards to pull off the reserve deck (fewer is safer — every card revealed is banished either way).`
                       : `${state.players.find((p) => p.id === reaverRevealCountPlayerId)?.name} is choosing how many cards to reveal from ${reaverCountTriggerLabel}...`
@@ -618,6 +629,19 @@ export function GamePage({
           <EnemyCardPicker
             cards={state.mageReveal?.candidates ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: myPlayerId, cardId })}
+          />
+        </div>
+      )}
+
+      {isMyChanterCountWindow && (
+        <div className="jester-picker">
+          <span>
+            🎼 A Chanter leads the chant — choose how many cards everyone draws (1-{state.chanterCountChoice?.maxCount}). This has
+            nothing to do with the Chanter card's own rank.
+          </span>
+          <ChanterCountPicker
+            maxCount={state.chanterCountChoice?.maxCount ?? 1}
+            onChoose={(count) => sendAction({ type: 'CHOOSE_CHANT_COUNT', playerId: myPlayerId, count })}
           />
         </div>
       )}
