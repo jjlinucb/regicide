@@ -902,7 +902,7 @@ describe('legacy: mission playthrough', () => {
     expect(state.currentEnemy?.damageTaken).toBe(4);
   });
 
-  it('HOUSE RULE (overrides the sourced default): an exact kill by an attack that included a Mage sends its cards to the discard pile as normal, not the banish pile', () => {
+  it("HOUSE RULE (2026-09-04, supersedes the exact-kill exception below): a Mage's own attack always banishes THIS PLAY's cards — exact kill included, no exception — not just the eventual discard an ordinary kill gets", () => {
     const enemy: LegacyEnemySpec = { name: 'Combo Target', suit: 'S', health: 4, attack: 1 };
     let state = startMission(1, [enemy]);
     const mage4: SuitedCard = { ...suited('H', '4'), arcane: true };
@@ -913,8 +913,8 @@ describe('legacy: mission playthrough', () => {
     state = res.state;
     expect(state.currentEnemy).toBeNull(); // only enemy in the mission — WON
     expect(state.phase).toBe('WON');
-    expect(state.discardPile.some((c) => c.id === mage4.id)).toBe(true);
-    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(false);
+    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(true);
+    expect(state.discardPile.some((c) => c.id === mage4.id)).toBe(false);
   });
 
   it('HOUSE RULE: an overkill by an attack that included a Mage still banishes its cards instead of sending them to the discard pile', () => {
@@ -929,6 +929,47 @@ describe('legacy: mission playthrough', () => {
     expect(state.currentEnemy).toBeNull(); // only enemy in the mission — WON
     expect(state.phase).toBe('WON');
     expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(true);
+    expect(state.discardPile.some((c) => c.id === mage4.id)).toBe(false);
+  });
+
+  it("HOUSE RULE (2026-09-04): a Mage's own attack banishes THIS PLAY's cards immediately even when it does NOT kill the enemy — no more waiting until the enemy eventually dies", () => {
+    const enemy: LegacyEnemySpec = { name: 'Tough Target', suit: 'S', health: 100, attack: 0 };
+    let state = startMission(1, [enemy]);
+    const mage4: SuitedCard = { ...suited('H', '4'), arcane: true };
+    state = rig(state, [mage4]);
+    state.tavernDeck = [];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage4.id] }));
+    state = res.state;
+    expect(state.currentEnemy?.damageTaken).toBe(4); // didn't kill (100 hp)
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === mage4.id)).toBe(false); // pulled off the table already
+    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(true); // banished immediately, no relic to save it
+    expect(state.discardPile.some((c) => c.id === mage4.id)).toBe(false);
+  });
+
+  it("HOUSE RULE scope (2026-09-04): only the cards THIS SPECIFIC PLAY used are banished — an earlier turn's own non-Mage card against the same enemy still just discards normally once the enemy dies", () => {
+    const enemy: LegacyEnemySpec = { name: 'Slow Target', suit: 'S', health: 7, attack: 0 };
+    let state = startMission(1, [enemy]);
+    const earlier = suited('D', '3'); // ordinary Bard card, no damage multiplier, played first
+    state = rig(state, [earlier]);
+    state.tavernDeck = [];
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [earlier.id] }));
+    state = res.state;
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === earlier.id)).toBe(true); // still on the table, not dead yet
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+
+    const mage4: SuitedCard = { ...suited('H', '4'), arcane: true };
+    state.players[0].hand = [mage4]; // 3 (earlier) + 4 (this play) = 7 — an exact kill
+    res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage4.id] }));
+    state = res.state;
+
+    expect(state.currentEnemy).toBeNull(); // only enemy in the mission — WON
+    // Only THIS kill's own Mage card is banished — not the whole table pile.
+    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(true);
+    expect(state.banishPile.some((c) => c.id === earlier.id)).toBe(false);
+    // The earlier, non-Mage card from the previous turn just discards normally, same as any other kill.
+    expect(state.discardPile.some((c) => c.id === earlier.id)).toBe(true);
     expect(state.discardPile.some((c) => c.id === mage4.id)).toBe(false);
   });
 
@@ -2883,7 +2924,11 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
     state = res.state;
 
     expect(state.turnPhase).toBe('AWAIT_AZURE_EMBLEM');
-    expect(state.azureEmblemWindow).toEqual({ pendingPlayerIds: [player0Id], eligibleCardIds: [played.id], blockNextAttack: false });
+    expect(state.azureEmblemWindow).toEqual({
+      pendingPlayerIds: [player0Id],
+      cards: [played],
+      onResolved: { kind: 'deferredAttack', blockNextAttack: false },
+    });
     expect(state.currentEnemy?.damageTaken).toBe(8); // 4 from the normal play + 4 from the chosen reveal card, as usual
   });
 
@@ -2910,7 +2955,7 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
     expect(state.pendingDamage).toBe(10);
   });
 
-  it('lets the Mage\'s own player decline — the card stays on the table (bound for the discard pile like any other)', () => {
+  it("lets the Mage's own player decline — the card is banished outright (John's house rule), never left on the table for an eventual discard", () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     let state = startEmblemMission(2, [boss]);
     state = structuredClone(state);
@@ -2925,8 +2970,36 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
     state = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: player0Id })).state;
 
     expect(state.azureEmblemWindow).toBeNull();
-    expect(state.currentEnemy?.tableCards.some((c) => c.id === played.id)).toBe(true); // left in place, declined
+    expect(state.banishPile.some((c) => c.id === played.id)).toBe(true); // declined the save — banished, not discarded
+    expect(state.discardPile.some((c) => c.id === played.id)).toBe(false);
+    expect(state.currentEnemy?.tableCards.some((c) => c.id === played.id)).toBe(false); // never left on the table at all
     expect(state.turnPhase).toBe('AWAIT_DEFEND');
+  });
+
+  it("HOUSE RULE (2026-09-04): the Azure Emblem window now opens even when the Mage's own attack ALSO lands the kill — it used to be skipped entirely whenever the play was a killing blow", () => {
+    const weak: LegacyEnemySpec = { name: 'Weak Target', suit: 'S', health: 4, attack: 1 };
+    const next: LegacyEnemySpec = { name: 'Next Target', suit: 'D', health: 10, attack: 1 };
+    let state = startEmblemMission(1, [weak, next]);
+    const mage4: SuitedCard = { ...suited('H', '4'), arcane: true }; // exact kill on the 4-health target
+    state = rig(state, [mage4]);
+    state.tavernDeck = [];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage4.id] }));
+    state = res.state;
+
+    // The kill already resolved (new enemy revealed) — Azure Emblem still gets its say on the Mage card.
+    expect(state.currentEnemy?.name).toBe('Next Target');
+    expect(state.turnPhase).toBe('AWAIT_AZURE_EMBLEM');
+    expect(state.azureEmblemWindow?.cards.map((c) => c.id)).toEqual([mage4.id]);
+    expect(state.azureEmblemWindow?.onResolved).toEqual({ kind: 'resumeResolved', turnPhase: 'AWAIT_PLAY', pendingDamage: 0 });
+
+    const bankRes = ensureOk(applyAction(state, { type: 'RESOLVE_AZURE_EMBLEM', playerId: state.players[0].id, cardId: mage4.id }));
+    state = bankRes.state;
+    expect(state.tavernDeck[0]).toEqual(mage4);
+    expect(state.banishPile.some((c) => c.id === mage4.id)).toBe(false); // saved, not banished
+    expect(state.azureEmblemWindow).toBeNull();
+    // Resumes exactly what the kill had already decided — same player, continuing against the new enemy.
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
   });
 
   it('rejects a response from anyone but the Mage\'s own player, rejects banking an ineligible card, and is inert without the relic', () => {
@@ -3485,7 +3558,7 @@ describe('legacy: mission 8 setup (Winds of Chaos)', () => {
     expect(anchor.noSuitPower).toBe(true);
   });
 
-  it('is a 12-enemy 2-wave gauntlet (6 dual-immune Trolls, 6 dual-immune Wyverns), ascendingZone enabled, with 6 Pilgrims + 4 fight-setup Chanters as extra reserve cards, and a preset Puppy anchor', () => {
+  it('is a 12-enemy 2-wave gauntlet (6 dual-immune Trolls, 6 dual-immune Wyverns), ascendingZone enabled, with 24 Pilgrims (4 copies each of 2-7) + 4 fight-setup Chanters as extra reserve cards, and a preset Puppy anchor', () => {
     const mission8 = getMission(8)!;
     expect(mission8.enemies.length).toBe(12);
     expect(mission8.enemies.every((e) => e.secondClass !== undefined)).toBe(true); // every enemy, both waves, is dual-immune
@@ -3494,15 +3567,24 @@ describe('legacy: mission 8 setup (Winds of Chaos)', () => {
     expect(new Set(mission8.enemies.slice(0, 6).map(pairKey)).size).toBe(6);
     expect(new Set(mission8.enemies.slice(6, 12).map(pairKey)).size).toBe(6);
     expect(mission8.ascendingZone).toBe(true);
-    expect(mission8.extraReserveCards?.length).toBe(10);
+    expect(mission8.extraReserveCards?.length).toBe(28);
     // Pilgrims run 1-7 only (John's live play): the seeded Ace anchor plus 2-7 in the deck. Slots 8, 9 and 10
     // have no Pilgrim by design — the chain's last three placements must be ordinary party cards, each buffing
     // the enemy's attack while it sits there. The old 2-10 run of nine made every placement free.
+    //
+    // FOLLOW-UP (John's live play, 2026-09-04): 4 copies of each value, not 1 — the same "P-Box" component
+    // Mission 7's own pilgrimDeck() already draws from correctly (see mission8PilgrimCards()).
     const deckPilgrims = mission8.extraReserveCards!.filter(
       (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.pilgrim),
     );
-    expect(deckPilgrims.length).toBe(6);
-    expect(deckPilgrims.map((c) => c.rank).sort()).toEqual(['2', '3', '4', '5', '6', '7']);
+    expect(deckPilgrims.length).toBe(24);
+    expect(new Set(deckPilgrims.map((c) => c.rank))).toEqual(new Set(['2', '3', '4', '5', '6', '7']));
+    for (const rank of ['2', '3', '4', '5', '6', '7']) {
+      expect(deckPilgrims.filter((c) => c.rank === rank).length).toBe(4);
+      // The 4 copies of a value are spread one per suit, same shape as Mission 7's pilgrimDeck().
+      expect(new Set(deckPilgrims.filter((c) => c.rank === rank).map((c) => c.suit)).size).toBe(4);
+    }
+    expect(deckPilgrims.every((c) => c.noSuitPower)).toBe(true);
     // And no Pilgrim impersonating Goran at rank 10 — he's a rank 8 everywhere else in the campaign.
     expect(deckPilgrims.some((c) => c.name === 'Goran')).toBe(false);
     expect(mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.chanter).length).toBe(4);
@@ -3531,8 +3613,8 @@ describe('legacy: mission 8 setup (Winds of Chaos)', () => {
     expect(state.ascendingZone).toBe(true);
     expect(state.missionZone.length).toBe(1);
     const handCount = state.players.reduce((sum, p) => sum + p.hand.length, 0);
-    // 40 party + 10 extras (6 Pilgrims + 4 fight-setup Chanters) = 50 total in circulation.
-    expect(handCount + state.tavernDeck.length).toBe(50);
+    // 40 party + 28 extras (24 Pilgrims + 4 fight-setup Chanters) = 68 total in circulation.
+    expect(handCount + state.tavernDeck.length).toBe(68);
   });
 });
 

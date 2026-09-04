@@ -37,6 +37,15 @@ export function isCompanionCard(card: Card): boolean {
 }
 
 /**
+ * Legacy-only, Mission 3+: a "Mage" for reveal purposes — a pure Mage card, or a card carrying a bonus Mage
+ * sticker (Mission 9's secondClassArcane). Shared with the client (see GamePage's azureEmblemEligibleCards),
+ * which needs it to tell which of an open Azure Emblem window's cards are actually eligible to bank.
+ */
+export function isMageCard(card: Card): card is Extract<Card, { kind: 'suited' }> {
+  return card.kind === 'suited' && Boolean(card.arcane || card.secondClassArcane);
+}
+
+/**
  * A card's class suit(s) — one normally, two for a Dual-class Stickers card (see SuitedCard.secondSuit), and
  * more for a card accumulating icons mission by mission (see SuitedCard.extraSuits — Gøran is the only one).
  * De-duplicated, so re-granting a suit the card already carries can never double-resolve its power.

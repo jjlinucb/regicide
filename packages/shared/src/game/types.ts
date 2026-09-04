@@ -433,15 +433,19 @@ export interface GameState {
    */
   kinfolkBankedThisTurn: boolean;
   /**
-   * Legacy-only (Mission 6), gated by the 'AZURE_EMBLEM' relic, sourced fix (see legacy-missions-transcript-
-   * mismatches.md): the open Azure Emblem window — opened whenever a play includes a Mage card. The Mage's OWN
-   * player (`pendingPlayerIds` holds just that one attacker id, kept as an array for shape-compatibility with
-   * every other pending-player-queue field) may bank one of `eligibleCardIds` (this play's own Mage card(s),
-   * still sitting on the enemy's table) onto the reserve deck via RESOLVE_AZURE_EMBLEM instead of losing it to
-   * the discard pile later, or decline by omitting a card. `blockNextAttack` mirrors a Guardian shield raised in
-   * the same play.
+   * Legacy-only (Mission 3+), gated by the 'AZURE_EMBLEM' relic (Mission 6): the open Azure Emblem window —
+   * opened whenever a play including a Mage card is fully resolved (see engine.ts's resolveMagePlayCards), win
+   * or lose, exact hit or overkill. The Mage's OWN player (`pendingPlayerIds` holds just that one attacker id,
+   * kept as an array for shape-compatibility with every other pending-player-queue field) may bank one of
+   * `cards` that's actually a Mage card onto the reserve deck via RESOLVE_AZURE_EMBLEM instead of it being
+   * banished, or decline by omitting a card — whatever isn't saved is banished regardless. `cards` holds the
+   * WHOLE play's own cards directly (not IDs to re-find in enemy.tableCards), since John's house rule
+   * (2026-09-04) pulls them off the table and banishes them unconditionally, even when this same play also
+   * landed the kill and the enemy (and its tableCards) are already gone by the time this window opens. See
+   * ChanterResolution for `onResolved` — this window can open whether or not the play defeated the enemy, the
+   * same as a chant or Regrowth can.
    */
-  azureEmblemWindow: { pendingPlayerIds: string[]; eligibleCardIds: string[]; blockNextAttack: boolean } | null;
+  azureEmblemWindow: { pendingPlayerIds: string[]; cards: SuitedCard[]; onResolved: ChanterResolution } | null;
   /**
    * Legacy-only (Mission 3+), sourced from a full solo playthrough (see tutorial_vids/summaries/mission-3.md —
    * "Meet Me at the Table"): the open Mage reveal window. Playing a Mage card (or a card carrying a bonus Mage
@@ -1153,7 +1157,7 @@ export interface ClientGameState {
   /** See GameState.kinfolkBankedThisTurn. */
   kinfolkBankedThisTurn: boolean;
   /** See GameState.azureEmblemWindow. Public information — it's on the table. */
-  azureEmblemWindow: { pendingPlayerIds: string[]; eligibleCardIds: string[]; blockNextAttack: boolean } | null;
+  azureEmblemWindow: { pendingPlayerIds: string[]; cards: SuitedCard[]; onResolved: ChanterResolution } | null;
   /** See GameState.mageReveal. Public information, same as every other pending-choice window. */
   mageReveal: {
     playerId: string;

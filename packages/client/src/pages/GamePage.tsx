@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   cardValue,
   ENDLESS_MODE_MAX_LOOP,
+  isMageCard,
   MAX_SOLO_JESTERS,
   matchesAscendingZoneSlot,
   SOLO_JESTER_ABILITY_TEXT,
@@ -141,11 +142,14 @@ export function GamePage({
   const isZonePurgeWindow = state.turnPhase === 'AWAIT_ZONE_PURGE' && Boolean(state.zonePurge);
   const isMyZonePurgeWindow = isZonePurgeWindow && state.zonePurge?.playerId === myPlayerId;
 
-  // Mission 6 relic: the Azure Emblem window, opened whenever a Mage joins an attack.
+  // Mission 6 relic: the Azure Emblem window, opened whenever a play resolves that included a Mage card — win,
+  // lose, exact hit, or overkill (John's house rule, 2026-09-04), so it's no longer safe to assume the window's
+  // cards are still sitting on the enemy's table (the kill may have already swept it away, or revealed a whole
+  // new enemy) — the window carries its own cards directly instead (see GameState.azureEmblemWindow).
   const isAzureEmblemWindow = state.turnPhase === 'AWAIT_AZURE_EMBLEM' && Boolean(state.azureEmblemWindow);
   const azureEmblemTurnPlayerId = state.azureEmblemWindow?.pendingPlayerIds[0];
   const isMyAzureEmblemTurn = isAzureEmblemWindow && azureEmblemTurnPlayerId === myPlayerId;
-  const azureEmblemEligibleCards = state.currentEnemy?.tableCards.filter((c) => state.azureEmblemWindow?.eligibleCardIds.includes(c.id)) ?? [];
+  const azureEmblemEligibleCards = state.azureEmblemWindow?.cards.filter(isMageCard) ?? [];
 
   // Mission 6, sourced fix: the zone-vengeance sacrifice window opened by a kill under zoneVengeanceOnKill —
   // only the current player (who landed the kill) resolves it.
@@ -571,7 +575,7 @@ export function GamePage({
 
       {isMyAzureEmblemTurn && (
         <div className="jester-picker">
-          <span>🔷 Azure Emblem: pick one of your Mage card(s) below to bank onto the reserve deck, or decline.</span>
+          <span>🔷 Azure Emblem: pick one of your Mage card(s) below to bank onto the reserve deck, or decline — everything used in this attack is banished either way.</span>
           <EnemyCardPicker
             cards={azureEmblemEligibleCards}
             onChoose={(cardId) => sendAction({ type: 'RESOLVE_AZURE_EMBLEM', playerId: myPlayerId, cardId })}
