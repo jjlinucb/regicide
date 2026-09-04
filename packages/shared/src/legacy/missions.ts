@@ -992,8 +992,10 @@ export const MISSIONS: Mission[] = [
     // SOURCED CORRECTION (fan-reimplementation rules doc): the shipped reward was pure upside — 4 free permanent
     // Chanter recruits, no downside. The source instead adds those same 4 cards as fight SETUP (see
     // extraReserveCards above — "Setup: Add Drum 3/5/7/9 to the party"), and the real reward is a mixed bag:
-    //  - Keep only rank 9 (Bram, who already carries the special Encore ability) permanently — the other 3
-    //    (Sela/Orin/Ketta) existed only for this one fight and are never added to the persisted roster at all
+    //  - Keep only rank 9 (Bram) permanently — the other 3 (Sela/Orin/Ketta) existed only for this one fight and
+    //    are never added to the persisted roster at all. Bram carries no special ability of his own: Chanter's
+    //    ENCORE was removed once the chant's draw count stopped being tied to any card's printed value (John's
+    //    house rule, 2026-09-04 — see game/types.ts's GameState.chanterCountChoice)
     //    (same "no separate grant-then-retire step needed" simplification Mission 5's Haror reward already uses).
     //  - "Permanently remove the Pilgrim Ace from the pilgrim deck" — a no-op by construction in this codebase:
     //    every mission's Pilgrim cards (including "Scrap," this mission's own Ace) are mission-local

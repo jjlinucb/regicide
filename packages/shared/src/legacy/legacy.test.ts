@@ -4096,27 +4096,61 @@ describe('legacy: mission 8 chain-vs-wave math (documents the corrected "before 
   });
 });
 
-describe('legacy: Chanter class power (chant — every player draws at once, then trims back down)', () => {
-  function chanterCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
-    return { ...suited(suit, rank), chanter: true, ...(special ? { special: 'ENCORE' as const } : {}) };
+describe('legacy: Chanter class power (chant — player declares a count, everyone draws at once, then trims back down)', () => {
+  function chanterCard(suit: SuitedCard['suit'], rank: SuitedCard['rank']): SuitedCard {
+    return { ...suited(suit, rank), chanter: true };
   }
 
-  it("draws its own value in cards for every player at once, skipping the trim window entirely when nobody goes over their hand limit", () => {
+  /** Resolves an open AWAIT_CHANT_COUNT window (see GameState.chanterCountChoice) by declaring `count`. */
+  function chooseChantCount(state: GameState, count: number): GameState {
+    const window = state.chanterCountChoice;
+    if (!window) throw new Error('No open chant-count choice to resolve.');
+    return ensureOk(applyAction(state, { type: 'CHOOSE_CHANT_COUNT', playerId: window.playerId, count })).state;
+  }
+
+  it('opens a chant-count choice for the playing player before anything is drawn', () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     let state = startMission(1, [boss]);
-    state = rig(state, [chanterCard('D', '2')]); // hand limit 8, well under after drawing 2
+    state = rig(state, [chanterCard('D', '2')]);
+    const player0Id = state.players[0].id;
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] }));
     state = res.state;
 
-    expect(state.chanterWindow).toBeNull();
-    expect(state.players[0].hand.length).toBe(2); // played card gone, 2 drawn back
+    expect(state.turnPhase).toBe('AWAIT_CHANT_COUNT');
+    expect(state.chanterCountChoice?.playerId).toBe(player0Id);
+    expect(state.chanterCountChoice?.onResolved).toEqual({ kind: 'deferredAttack', blockNextAttack: false });
+    expect(state.chanterCountChoice?.maxCount).toBe(state.tavernDeck.length);
+    expect(state.players[0].hand.length).toBe(0); // played card gone, nothing drawn yet
+  });
+
+  it("HOUSE RULE (2026-09-04): the declared count has nothing to do with the Chanter card's own printed rank", () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startMission(1, [boss]);
+    state = rig(state, [chanterCard('D', '2')]); // rank 2 — a pre-house-rule reading would draw exactly 2
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseChantCount(state, 6); // freely declared, unrelated to the rank-2 card that opened it
+
+    expect(state.turnPhase).toBe('AWAIT_DEFEND'); // hand limit 8, well under after drawing 6, no trim needed
+    expect(state.players[0].hand.length).toBe(6); // 0 (played) + 6 drawn, not 2
     expect(state.currentEnemy?.damageTaken).toBe(2); // plain damage — Diamonds' draw power never fired
-    expect(state.turnPhase).toBe('AWAIT_DEFEND'); // straight to the deferred attack tail
     expect(state.pendingDamage).toBe(10);
   });
 
-  it('draws for every player at the table at once, even past hand limit, and queues only the ones now over it to trim', () => {
+  it('rejects a count of 0, a negative count, and a count above the reserve deck\'s own size', () => {
+    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
+    let state = startMission(1, [boss]);
+    state = rig(state, [chanterCard('D', '2')]);
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    const window = state.chanterCountChoice!;
+
+    expect(applyAction(state, { type: 'CHOOSE_CHANT_COUNT', playerId: window.playerId, count: 0 }).ok).toBe(false);
+    expect(applyAction(state, { type: 'CHOOSE_CHANT_COUNT', playerId: window.playerId, count: -1 }).ok).toBe(false);
+    expect(applyAction(state, { type: 'CHOOSE_CHANT_COUNT', playerId: window.playerId, count: window.maxCount + 1 }).ok).toBe(false);
+  });
+
+  it('draws the declared count for every player at the table at once, even past hand limit, and queues only the ones now over it to trim', () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     let state = startMission(2, [boss]); // hand limit 7 for 2 players
     state = structuredClone(state);
@@ -4125,8 +4159,8 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
     const player0Id = state.players[0].id;
     const player1Id = state.players[1].id;
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseChantCount(state, 3);
 
     // Player 0's hand: card played (0 left), draws 3 -> 3, under the 7 limit, no trim needed.
     // Player 1's hand: 6 + 3 drawn = 9, over the 7 limit by 2 -> queued to trim.
@@ -4148,6 +4182,7 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
     const player0Id = state.players[0].id;
 
     state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseChantCount(state, 3);
     // Player 0 is not in the trim queue (player 1 is) — their attempt should be rejected.
     const wrongPlayer = applyAction(state, { type: 'RESOLVE_CHANT', playerId: player0Id, discardCardIds: [] });
     expect(wrongPlayer.ok).toBe(false);
@@ -4166,6 +4201,7 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
     const player0Id = state.players[0].id;
 
     state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+    state = chooseChantCount(state, 3);
     const player1 = state.players[1];
     const toDiscard = player1.hand.slice(0, 2).map((c) => c.id);
 
@@ -4180,31 +4216,26 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
     expect(state.pendingDamage).toBe(10);
   });
 
-  it("Encore doubles how many cards everyone draws", () => {
-    const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
-    let state = startMission(1, [boss]);
-    state = rig(state, [chanterCard('D', '3', true)]);
-
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
-
-    expect(state.players[0].hand.length).toBe(6); // 0 (played) + 6 drawn (Encore doubles 3 -> 6)
-  });
-
-  it('REGRESSION: a Chanter whose own play also lands the killing blow still fires the chant, then the same player continues against the newly-revealed enemy', () => {
+  it('REGRESSION: a Chanter whose own play also lands the killing blow still opens the chant-count choice, then fires the chant once declared, and the same player continues against the newly-revealed enemy', () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     const next: LegacyEnemySpec = { name: 'Drake', suit: 'S', health: 100, attack: 5 };
     let state = startMission(1, [boss, next]);
-    // A single Diamonds Chanter card worth 5, with the current enemy's health set to exactly 5 — this one card
+    // A single Diamonds Chanter card, with the current enemy's health set to exactly its value — this one card
     // both lands the killing blow AND should still trigger the chant (the bug: the shipped version's beginChant
     // call sat behind the "enemy defeated" early return, so the chant was silently dropped whenever the killing
     // play included a Chanter).
     state = rig(state, [chanterCard('D', '5')], { maxHealth: 5 });
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
 
-    // The kill resolved (new enemy revealed, same player continues, no defend) ...
+    // The kill already resolved (new enemy revealed) BEFORE the chant-count choice even opens.
+    expect(state.currentEnemy?.name).toBe('Drake');
+    expect(state.turnPhase).toBe('AWAIT_CHANT_COUNT');
+    expect(state.chanterCountChoice?.onResolved).toEqual({ kind: 'resumeResolved', turnPhase: 'AWAIT_PLAY', pendingDamage: 0 });
+
+    state = chooseChantCount(state, 5);
+
+    // The kill's resolution still stands ...
     expect(state.currentEnemy?.name).toBe('Drake');
     expect(state.turnPhase).toBe('AWAIT_PLAY');
     expect(state.pendingDamage).toBe(0);
@@ -4213,7 +4244,7 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
     expect(state.chanterWindow).toBeNull();
   });
 
-  it('REGRESSION: when the killing play also overflows a hand, the chant trim window still opens, then resumes to "continue against the new enemy" instead of a deferred attack', () => {
+  it('REGRESSION: when the killing play also overflows a hand, the chant trim window still opens after the count is declared, then resumes to "continue against the new enemy" instead of a deferred attack', () => {
     const boss: LegacyEnemySpec = { name: 'Wyvern', suit: 'S', health: 100, attack: 10 };
     const next: LegacyEnemySpec = { name: 'Drake', suit: 'S', health: 100, attack: 5 };
     let state = startMission(2, [boss, next]); // hand limit 7 for 2 players
@@ -4224,8 +4255,9 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
     const player0Id = state.players[0].id;
     const player1Id = state.players[1].id;
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] }));
-    state = res.state;
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: player0Id, cardIds: [state.players[0].hand[0].id] })).state;
+    expect(state.turnPhase).toBe('AWAIT_CHANT_COUNT');
+    state = chooseChantCount(state, 3);
 
     // The kill already revealed the next enemy before the chant's trim window even opens.
     expect(state.currentEnemy?.name).toBe('Drake');
@@ -4249,7 +4281,7 @@ describe('legacy: Chanter class power (chant — every player draws at once, the
 });
 
 describe('legacy: mission 8 reward (only Bram kept, plus corrupt-another-card)', () => {
-  it('SOURCED FIX: the other 3 Chanters (fight setup, not a reward) are never granted — only Bram (rank 9, Encore) is kept permanently', () => {
+  it('SOURCED FIX: the other 3 Chanters (fight setup, not a reward) are never granted — only Bram (rank 9) is kept permanently, with no signature ability (ENCORE was removed)', () => {
     const mission8 = getMission(8)!;
     // The 4 Chanters are fight SETUP now (extraReserveCards), not part of the reward.
     const setupChanters = mission8.extraReserveCards?.filter((c) => c.kind === 'suited' && c.chanter) ?? [];
@@ -4259,7 +4291,7 @@ describe('legacy: mission 8 reward (only Bram kept, plus corrupt-another-card)',
     const chanters = party.filter((c) => c.kind === 'suited' && c.chanter);
     expect(chanters.length).toBe(1);
     expect(chanters[0]?.kind === 'suited' && chanters[0]?.name).toBe('Bram the Refrainkeeper');
-    expect(chanters[0]?.kind === 'suited' && chanters[0]?.special).toBe('ENCORE');
+    expect(chanters[0]?.kind === 'suited' && chanters[0]?.special).toBeUndefined();
   });
 
   it('corrupts another card, and no longer recruits Goran here (moved to Mission 4 — see that mission\'s own reward)', () => {

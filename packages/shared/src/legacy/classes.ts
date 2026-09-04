@@ -152,15 +152,16 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     // class table stays uniform, and because the physical game may yet turn out to grant it somewhere.
     specialText: 'Wellspring: Regrowth deals out the discard pile and lets you keep a second card in hand.',
   },
+  // Carries no signature ability (see SpecialAbilityId's own doc comment): ENCORE ("doubles how many cards
+  // everyone draws") was removed once the chant's draw count stopped being tied to any card's printed value at
+  // all — John's house rule, 2026-09-04, see game/types.ts's GameState.chanterCountChoice. Same shape as REAVER
+  // above, which has never had one either.
   CHANTER: {
     id: 'CHANTER',
     name: 'Chanter',
     tag: 'Team Draw',
     glyph: '🎼',
     color: '#3a8c8c',
-    specialAbility: 'ENCORE',
-    specialName: 'Encore',
-    specialText: 'Encore: doubles how many cards everyone draws in the chant.',
   },
   EVERGREEN: {
     id: 'EVERGREEN',
