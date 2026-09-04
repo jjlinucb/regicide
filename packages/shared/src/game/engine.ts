@@ -786,9 +786,12 @@ function isReaverCard(c: Card): c is Extract<Card, { kind: 'suited' }> {
  * assembled via the Kinfolk Flute) reveals proportionally more. Confirmed live (2026-08-30): an earlier reading
  * used only the Reaver's own rank here, which under-revealed the moment a Reaver was combo'd with anything else.
  * Either opens AWAIT_REAVER_REVEAL for `playerId` to choose one candidate's raw strength to add to the attack, or,
- * if nothing revealed is choosable, resolves straight through with no bonus. Every card revealed here, chosen or
- * not, is banished the instant the choice resolves (see resolveReaverRevealChoice) — unlike a Mage's reveal,
- * nothing not-chosen falls to the discard pile instead.
+ * if nothing revealed is choosable, resolves straight through with no bonus. Once the window IS open the pick is
+ * mandatory (John's ruling, 2026-09-04 — "if you reveal only one, you at least have to use one"), so the
+ * no-candidates branch below is the one and only path that reaches the attack with no Reaver bonus at all; it
+ * exists so a reveal that turns up nothing choosable can never leave the game waiting on an impossible choice.
+ * Every card revealed here, chosen or not, is banished the instant the choice resolves (see
+ * resolveReaverRevealChoice) — unlike a Mage's reveal, nothing not-chosen falls to the discard pile instead.
  */
 function revealForReaver(
   state: GameState,
@@ -811,6 +814,9 @@ function revealForReaver(
   const candidates = revealed.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited');
   const player = state.players.find((p) => p.id === playerId)!;
   const triggerLabel = trigger.name ?? `the ${trigger.rank}`;
+  // Deadlock guard for the mandatory pick: `candidates` drops the Jesters `revealed` may contain, and an empty or
+  // short reserve deck can leave `revealed` itself empty, so with nothing choosable the window must settle itself
+  // here rather than open and wait for a choice that cannot be made.
   if (candidates.length === 0) {
     if (revealed.length > 0) {
       banishCards(state, revealed);
@@ -890,7 +896,10 @@ function resolveReaverRevealCount(state: GameState, action: Extract<GameAction, 
   return revealForReaver(state, playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, action.count, trigger);
 }
 
-/** Resolves the AWAIT_REAVER_REVEAL window opened by revealForReaver (see GameState.reaverReveal). */
+/**
+ * Resolves the AWAIT_REAVER_REVEAL window opened by revealForReaver (see GameState.reaverReveal) — the only way
+ * out of that window, since John's ruling (2026-09-04) makes the pick mandatory once cards are on the table.
+ */
 function resolveReaverRevealChoice(state: GameState, action: Extract<GameAction, { type: 'CHOOSE_REAVER_REVEAL_CARD' }>): EngineResult {
   const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_REAVER_REVEAL');
   if (err) return fail(err);
@@ -916,29 +925,6 @@ function resolveReaverRevealChoice(state: GameState, action: Extract<GameAction,
   state.turnPhase = 'AWAIT_PLAY';
   const player = state.players.find((p) => p.id === playerId)!;
   return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, reaverBonus);
-}
-
-/**
- * Resolves the AWAIT_REAVER_REVEAL window via DECLINE_REAVER_REVEAL (John's house rule): the player skips the
- * bonus damage entirely — e.g. to land an exact kill without overkilling past it and losing the Mission 5
- * death-throes splash. The revealed cards are still banished for good, same as resolveReaverRevealChoice; only
- * the +damage is skipped.
- */
-function declineReaverReveal(state: GameState, action: Extract<GameAction, { type: 'DECLINE_REAVER_REVEAL' }>): EngineResult {
-  const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_REAVER_REVEAL');
-  if (err) return fail(err);
-  const window = state.reaverReveal;
-  if (!window) return fail('There is no open Reaver reveal to resolve.');
-
-  banishCards(state, window.allRevealed);
-  const triggerLabel = window.trigger.name ?? `the ${window.trigger.rank}`;
-  log(state, `${triggerLabel}'s reveal is declined — ${window.allRevealed.length} card(s) banished, no bonus.`);
-
-  const { playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits } = window;
-  state.reaverReveal = null;
-  state.turnPhase = 'AWAIT_PLAY';
-  const player = state.players.find((p) => p.id === playerId)!;
-  return continueResolveCommittedPlay(state, player, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, 0);
 }
 
 /**
@@ -2570,8 +2556,9 @@ function resolveScarletWhistleSoloChoice(
  * Resolves the AWAIT_SCARLET_WHISTLE_SOLO window via DECLINE_SCARLET_WHISTLE_SOLO (John's ruling, confirmed live
  * 2026-09-02): the pairing is optional, so the Companion attacks alone and the discard pile is left untouched —
  * e.g. to land an exact kill the extra card would overshoot, or to keep a card sitting in the discard pile where
- * a later mechanic can still reach it. Unlike declineReaverReveal, there's no cost still to be paid on the way
- * out: the window costs nothing to open, so declining resolves exactly as if it had never opened at all (the same
+ * a later mechanic can still reach it. Nothing is spent to open this window — no card leaves the reserve deck the
+ * way a Reaver's reveal spends one per point of the play (which is exactly why that reveal is no longer declinable
+ * at all, see revealForReaver) — so declining here resolves exactly as if the window had never opened (the same
  * path playCards takes when the discard pile holds no suited card).
  */
 function declineScarletWhistleSoloChoice(
@@ -3640,8 +3627,6 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return resolveReaverRevealCount(draft, action);
     case 'CHOOSE_REAVER_REVEAL_CARD':
       return resolveReaverRevealChoice(draft, action);
-    case 'DECLINE_REAVER_REVEAL':
-      return declineReaverReveal(draft, action);
     case 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD':
       return resolveScarletWhistleSoloChoice(draft, action);
     case 'DECLINE_SCARLET_WHISTLE_SOLO':

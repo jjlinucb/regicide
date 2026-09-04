@@ -331,7 +331,7 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * AWAIT_REAVER_REVEAL_COUNT is Mission 5+ only (see GameState.reaverRevealCountChoice) — opened by a Reaver card
  * in a play, BEFORE any card is revealed, resolved via CHOOSE_REAVER_REVEAL_COUNT into AWAIT_REAVER_REVEAL.
  * AWAIT_REAVER_REVEAL is Mission 5+ only (see GameState.reaverReveal) — opened once the reveal count is chosen,
- * resolved via CHOOSE_REAVER_REVEAL_CARD or (declining any bonus) DECLINE_REAVER_REVEAL. AWAIT_SCARLET_WHISTLE_SOLO is Mission 4+ only, gated by the
+ * resolved via CHOOSE_REAVER_REVEAL_CARD, the only way out of it. AWAIT_SCARLET_WHISTLE_SOLO is Mission 4+ only, gated by the
  * 'SCARLET_WHISTLE' relic (see GameState.scarletWhistleSoloChoice) — opened by a solo player's lone Companion
  * play, resolved via CHOOSE_SCARLET_WHISTLE_DISCARD_CARD or (pairing with nothing) DECLINE_SCARLET_WHISTLE_SOLO.
  * AWAIT_CHANT_COUNT is Mission 8 only (see GameState.chanterCountChoice), John's house rule (2026-09-04) —
@@ -536,8 +536,9 @@ export interface GameState {
    * outright before this choice existed) via CHOOSE_REAVER_REVEAL_COUNT, resolved by resolveReaverRevealCount into
    * the ordinary AWAIT_REAVER_REVEAL window below. Since every card revealed there is banished for good whether
    * chosen or not, choosing a smaller count is strictly safer (fewer cards lost to the banish pile) at the cost of
-   * fewer candidates to pick from — choosing 1 either takes that single card automatically (it's the only
-   * candidate) or, if it's a Jester/corrupted card, costs nothing but that one card for no bonus. Confirmed live
+   * fewer candidates to pick from — and since the pick itself is mandatory (see reaverReveal below), choosing 1
+   * means taking that single card's value, whatever it is, unless it's a Jester and there is nothing to take at
+   * all. Confirmed live
    * (2026-09-02): the shipped version always forced the full reveal, with no way to reveal fewer than the play's
    * total value. `trigger` names the Reaver card that opened this, same as reaverReveal.trigger below.
    */
@@ -559,12 +560,15 @@ export interface GameState {
    * reserve deck — up to one per point of the WHOLE PLAY's own combined total value, not just the Reaver card's
    * own printed rank (confirmed live 2026-08-30: a Reaver combo'd into a bigger same-rank play, including via the
    * Kinfolk Flute, reveals proportionally more), but never more than the player chose via
-   * CHOOSE_REAVER_REVEAL_COUNT — and lets `playerId` choose one of them via CHOOSE_REAVER_REVEAL_CARD to add its
-   * raw numeric strength (its class power, if any, is ignored) to the play's attack total — or decline entirely
-   * via DECLINE_REAVER_REVEAL (John's house rule) if no bonus is wanted, e.g. to avoid overkilling past an exact
-   * kill. EVERY card revealed this way — chosen or not, or even if the player declines outright — is banished for
-   * good, not discarded (see resolveReaverRevealChoice/declineReaverReveal's use of `allRevealed`, which includes
-   * candidates never offered as a choice, like Jesters/corrupted cards). A Reaver's own class power
+   * CHOOSE_REAVER_REVEAL_COUNT — and makes `playerId` choose one of them via CHOOSE_REAVER_REVEAL_CARD to add its
+   * raw numeric strength (its class power, if any, is ignored) to the play's attack total. That pick is MANDATORY
+   * (John's ruling, 2026-09-04: "if you reveal only one, you at least have to use one") — an earlier house rule
+   * let the player decline the bonus outright to avoid overkilling past an exact kill, and John has given that up
+   * knowingly; the count choice above is now the only lever on how much a reveal costs. This window therefore only
+   * ever opens with at least one candidate in it (see engine.ts's revealForReaver, which resolves a reveal that
+   * turns up nothing choosable on the spot rather than opening an unanswerable window). EVERY card revealed this
+   * way — chosen or not — is banished for good, not discarded (see resolveReaverRevealChoice's use of
+   * `allRevealed`, which includes revealed Jesters, never offered as a choice). A Reaver's own class power
    * always doubles the play's total damage on top of this — see continueResolveCommittedPlay's reaverMultiplier —
    * so combining a Reaver with a Warrior (Clubs) card in the same play compounds into quadruple damage.
    * `trigger` is the Reaver card that opened this reveal, so the UI can name it instead of a generic banner.
@@ -1130,17 +1134,11 @@ export type GameAction =
   /**
    * Legacy-only (Mission 5+), from AWAIT_REAVER_REVEAL: the player whose Reaver card opened the reveal (see
    * GameState.reaverReveal) chooses `cardId`, from the cards just revealed off the reserve deck, to add its
-   * numeric strength to the attack. Every revealed card, chosen or not, is banished for good.
+   * numeric strength to the attack. Every revealed card, chosen or not, is banished for good. Mandatory once the
+   * window is open (John's ruling, 2026-09-04) — there is no companion decline action, so this is the window's
+   * only exit.
    */
   | { type: 'CHOOSE_REAVER_REVEAL_CARD'; playerId: string; cardId: string }
-  /**
-   * Legacy-only (Mission 5+), John's house rule, from AWAIT_REAVER_REVEAL: the player declines to add any of the
-   * revealed cards' strength to the attack — e.g. to land an exact kill without overkilling past it and losing
-   * the Mission 5 death-throes splash (see dealDamageAndCheckDefeat's exactKillSplashDamage branch). The revealed
-   * cards are still banished for good either way, same as resolveReaverRevealChoice — declining only skips the
-   * bonus damage, not the reveal's cost.
-   */
-  | { type: 'DECLINE_REAVER_REVEAL'; playerId: string }
   /**
    * Legacy-only (Mission 4+), gated by the 'SCARLET_WHISTLE' relic, John's house rule, from
    * AWAIT_SCARLET_WHISTLE_SOLO: the solo attacker whose lone Companion play opened the window (see
@@ -1153,8 +1151,9 @@ export type GameAction =
    * from AWAIT_SCARLET_WHISTLE_SOLO: the solo attacker takes NO card from the discard pile and lets the Companion
    * attack alone. The pairing has always been optional at the table — the whistle offers a card, it never forces
    * one — so this resolves exactly as if the window had never opened (see engine.ts's
-   * declineScarletWhistleSoloChoice), leaving the discard pile untouched. Mirrors DECLINE_REAVER_REVEAL's shape,
-   * except that declining here has no cost to skip: nothing was spent to open the window.
+   * declineScarletWhistleSoloChoice), leaving the discard pile untouched. A Reaver's reveal has no such decline
+   * (CHOOSE_REAVER_REVEAL_CARD is mandatory) precisely because opening it already spends cards off the reserve
+   * deck, whereas nothing is spent to open this one.
    */
   | { type: 'DECLINE_SCARLET_WHISTLE_SOLO'; playerId: string }
   | { type: 'DEFEND'; playerId: string; cardIds: string[] }
