@@ -23,6 +23,7 @@ import {
   currentEnemyAttack,
   currentEnemyAttackWithDiscardBuff,
   discardPileTopValue,
+  isBeastCompanion,
   isCompanionCard,
   isSuitBlockedByImmunity,
   MAX_SOLO_JESTERS,
@@ -601,6 +602,18 @@ function resolveDiamonds(state: GameState, attackValue: number, bonus = 0): void
     idx += 1;
   }
   if (drawn > 0) log(state, `${powerLabel(state, 'D')}: ${drawn} card(s) drawn${bonus > 0 ? ' (Inspire)' : ''}.`);
+  // Live-play report: a Bard/Diamonds power alongside a blocked suit in the same play looked like it silently
+  // did nothing — it actually fired correctly, but every hand was already full so 0 cards could be drawn, and
+  // this function used to stay completely silent in that case. Log WHY nothing happened instead of looking
+  // identical to the power having been skipped entirely.
+  else if (target > 0) {
+    log(
+      state,
+      state.tavernDeck.length === 0
+        ? `${powerLabel(state, 'D')}: the reserve deck is empty — nothing to draw.`
+        : `${powerLabel(state, 'D')}: every hand is already full — nothing to draw.`,
+    );
+  }
 }
 
 function resolveHearts(state: GameState, attackValue: number, bonus = 0): void {
@@ -611,6 +624,8 @@ function resolveHearts(state: GameState, attackValue: number, bonus = 0): void {
   toReserveDeck(state, healed, 'bottom'); // "under the tavern deck" = bottom
   state.discardPile = remaining;
   if (healCount > 0) log(state, `${powerLabel(state, 'H')}: ${healCount} card(s) shuffled back under the Tavern deck${bonus > 0 ? ' (Revive)' : ''}.`);
+  // Same clarity fix as resolveDiamonds above — an empty discard pile means nothing to heal, silently.
+  else if (attackValue + bonus > 0) log(state, `${powerLabel(state, 'H')}: the discard pile is empty — nothing to shuffle back.`);
 }
 
 /** True if any played card carries the given signature ability (Legacy-only; see types.SpecialAbilityId). */
@@ -885,9 +900,17 @@ function resolveReaverRevealChoice(state: GameState, action: Extract<GameAction,
 
   const chosen = window.candidates.find((c) => c.id === action.cardId);
   if (!chosen) return fail('That card is not part of the current reveal.');
-  const reaverBonus = cardValue(chosen);
+  // John's house rule, same reasoning as resolveMageRevealChoice: a Beast Companion torn up by this reveal has
+  // no "partner" card to copy the normal way, so it copies the Reaver card that opened this reveal instead of
+  // falling back to its own flat printed value (1) — a Beast Companion should never be worse than a plain Ace.
+  const reaverBonus = isBeastCompanion(chosen) ? cardValue(window.trigger) : cardValue(chosen);
   banishCards(state, window.allRevealed);
-  log(state, `${chosen.name ?? `the ${chosen.rank}`} is torn from the reserve deck — banished, +${reaverBonus} damage.`);
+  log(
+    state,
+    `${chosen.name ?? `the ${chosen.rank}`} is torn from the reserve deck — banished, +${reaverBonus} damage${
+      isBeastCompanion(chosen) ? ` (Beast Companion, copying ${window.trigger.name ?? `the ${window.trigger.rank}`}'s strength)` : ''
+    }.`,
+  );
 
   const { playerId, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits } = window;
   state.reaverReveal = null;
@@ -1011,7 +1034,14 @@ function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, {
   // to the attackIncludesMage overkill/exact-kill discard-vs-banish branch in finishEnemyDefeatTail. Its suit
   // power still fires despite being banished rather than played — see arcaneCards below, folded into
   // continueResolveCommittedPlay's class/suit resolution independently of tableCards membership.
-  const chosenValue = cardValue(chosen);
+  //
+  // John's house rule, live-play report (2026-09-04): a Beast Companion torn up by a reveal isn't paired with
+  // one other card the normal way (see rules.ts's isBeastCompanion/validatePlayShape), so it has no "partner" to
+  // copy and used to just fall back to its own flat printed value (1) — a Beast Companion is supposed to be
+  // strictly better than a plain Animal Companion, never worse. The closest analog to "partner" here is the
+  // Mage card that opened this specific reveal round (`window.trigger`) — so a Beast Companion copies that
+  // card's value instead of contributing its own.
+  const chosenValue = isBeastCompanion(chosen) ? cardValue(window.trigger) : cardValue(chosen);
   banishCards(state, [chosen]);
   const arcaneBonus = window.arcaneBonus + chosenValue;
   // Carried whole rather than reduced to its suits (John's ruling, correcting the suits-only reading this
@@ -1028,9 +1058,12 @@ function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, {
   const arcaneImmuneSuits = triggerIsCorruptedMage
     ? Array.from(new Set([...window.arcaneImmuneSuits, ...cardSuits(chosen)]))
     : window.arcaneImmuneSuits;
+  const triggerName = window.trigger.kind === 'suited' ? (window.trigger.name ?? `the ${window.trigger.rank}`) : 'the Mage';
   log(
     state,
-    `${chosen.name ?? `the ${chosen.rank}`} is torn from the reserve deck and banished — adding +${chosenValue} and its own suit power${triggerIsCorruptedMage ? ' — ignoring immunity, courtesy of the corrupted Mage' : ''}.`,
+    `${chosen.name ?? `the ${chosen.rank}`} is torn from the reserve deck and banished — adding +${chosenValue}${
+      isBeastCompanion(chosen) ? ` (Beast Companion, copying ${triggerName}'s strength)` : ''
+    } and its own suit power${triggerIsCorruptedMage ? ' — ignoring immunity, courtesy of the corrupted Mage' : ''}.`,
   );
 
   const { playerId, cards, claimedJester, forcedPlay, totalValue, queue } = window;
