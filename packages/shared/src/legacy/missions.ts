@@ -1002,30 +1002,31 @@ export const MISSIONS: Mission[] = [
     //    extraReserveCards/presetMissionZone entries that never persist into the campaign party or any later
     //    mission's data to begin with (missions.ts has no cross-mission "pilgrim deck" state at all) — there's
     //    nothing left to remove that wasn't already gone by construction, so no code change was needed here.
-    //  - "Add the Diamonds suit to Goran" — STILL NOT implemented here, though the rest of the chain now is. The
-    //    source's chain is: Mission 4 recruits Goran (rank 8, no suit revealed yet), then a suit per mission —
-    //    Clubs at 5, Spades at 6, Hearts at 7 (all three now implemented, the last via
-    //    MissionReward.extraSuitByName), and Diamonds HERE, which would complete all four right before Mission 9
-    //    makes him Evergreen. Adding it is now a one-line `extraSuitByName: { name: 'Goran', suit: 'D' }` on this
-    //    mission's reward — the field and its SuitedCard.extraSuits list already exist and already scale past two
-    //    suits — left unimplemented only because no live play has confirmed this specific step. A prior pass,
-    //    working before a fuller
-    //    solo playthrough existed to confirm Mission 4's own ending recruits him, had already shipped Mission 4 (and
-    //    the already-merged Mission 7 rework, out of scope for this pass) without him — as a stopgap, THIS mission
-    //    was made his first recruitment instead (Spades/Paladin, both unsourced judgment calls — see Mission 4's
-    //    own reward comment). A later pass, working from that direct playthrough, moved his actual first
-    //    recruitment back to Mission 4 where the source places it — so this mission no longer recruits him at all,
-    //    but neither Mission 7's Hearts-suit step nor this mission's own Diamonds-suit step has been implemented in
-    //    their place. Both remain open gaps, flagged here rather than attempted, since fixing them means reopening
-    //    Mission 7's own reward too — out of scope for this pass. Mission 9's reward still upgrades Goran (by name,
-    //    not identity — see party.ts's applyEvergreenUpgradeByName's doc comment) to Evergreen regardless of which
-    //    mission actually recruited him, so that step is unaffected by any of this.
-    //  - "Corrupt another card" — reuses the existing corruptAnotherCard reward step (see party.ts).
+    //  - "Add the Diamonds suit to Goran" — confirmed live (2026-09-04): the source's chain is Mission 4 recruits
+    //    Goran (rank 8, no suit revealed yet), then a suit per mission — Clubs at 5, Spades at 6, and Diamonds
+    //    HERE (via MissionReward.extraSuitByName), completing all 4 base classes right before Mission 9 makes him
+    //    Evergreen. Diamonds is the Bard suit (see classes.ts's CLASS_THEME) — this mission's own reward is what
+    //    makes Goran a Bard, on top of the Warrior/Paladin/Cleric he already carries. Mission 7's own Hearts/
+    //    Cleric step (the third suit the source's chain calls for) is still not implemented — see that mission's
+    //    own reward comment for why — so Goran arrives at this mission with only 2 of his eventual 4 suits live,
+    //    not 3; this reward still only ever adds Diamonds on top of whatever he already has, so that gap doesn't
+    //    block this one. Mission 9's reward still upgrades Goran (by name, not identity — see party.ts's
+    //    applyEvergreenUpgradeByName's doc comment) to Evergreen regardless of which mission actually recruited
+    //    him, so that step is unaffected by any of this.
+    //  - "Corrupt another card" — reuses the existing corruptAnotherCard reward step (see party.ts). John's house
+    //    rule (2026-09-04) restricts its target pool to an ordinary rank 2-9 base-class card — see
+    //    applyCorruptAnotherCard's own doc.
+    //  - "Chanter sticker" (John, live play 2026-09-04): after the mission, the player picks one eligible rank-2
+    //    card (any base class except Bard — see chanterStickerEligible) to permanently gain a bonus Chanter
+    //    sticker (SuitedCard.secondClassChanter), the same "keeps its own suit power AND gets the bonus mechanic"
+    //    player-choice shape Missions 5/6/7's Reaver/Guardian/Druid stickers already use.
     standingJesters: true,
     sidelineHighArcana: true,
     reward: {
       recruits: [specialRecruit('Bram the Refrainkeeper', 'CHANTER', '9', 'S')],
       corruptAnotherCard: true,
+      extraSuitByName: { name: 'Goran', suit: 'D' },
+      chanterStickerChoice: true,
     },
   },
   {

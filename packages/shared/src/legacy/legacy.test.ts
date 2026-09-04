@@ -7,12 +7,14 @@ import { CLASS_THEME } from './classes.js';
 import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs, type MissionEnemySpec } from './missions.js';
 import {
+  applyChanterStickerChoice,
   applyCorruptAnotherCard,
   applyDruidStickerChoice,
   applyExtraSuitByName,
   applyDualClassStickers,
   applyEvergreenUpgrade,
   applyGuardianStickerChoice,
+  chanterStickerEligible,
   druidStickerEligible,
   applyMageSticker,
   applyReaverStickerChoice,
@@ -2706,6 +2708,38 @@ describe('legacy: applyCorruptAnotherCard (mixed-bag reward primitive)', () => {
     const result = applyCorruptAnotherCard(party);
     expect(result).toEqual(party);
   });
+
+  it("HOUSE RULE (2026-09-04): only ranks 2-9 are eligible — a 10 or an Ace is never corrupted, even when nothing else in the party is eligible", () => {
+    const ten = suited('C', '10');
+    const ace = suited('D', 'A');
+    const party = [ten, ace];
+    const result = applyCorruptAnotherCard(party);
+    expect(result).toEqual(party); // nothing eligible — no-op
+  });
+
+  it('HOUSE RULE (2026-09-04): never corrupts a Mage (or any other special faction class), even a card that only carries the bonus sticker version', () => {
+    const mage: SuitedCard = { ...suited('H', '5'), arcane: true };
+    const mageSticker: SuitedCard = { ...suited('D', '5'), secondClassArcane: true };
+    const reaver: SuitedCard = { ...suited('C', '6'), reaver: true };
+    const guardian: SuitedCard = { ...suited('S', '8'), guardian: true };
+    const druid: SuitedCard = { ...suited('D', '4'), druid: true };
+    const chanter: SuitedCard = { ...suited('S', '9'), chanter: true };
+    const chanterSticker: SuitedCard = { ...suited('C', '2'), secondClassChanter: true };
+    const evergreen: SuitedCard = { ...suited('H', '8'), evergreen: true };
+    const inert: SuitedCard = { ...suited('S', '8'), noSuitPower: true };
+    const party = [mage, mageSticker, reaver, guardian, druid, chanter, chanterSticker, evergreen, inert];
+    const result = applyCorruptAnotherCard(party);
+    expect(result).toEqual(party); // nothing eligible — no-op
+  });
+
+  it('HOUSE RULE (2026-09-04): an ordinary rank 2-9 base-class card is still eligible', () => {
+    const party = [suited('H', '5'), suited('C', '10')]; // only the 5 of Hearts is eligible
+    const result = applyCorruptAnotherCard(party);
+    const corrupted = result.filter((c) => c.kind === 'suited' && c.corrupted);
+    expect(corrupted.length).toBe(1);
+    expect(corrupted[0].suit).toBe('H');
+    expect(corrupted[0].rank).toBe('5');
+  });
 });
 
 describe('legacy: mission 6 reward, sourced fix (only the rank-3 Guardian kept, plus a player-chosen Guardian sticker)', () => {
@@ -4298,6 +4332,52 @@ describe('legacy: mission 8 reward (only Bram kept, plus corrupt-another-card)',
     const mission8 = getMission(8)!;
     expect(mission8.reward.corruptAnotherCard).toBe(true);
     expect(mission8.reward.recruits.some((r) => r.name === 'Goran')).toBe(false);
+  });
+
+  it("CONFIRMED LIVE (2026-09-04): adds Goran's 4th suit (Diamonds/Bard) on top of whatever he already has, and offers a player-chosen Chanter sticker", () => {
+    const mission4 = getMission(4)!;
+    const mission5 = getMission(5)!;
+    const mission6 = getMission(6)!;
+    const mission8 = getMission(8)!;
+    expect(mission8.reward.chanterStickerChoice).toBe(true);
+
+    let party = applyReward(buildInitialParty(), mission4.reward);
+    party = applyReward(party, mission5.reward);
+    party = applyReward(party, mission6.reward);
+    party = applyReward(party, mission8.reward);
+    const goran = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
+    expect(goran).toBeDefined();
+    if (goran?.kind === 'suited') {
+      expect(goran.suit).toBe('C'); // Clubs/Warrior, live since Mission 5
+      expect(goran.secondSuit).toBe('S'); // Spades/Paladin, Mission 6
+      expect(goran.extraSuits).toEqual(['D']); // Diamonds/Bard, THIS mission — makes him a Bard too
+    }
+
+    // Deliberately not auto-applied — the player has to pick a target first.
+    expect(party.some((c) => c.kind === 'suited' && c.secondClassChanter)).toBe(false);
+  });
+
+  it('chanterStickerEligible restricts to rank 2 and never a Bard, excluding anything already special or already stickered', () => {
+    const eligible = buildInitialParty().filter(chanterStickerEligible);
+    expect(eligible.every((c) => c.rank === '2')).toBe(true);
+    expect(eligible.map((c) => c.suit).sort()).toEqual(['C', 'H', 'S']); // never the 2 of Diamonds (Bard)
+    expect(chanterStickerEligible(suited('D', '2'))).toBe(false); // Bard, explicitly excluded — "but not bard"
+    expect(chanterStickerEligible(suited('C', '3'))).toBe(false); // wrong rank
+    expect(chanterStickerEligible({ ...suited('C', '2'), chanter: true })).toBe(false); // already a primary special class
+    expect(chanterStickerEligible({ ...suited('C', '2'), secondClassChanter: true })).toBe(false); // already stickered
+  });
+
+  it('applyChanterStickerChoice applies the sticker to exactly the chosen card, keeping its own suit power, and is a no-op for an ineligible id', () => {
+    const party = buildInitialParty();
+    const target = party.filter(chanterStickerEligible).find((c) => c.suit === 'H')!;
+    const next = applyChanterStickerChoice(party, target.id);
+    const stickered = next.filter((c) => c.kind === 'suited' && c.secondClassChanter);
+    expect(stickered.length).toBe(1);
+    expect(stickered[0].id).toBe(target.id);
+    expect(stickered[0].kind === 'suited' && stickered[0].suit).toBe('H'); // still a Cleric
+    // A no-op for an ineligible target (the 2 of Diamonds — a Bard).
+    const diamonds2 = party.find((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '2')!;
+    expect(applyChanterStickerChoice(party, diamonds2.id)).toBe(party);
   });
 
   it('a Chanter recruit takes its explicit suit (Chanter has none of its own) and is flagged chanter', () => {

@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Server } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import type { Card, ClientGameState, ClientToServerEvents, LegacyStatePayload, ServerToClientEvents } from '@regicide/shared';
-import { druidStickerEligible, guardianStickerEligible, reaverStickerEligible } from '@regicide/shared';
+import { chanterStickerEligible, druidStickerEligible, guardianStickerEligible, reaverStickerEligible } from '@regicide/shared';
 import { RoomManager } from './rooms/RoomManager.js';
 import { registerSocketHandlers } from './socket/handlers.js';
 import { InMemoryCampaignStore } from './db/campaigns.js';
@@ -573,6 +573,39 @@ describe('legacy campaign integration', () => {
 
     // One-time only.
     const again = await rooms.chooseDruidSticker(created.code, created.playerId, eligible[1].id);
+    expect('error' in again).toBe(true);
+
+    client.close();
+  });
+
+  it("Mission 8's Chanter-sticker reward is a one-time player choice, limited to rank-2 non-Bard cards", async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Rashid' });
+
+    // Jump past mission 8 (auto-grants missions 1-8's rewards, including Mission 8's Chanter-sticker choice).
+    const result = rooms.startLegacyMission(created.code, created.playerId, 9);
+    if ('error' in result) throw new Error(result.error);
+    expect(result.room.legacy?.party.some((c) => c.kind === 'suited' && c.secondClassChanter)).toBe(false);
+    const eligible = result.room.legacy!.party.filter(chanterStickerEligible);
+    // Rank 2, any base class except Bard.
+    expect(eligible.every((c) => c.rank === '2')).toBe(true);
+    expect(eligible.map((c) => c.suit).sort()).toEqual(['C', 'H', 'S']);
+
+    const notHost = await rooms.chooseChanterSticker(created.code, 'not-the-host', eligible[0].id);
+    expect('error' in notHost).toBe(true);
+
+    const diamonds2 = result.room.legacy!.party.find((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '2')!;
+    const ineligible = await rooms.chooseChanterSticker(created.code, created.playerId, diamonds2.id);
+    expect('error' in ineligible).toBe(true);
+
+    const applied = await rooms.chooseChanterSticker(created.code, created.playerId, eligible[0].id);
+    if ('error' in applied) throw new Error(applied.error);
+    const stickered = applied.room.legacy?.party.find((c) => c.id === eligible[0].id);
+    expect(stickered?.kind === 'suited' && stickered.secondClassChanter).toBe(true);
+
+    // One-time only.
+    const again = await rooms.chooseChanterSticker(created.code, created.playerId, eligible[1].id);
     expect('error' in again).toBe(true);
 
     client.close();

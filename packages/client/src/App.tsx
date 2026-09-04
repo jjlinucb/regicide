@@ -48,6 +48,7 @@ export function App() {
     chooseReaverSticker,
     chooseGuardianSticker,
     chooseDruidSticker,
+    chooseChanterSticker,
     loadEndlessSave,
   } = useGameConnection();
 
@@ -129,6 +130,7 @@ export function App() {
           onChooseReaverSticker={chooseReaverSticker}
           onChooseGuardianSticker={chooseGuardianSticker}
           onChooseDruidSticker={chooseDruidSticker}
+          onChooseChanterSticker={chooseChanterSticker}
           onLeave={handleLeave}
         />
       );
