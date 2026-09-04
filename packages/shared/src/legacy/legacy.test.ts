@@ -3423,6 +3423,26 @@ describe('legacy: Druid class power (Regrowth — deal out the discard pile)', (
 });
 
 describe('legacy: mission 8 setup (Winds of Chaos)', () => {
+  it("BUG FIX: every Mission 8 Pilgrim is suitless — the seeded anchor rendered as a Cleric Ace", () => {
+    // John's live report: "for mission 8, the first card there is actually a pilgrim, so it has no suit, right
+    // now it's marked as cleric." Mission 8's pilgrim() used to deliberately omit noSuitPower (its own comment
+    // said so), unlike Mission 7's pilgrimDeck(). A Pilgrim is a stranded villager in both missions; the suit
+    // is only there to keep card ids distinct.
+    const mission8 = getMission(8)!;
+    const pilgrims = [...(mission8.presetMissionZone ?? []), ...(mission8.extraReserveCards ?? [])].filter(
+      (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.pilgrim),
+    );
+    expect(pilgrims.length).toBeGreaterThan(0);
+    expect(pilgrims.every((c) => c.noSuitPower)).toBe(true);
+    // Including the anchor seeded into the zone, which is what John was looking at.
+    const anchor = mission8.presetMissionZone![0] as Extract<Card, { kind: 'suited' }>;
+    expect(anchor.name).toBe('Scrap');
+    // noSuitPower is what keeps it out of the engine's suit-power resolution and out of immunity-blocking (see
+    // continueResolveCommittedPlay's nonArcaneCards filter); cardSuits() itself still reports the bookkeeping
+    // suit, which is only ever used to keep card ids distinct here.
+    expect(anchor.noSuitPower).toBe(true);
+  });
+
   it('is a 12-enemy 2-wave gauntlet (6 dual-immune Trolls, 6 dual-immune Wyverns), ascendingZone enabled, with 9 Pilgrims + 1 wildcard + 4 fight-setup Chanters as extra reserve cards, and a preset Puppy anchor', () => {
     const mission8 = getMission(8)!;
     expect(mission8.enemies.length).toBe(12);

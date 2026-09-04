@@ -165,9 +165,19 @@ function reaverCompanion(name: string, suit: Suit, rank: Rank): Card {
  * named, drawable, playable cards. Mission 7's are an anonymous 24-card deck built by pilgrimDeck() below.
  * Mission 8 only cares that a Pilgrim placed in its zone never buffs the current enemy's attack the way an
  * ordinary card bridging a gap does.
+ *
+ * CORRECTION (2026-09-03, John's live play — "for mission 8, the first card there is actually a pilgrim, so it
+ * has no suit, right now it's marked as cleric"): these carry `noSuitPower` too, exactly like Mission 7's
+ * pilgrimDeck() cards. This file used to state the opposite in so many words — that Mission 8's Pilgrims were
+ * "real playable cards whose suits do resolve" — which rendered the seeded Ace as a Cleric and let a Pilgrim
+ * played from hand fire a suit power. A Pilgrim is a stranded villager in both missions; being individually
+ * named, drawable and playable here doesn't give it a class. The suit is now pure id/identity bookkeeping,
+ * same as a Mercenary "19"'s placeholder — it still distinguishes the cards and keeps their ids unique, it just
+ * never resolves. Note this also keeps them out of immunity-blocking (see continueResolveCommittedPlay's
+ * nonArcaneCards filter), so a Pilgrim can always be spent into an attack regardless of what the enemy wards.
  */
 function pilgrim(name: string, suit: Suit, rank: Rank): Card {
-  return { id: `pilgrim-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, pilgrim: true };
+  return { id: `pilgrim-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, pilgrim: true, noSuitPower: true };
 }
 
 /**
@@ -180,8 +190,8 @@ function pilgrim(name: string, suit: Suit, rank: Rank): Card {
  *
  * The 4 copies of each value are spread one per suit. Pilgrims have no suit power of their own (`noSuitPower`) —
  * the source describes them as suitless, and this deck never reaches a hand to be played anyway; the suit is
- * pure id/identity bookkeeping, exactly like a Mercenary "19"'s placeholder. Deliberately NOT applied to
- * pilgrim() above, whose Mission 8 cards are real playable cards whose suits do resolve.
+ * pure id/identity bookkeeping, exactly like a Mercenary "19"'s placeholder — and, since 2026-09-03, exactly
+ * like pilgrim() above, whose Mission 8 cards are suitless for the same reason (see its own comment).
  */
 function pilgrimDeck(): Card[] {
   const suits: Suit[] = ['H', 'D', 'C', 'S'];
