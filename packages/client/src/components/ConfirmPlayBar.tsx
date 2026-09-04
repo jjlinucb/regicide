@@ -13,7 +13,13 @@ interface Props {
   onDefend: () => void;
   onClear: () => void;
   /** Mission 8 only: shown as a third option alongside Yield/Play when the ascending mission zone is open. */
-  placeInZone?: { canPlace: boolean; requiredValue: number; onPlace: () => void };
+  placeInZone?: {
+    canPlace: boolean;
+    /** True when more than one committed card matches the slot — this button stays disabled so the player must pick one in the Mission Zone panel instead of the game guessing. */
+    ambiguous: boolean;
+    requiredValue: number;
+    onPlace: () => void;
+  };
 }
 
 export function ConfirmPlayBar({
@@ -70,7 +76,11 @@ export function ConfirmPlayBar({
         <button
           className="btn btn-secondary"
           disabled={!placeInZone.canPlace}
-          title={`Place a card from the attack that just landed a kill into the mission zone, free — needs a card worth exactly ${placeInZone.requiredValue}`}
+          title={
+            placeInZone.ambiguous
+              ? 'More than one card matches — click the specific one you want in the Mission Zone panel above.'
+              : `Place a card from the attack that just landed a kill into the mission zone, free — needs a card worth exactly ${placeInZone.requiredValue}`
+          }
           onClick={placeInZone.onPlace}
         >
           Place in Zone

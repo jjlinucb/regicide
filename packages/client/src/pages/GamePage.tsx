@@ -121,9 +121,14 @@ export function GamePage({
   // desync a value-derived "top + 1" the moment one lands.
   const zoneRequiredValue = state.missionZone.length + 1;
   // SOURCED FIX: placement no longer costs a fresh hand card — it reuses a card already committed to the kill's
-  // own winning attack (see GameState.zoneCommittedPlay), at no extra cost. Pick whichever committed card (if
-  // any) actually fills the current required slot.
-  const placeableZoneCard = state.zoneCommittedPlay.find((c) => matchesAscendingZoneSlot(c, zoneRequiredValue));
+  // own winning attack (see GameState.zoneCommittedPlay), at no extra cost. EVERY committed card that fills the
+  // current required slot stays selectable — a single kill can free more than one match at once (e.g. a Pilgrim
+  // card alongside an ordinary one of the same value), and which one gets placed matters: only a non-Pilgrim card
+  // buffs the enemy's attack once seated (see rules.ts's ascendingZoneAttackBuff), so silently taking the first
+  // match would deny the player the obviously-better Pilgrim choice.
+  const placeableZoneCards = state.zoneCommittedPlay.filter((c) => matchesAscendingZoneSlot(c, zoneRequiredValue));
+  const placeableZoneCard = placeableZoneCards[0];
+  const placeableZoneCardIds = new Set(placeableZoneCards.map((c) => c.id));
   const isChantWindow = state.turnPhase === 'AWAIT_CHANT_TRIM' && Boolean(state.chanterWindow);
   const chantTrimmerId = state.chanterWindow?.pendingPlayerIds[0];
   const isMyChantTrim = isChantWindow && chantTrimmerId === myPlayerId;
@@ -403,7 +408,7 @@ export function GamePage({
           <div className="z-missionzone">
             <MissionZonePanel
               state={state}
-              placeableCardId={canPlaceInZone ? placeableZoneCard?.id ?? null : null}
+              placeableCardIds={canPlaceInZone ? placeableZoneCardIds : undefined}
               onPlaceInZone={
                 canPlaceInZone
                   ? (cardId) => sendAction({ type: 'PLACE_IN_ZONE', playerId: myPlayerId, cardId })
@@ -752,7 +757,12 @@ export function GamePage({
             placeInZone={
               isLegacy && state.ascendingZone && !state.zoneClosed && state.turnPhase === 'AWAIT_PLAY'
                 ? {
-                    canPlace: canPlaceInZone,
+                    // More than one committed card can match the same slot at once (e.g. a Pilgrim card and an
+                    // ordinary card of equal value) — this generic button only auto-picks when the choice is
+                    // unambiguous; with a real choice on the table, it's disabled and the player must click the
+                    // specific card they want in the Mission Zone panel instead (see placeableCardIds above).
+                    canPlace: canPlaceInZone && placeableZoneCards.length === 1,
+                    ambiguous: placeableZoneCards.length > 1,
                     requiredValue: zoneRequiredValue,
                     onPlace: () => {
                       if (!placeableZoneCard) return;
