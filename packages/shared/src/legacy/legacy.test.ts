@@ -2446,28 +2446,32 @@ describe('legacy: mission 5 reward (rank-5 Reaver kept, Myla joins with no abili
     expect(reavers[0]).toMatchObject({ name: 'Haror', rank: '5' });
   });
 
-  it('rewards Myla as a joinable rank-7 card with NO class power, a second round of Dual-class Stickers, and a corrupt-another-card effect', () => {
+  it('never recruits Myla — she is an interlude, not a reward — but still grants the stickers and corruption', () => {
+    // John, 2026-09-03: Myla is gone after this mission. Earlier passes recruited her here, first as a working
+    // Cleric and then as a powerless rank-7 card; both are superseded — she's off the roster entirely.
     const mission5 = getMission(5)!;
-    const myla = mission5.reward.recruits.find((r) => r.name === 'Myla');
-    expect(myla?.rank).toBe('7');
-    expect(myla?.noSuitPower).toBe(true);
+    expect(mission5.reward.recruits.some((r) => r.name === 'Myla')).toBe(false);
     expect(mission5.reward.dualClassStickers).toBe(4);
     expect(mission5.reward.corruptAnotherCard).toBe(true);
 
     const party = applyReward(buildInitialParty(), mission5.reward);
-    const mylaCard = party.find((c) => c.kind === 'suited' && c.name === 'Myla');
-    expect(mylaCard).toBeDefined();
-    if (mylaCard?.kind === 'suited') {
-      expect(mylaCard.suit).toBe('H'); // kept for identity/immunity bookkeeping, even with no live suit power
-      expect(mylaCard.noSuitPower).toBe(true);
-      expect(mylaCard.guardian).toBeUndefined();
-      expect(mylaCard.reaver).toBeUndefined();
-    }
-    // The corrupt-another-card effect landed on some existing party member, never on Myla or Haror themselves.
+    expect(party.some((c) => c.kind === 'suited' && c.name === 'Myla')).toBe(false);
+
+    // The corrupt-another-card effect still landed on some existing party member, never on Haror himself.
     const corrupted = party.filter((c) => c.kind === 'suited' && c.corrupted);
     expect(corrupted.length).toBe(1);
-    expect(corrupted[0].name).not.toBe('Myla');
     expect(corrupted[0].name).not.toBe('Haror');
+  });
+
+  it('keeps Myla present as a fixture in Missions 5 and 6, and as Mission 9\'s boss — she is only gone from the roster', () => {
+    // Removing the recruit must not disturb the three places she legitimately appears, none of which is a
+    // playable card: Mission 5 seeds her into the banish pile, Mission 6 into its mission zone (the whole point
+    // of that fight), and Mission 9 fields her as its boss.
+    const inBanish = getMission(5)!.presetBanishPile ?? [];
+    expect(inBanish.some((c) => c.kind === 'suited' && c.name === 'Myla')).toBe(true);
+    const inZone = getMission(6)!.presetMissionZone ?? [];
+    expect(inZone.some((c) => c.kind === 'suited' && c.name === 'Myla')).toBe(true);
+    expect(getMission(9)!.enemies.some((e) => e.name === 'Myla')).toBe(true);
   });
 
   it('recruits Goran inert at Mission 4, then switches on Clubs/Warrior as his real suit at Mission 5, confirmed live', () => {

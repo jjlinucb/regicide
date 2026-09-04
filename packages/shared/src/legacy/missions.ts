@@ -646,11 +646,13 @@ export const MISSIONS: Mission[] = [
     // missing "corrupt another card" effect (see party.ts's applyCorruptAnotherCard) and a second round of
     // Dual-class Stickers.
     //
-    // Myla (value 7) — who spent this fight seeded into the banish pile via presetBanishPile above, not a
-    // reserve-deck card — now joins the party for real, but confirmed live (2026-08-30) as a plain rank-7 card
-    // with NO class power at all (`noSuitPower`), not a working Cleric as an earlier reading had it — she still
-    // carries the Hearts suit for identity/immunity-bookkeeping continuity with her Mission 5/6 zone appearances,
-    // it just never resolves when she's played.
+    // Myla (value 7) is NOT a reward here. She spends this fight seeded into the banish pile (presetBanishPile
+    // above) and that's the whole of her time with the party — an interlude, not a recruit (John, 2026-09-03).
+    // She never becomes a playable card at any point in the campaign: Mission 6 seeds her into its own mission
+    // zone as the thing the party is fighting around, and Mission 9 brings her back as that mission's boss.
+    // Earlier passes had this mission permanently recruit her (first as a working Cleric, then — after a live
+    // 2026-08-30 correction — as a plain rank-7 card with `noSuitPower`); both readings are superseded, and the
+    // card is gone from the roster entirely rather than being kept in a powerless form.
     //
     // Goran (recruited back at Mission 4 as an inert rank-8 card, no working suit — see that mission's reward
     // comment) has his class power switched on for the first time here, with Clubs (Warrior) as the suit that
@@ -668,7 +670,7 @@ export const MISSIONS: Mission[] = [
     sidelineHighArcana: true,
     randomizeEnemyTierOrder: true,
     reward: {
-      recruits: [recruit('Haror', 'REAVER', '5', 'S'), { name: 'Myla', class: 'CLERIC', rank: '7', suit: 'H', noSuitPower: true }],
+      recruits: [recruit('Haror', 'REAVER', '5', 'S')],
       dualClassStickers: 4,
       corruptAnotherCard: true,
       suitByName: { name: 'Goran', suit: 'C' },
