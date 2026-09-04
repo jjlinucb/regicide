@@ -430,6 +430,22 @@ export interface GameState {
   /** Legacy-only: relic ids the campaign has earned and carries into every mission (e.g. 'KINFOLK_FLUTE'). */
   relics: string[];
   /**
+   * Legacy-only: the subset of `relics` that is present but CORRUPTED, and so inert — a relic listed here is in
+   * play (the party physically has it) but none of its powers apply until it's cleansed (see engine.ts's
+   * relicActive, the single gate every relic check goes through).
+   *
+   * This is deliberately NOT SuitedCard.corrupted: that flag lives on a party CARD, and relics aren't cards at
+   * all in this codebase — they're bare string ids in `relics` above, with no per-relic object to hang a flag
+   * on. Relic corruption is therefore its own small piece of state rather than a reuse of card corruption, and
+   * it shares none of card corruption's rules (no immunity-ignoring, no banish cost, no rank 2-9 eligibility
+   * restriction — see legacy/party.ts's applyCorruptAnotherCard for those).
+   *
+   * Per-mission, not persisted: set from Mission.startingCorruptedRelics at mission start and never carried into
+   * the next mission. See missions.ts's Mission 9 for the only mission that uses it today, and that field's own
+   * doc for the open rules questions this shape leaves deliberately unanswered.
+   */
+  corruptedRelics: string[];
+  /**
    * Legacy-only, gated by the 'SCARLET_WHISTLE' relic: the open combo-assist window. Non-null from the moment a
    * player attacks alone with a lone Animal/Beast Companion until it's resolved — any other player may silently
    * add one card via ASSIST_COMBO before the attacker calls RESOLVE_COMBO. The 'KINFOLK_FLUTE' relic used to
@@ -915,6 +931,12 @@ export type GameAction =
       exactKillOnly?: boolean;
       /** See GameState.relics. */
       relics?: string[];
+      /**
+       * See GameState.corruptedRelics / Mission.startingCorruptedRelics: relic ids this mission hands the party
+       * at setup in a corrupted (inert) state. Added to `relics` on top of whatever the campaign already earned,
+       * so the relic is genuinely in play — just switched off.
+       */
+      startingCorruptedRelics?: string[];
       /** See GameState.endOfTurnZoneFlip. */
       endOfTurnZoneFlip?: boolean;
       /** See GameState.standingJesters. */
@@ -1210,6 +1232,8 @@ export interface ClientGameState {
   scarletWhistleSoloChoice: { playerId: string; candidates: SuitedCard[]; cards: Card[]; forcedPlay: boolean } | null;
   /** Legacy-only: relic ids the campaign has earned (e.g. 'KINFOLK_FLUTE', 'SCARLET_WHISTLE'). Public information. */
   relics: string[];
+  /** See GameState.corruptedRelics — which of `relics` are present but inert. Public information. */
+  corruptedRelics: string[];
   /** See GameState.kinfolkBankedThisTurn. */
   kinfolkBankedThisTurn: boolean;
   /** See GameState.azureEmblemWindow. Public information — it's on the table. */

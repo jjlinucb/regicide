@@ -33,6 +33,7 @@ import {
   pileTopImmuneSuits,
   validatePlayShape,
 } from './rules.js';
+import { relicActive } from './selectors.js';
 import { classForSuit } from '../legacy/classes.js';
 
 const SUIT_NAME: Record<Suit, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
@@ -721,13 +722,14 @@ function pushToDiscardPile(state: GameState, cards: Card[]): void {
 /**
  * Pays a corrupted card's cost: normally banishes the top of
  * the reserve deck (see SuitedCard.corrupted). With Mission 9's 'EVERGREEN_MOTHER' relic
- * in play, the cost changes to another player banishing a card from their own hand instead — in solo play (no
- * "other player" to ask), the same player banishes from their own remaining hand instead (the relic's "solo
- * side"). If there's no eligible hand to banish from (every other hand is empty, or the solo player's own hand
+ * ACTIVE — held and NOT itself corrupted (see relicActive; Mission 9 hands the party a corrupted copy, which
+ * does nothing here until cleansed) — the cost changes instead to another player banishing a card from their
+ * own hand. In solo play (no "other player" to ask), the same player banishes from their own remaining hand
+ * instead (the relic's "solo side"). If there's no eligible hand to banish from (every other hand is empty, or the solo player's own hand
  * is), nothing happens.
  */
 function applyCorruptedCost(state: GameState, player: PlayerState, label: string): void {
-  if (state.relics.includes('EVERGREEN_MOTHER')) {
+  if (relicActive(state, 'EVERGREEN_MOTHER')) {
     const candidates = state.players.length === 1 ? [player] : state.players.filter((p) => p.id !== player.id);
     const eligible = candidates.filter((p) => p.hand.length > 0);
     if (eligible.length === 0) {
@@ -1730,6 +1732,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.endlessLoop = 0;
   state.exactKillOnly = false;
   state.relics = [];
+  state.corruptedRelics = [];
   state.comboAssist = null;
   state.kinfolkBankedThisTurn = false;
   state.azureEmblemWindow = null;
@@ -1927,7 +1930,14 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.jesterClaim = null;
   state.endlessLoop = 0;
   state.exactKillOnly = action.exactKillOnly ?? false;
-  state.relics = action.relics ?? [];
+  // A mission's starting corrupted relics are handed to the party ON TOP of whatever the campaign already
+  // earned, so the relic is genuinely in play for this mission — just switched off (see relicActive). Deduped:
+  // a campaign replaying a mission it has already won would otherwise list the same relic twice, and the
+  // mission's own corrupted state deliberately wins in that case (Mission 9's relic is corrupted AT Mission 9,
+  // whether or not a previous clear already banked it permanently).
+  const startingCorruptedRelics = action.startingCorruptedRelics ?? [];
+  state.relics = Array.from(new Set([...(action.relics ?? []), ...startingCorruptedRelics]));
+  state.corruptedRelics = [...startingCorruptedRelics];
   state.comboAssist = null;
   state.kinfolkBankedThisTurn = false;
   state.azureEmblemWindow = null;
@@ -2458,7 +2468,7 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
   // standalone play of just the slot card; a real hand card must still be played alongside it.
   let kinfolkCard: Card | null = null;
   if (action.includeKinfolkSlot) {
-    if (!state.relics.includes('KINFOLK_FLUTE')) return fail('The Kinfolk Flute has not been earned yet.');
+    if (!relicActive(state, 'KINFOLK_FLUTE')) return fail('The Kinfolk Flute has not been earned yet.');
     if (!player.kinfolkSlot) return fail('Your Kinfolk slot is empty.');
     if (cards.length === 0) return fail('Play at least one hand card alongside your Kinfolk Flute card.');
     kinfolkCard = player.kinfolkSlot;
@@ -2483,7 +2493,7 @@ function playCards(state: GameState, action: Extract<GameAction, { type: 'PLAY_C
   // (see assistCombo/resolveComboAssist, reusing the same resolveCommittedPlay path below). Moot whenever the
   // player's own Kinfolk slot already supplied the second card — that resolves immediately, no window needed.
   const scarletAssist =
-    state.relics.includes('SCARLET_WHISTLE') &&
+    relicActive(state, 'SCARLET_WHISTLE') &&
     !kinfolkCard &&
     cards.length === 1 &&
     cards[0].kind === 'suited' &&
@@ -2585,7 +2595,7 @@ function declineScarletWhistleSoloChoice(
  */
 function bankKinfolkCard(state: GameState, action: Extract<GameAction, { type: 'BANK_KINFOLK_CARD' }>): EngineResult {
   if (state.ruleset !== 'legacy') return fail('BANK_KINFOLK_CARD is only available in Regicide Legacy.');
-  if (!state.relics.includes('KINFOLK_FLUTE')) return fail('The Kinfolk Flute has not been earned yet.');
+  if (!relicActive(state, 'KINFOLK_FLUTE')) return fail('The Kinfolk Flute has not been earned yet.');
   const err = requireCurrentPlayerTurn(state, action.playerId, 'AWAIT_PLAY');
   if (err) return fail(err);
 
@@ -3342,6 +3352,10 @@ function resolveMagePlayCards(
   killedEnemy: boolean,
   onResolved: ChanterResolution,
 ): EngineResult {
+  // NOTE: deliberately still a raw `relics.includes` rather than relicActive, unlike every other relic gate in
+  // this file. This line sits inside Mage attack banish resolution, which was being rewritten in parallel when
+  // the corrupted-relic state landed; swapping it would be a pure no-op today (nothing ever corrupts the Azure
+  // Emblem) at the cost of a conflict in someone else's live edit. Fold it into relicActive once that settles.
   if (!state.relics.includes('AZURE_EMBLEM')) {
     settleMageAttackCards(state, cards, killedEnemy);
     return runChantResolution(state, onResolved);
@@ -3502,6 +3516,7 @@ export function createLobbyState(): GameState {
     endlessLoop: 0,
     exactKillOnly: false,
     relics: [],
+    corruptedRelics: [],
     comboAssist: null,
     scarletWhistleSoloChoice: null,
     kinfolkBankedThisTurn: false,

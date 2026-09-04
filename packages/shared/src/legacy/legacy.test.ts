@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
+import { relicActive } from '../game/selectors.js';
+import { redactStateFor } from '../game/redact.js';
 import { makeRng } from '../game/deck.js';
 import { cardSuits, missionZoneValueSum } from '../game/rules.js';
 import type { Card, EngineResult, GameState, LegacyEnemySpec, SuitedCard } from '../game/types.js';
@@ -6354,5 +6356,91 @@ describe('legacy: Mercenary any-suit Ace (wildSuit)', () => {
     // Companion pairing (both cards count as Animal Companions, each contributing its own value): 1 + 1 = 2 damage.
     expect(state.currentEnemy?.damageTaken).toBe(2);
     expect(state.currentEnemy?.tableCards.some((c) => c.kind === 'suited' && c.suit === 'D')).toBe(true);
+  });
+});
+
+describe("legacy: mission 9 setup — the Evergreen Mother relic starts in play, corrupted (John, 2026-09-04)", () => {
+  /** Starts a mission exactly as RoomManager does: the campaign's earned relics, plus the mission's own corrupted ones. */
+  function startMissionWithSetup(n: number, enemies: LegacyEnemySpec[], opts: { relics?: string[]; startingCorruptedRelics?: string[] }): GameState {
+    const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ids,
+      playerNames: ids.map((_, i) => `Player ${i}`),
+      seed: 'corrupted-relic-test',
+      party: buildInitialParty(),
+      enemies,
+      jesterCount: 0,
+      relics: opts.relics,
+      startingCorruptedRelics: opts.startingCorruptedRelics,
+    });
+    if (!res.ok) throw new Error(res.error);
+    return res.state;
+  }
+
+  const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 10 };
+
+  it('declares the relic in its starting setup, and still grants it permanently as its reward', () => {
+    const mission9 = getMission(9)!;
+    expect(mission9.startingCorruptedRelics).toEqual(['EVERGREEN_MOTHER']);
+    // The reward is deliberately untouched: the relic is still earned for good on a win, so Missions 10-12
+    // carry a working Evergreen Mother exactly as they did before this change.
+    expect(mission9.reward.relics).toEqual(['EVERGREEN_MOTHER']);
+  });
+
+  it('is the only mission that starts with a corrupted relic — nothing else was given one', () => {
+    const withCorruptedRelics = MISSIONS.filter((m) => m.startingCorruptedRelics?.length);
+    expect(withCorruptedRelics.map((m) => m.id)).toEqual([9]);
+  });
+
+  it('puts the relic genuinely IN PLAY at mission start, and marks it corrupted', () => {
+    const state = startMissionWithSetup(2, [boss], { relics: [], startingCorruptedRelics: ['EVERGREEN_MOTHER'] });
+    expect(state.relics).toContain('EVERGREEN_MOTHER');
+    expect(state.corruptedRelics).toEqual(['EVERGREEN_MOTHER']);
+    expect(relicActive(state, 'EVERGREEN_MOTHER')).toBe(false);
+  });
+
+  it("DECISION (not sourced): a corrupted relic is fully inert — the corrupted-card cost falls back to banishing the reserve deck's top card, exactly as it did before the relic was in play at all", () => {
+    let state = startMissionWithSetup(2, [boss], { startingCorruptedRelics: ['EVERGREEN_MOTHER'] });
+    const corrupted: SuitedCard = { ...suited('H', '5'), corrupted: true };
+    state = rig(state, [corrupted]);
+    const tavernBefore = state.tavernDeck.length;
+    const otherHandBefore = state.players[1].hand.length;
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+
+    // The relic's redirect did NOT fire: the reserve deck paid, and no other player lost a card.
+    expect(res.state.tavernDeck.length).toBe(tavernBefore - 1);
+    expect(res.state.players[1].hand.length).toBe(otherHandBefore);
+    expect(res.state.banishPile.length).toBe(1);
+  });
+
+  it('stays corrupted at Mission 9 even for a campaign that already earned the relic, and never lists it twice', () => {
+    const state = startMissionWithSetup(2, [boss], {
+      relics: ['EVERGREEN_MOTHER'], // already banked from a previous clear
+      startingCorruptedRelics: ['EVERGREEN_MOTHER'],
+    });
+    expect(state.relics.filter((r) => r === 'EVERGREEN_MOTHER').length).toBe(1);
+    expect(relicActive(state, 'EVERGREEN_MOTHER')).toBe(false);
+  });
+
+  it('REGRESSION: a mission that declares no corrupted relics leaves an earned relic fully working (Missions 10-12 unaffected)', () => {
+    let state = startMissionWithSetup(2, [boss], { relics: ['EVERGREEN_MOTHER'] });
+    expect(state.corruptedRelics).toEqual([]);
+    expect(relicActive(state, 'EVERGREEN_MOTHER')).toBe(true);
+
+    const corrupted: SuitedCard = { ...suited('H', '5'), corrupted: true };
+    state = rig(state, [corrupted]);
+    const tavernBefore = state.tavernDeck.length;
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+
+    expect(res.state.tavernDeck.length).toBe(tavernBefore); // redirect fired — reserve deck untouched
+  });
+
+  it('surfaces the corrupted state to the client, so the UI can mark the relic', () => {
+    const state = startMissionWithSetup(2, [boss], { startingCorruptedRelics: ['EVERGREEN_MOTHER'] });
+    const view = redactStateFor(state, state.players[0].id);
+    expect(view.relics).toContain('EVERGREEN_MOTHER');
+    expect(view.corruptedRelics).toEqual(['EVERGREEN_MOTHER']);
   });
 });

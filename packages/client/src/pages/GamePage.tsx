@@ -5,6 +5,7 @@ import {
   isMageCard,
   MAX_SOLO_JESTERS,
   matchesAscendingZoneSlot,
+  relicActive,
   SOLO_JESTER_ABILITY_TEXT,
   validatePlayShape,
   type ClientGameState,
@@ -75,7 +76,7 @@ export function GamePage({
   const unresolvedWildCard = selectedCards.find((c) => c.kind === 'suited' && c.wildSuit && !chosenSuits[c.id]);
 
   // Kinfolk Flute: a personal storage slot, gated on the relic actually being earned.
-  const hasKinfolkFlute = state.relics.includes('KINFOLK_FLUTE');
+  const hasKinfolkFlute = relicActive(state, 'KINFOLK_FLUTE');
   const myKinfolkSlot = me?.kinfolkSlot ?? null;
   const canBankKinfolk =
     hasKinfolkFlute &&

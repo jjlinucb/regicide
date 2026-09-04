@@ -607,6 +607,7 @@ export class RoomManager {
       randomizeEnemyOrder: mission.randomizeEnemyOrder,
       randomizeEnemyTierOrder: mission.randomizeEnemyTierOrder,
       relics: room.legacy.permanentRules,
+      startingCorruptedRelics: mission.startingCorruptedRelics,
     });
     if (!result.ok) return { error: result.error };
     room.gameState = result.state;

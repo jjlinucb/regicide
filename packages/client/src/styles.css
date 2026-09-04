@@ -302,6 +302,24 @@ button {
   opacity: 0.55;
 }
 
+/* A corrupted relic (see GameState.corruptedRelics): held, but inert until cleansed. Echoes the corrupted
+   CARD treatment above — the same black border and 🥀 — scaled to a chip, so a player reads "this is the same
+   kind of wrong" at a glance. Mission 9 starts with the Evergreen Mother in this state. */
+.relic-chip.corrupted {
+  color: var(--ink-dim);
+  border-color: #1a1a1a;
+  background: color-mix(in srgb, #1a1a1a 12%, var(--bg-elevated));
+}
+
+.relic-chip.corrupted .relic-glyph {
+  opacity: 0.6;
+}
+
+.relic-corrupted-badge {
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
 @media (max-width: 900px) {
   .game-board {
     grid-template-columns: 1fr;
