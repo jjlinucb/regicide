@@ -5,6 +5,7 @@ import { Server } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import type { Card, ClientGameState, ClientToServerEvents, LegacyStatePayload, Rank, ServerToClientEvents } from '@regicide/shared';
 import {
+  buildInitialParty,
   chanterStickerEligible,
   druidStickerEligible,
   guardianStickerEligible,
@@ -472,13 +473,49 @@ describe('legacy campaign integration', () => {
 
     const result = rooms.startLegacyMission(created.code, created.playerId, 11);
     if ('error' in result) throw new Error(result.error);
-    expect(result.room.legacy?.beastCompanionPool.length).toBe(4);
+    // 5, not 4: jumping to 11 grants Missions 1-10's rewards, and Mission 9's includes Ash the Mage Beast.
+    expect(result.room.legacy?.beastCompanionPool.length).toBe(5);
     expect(result.room.gameState.beastDeckMechanic).toBe(true);
-    // All 4 beast cards are accounted for between the face-down deck and its used-card pile, same as the
-    // shared-package Mission 11 test (which builds its party the old way, directly from Mission 4's recruit specs).
+    // All 5 beast cards are accounted for between the face-down deck and its used-card pile, same as the
+    // shared-package Mission 11 test (which builds its party the old way, directly from the missions' recruit specs).
     const pool = [...result.room.gameState.beastDeck, ...result.room.gameState.beastDeckDiscard];
-    expect(pool.length).toBe(4);
+    expect(pool.length).toBe(5);
+    // The Mage beast survived the round trip through the pool with BOTH flags intact.
+    expect(pool.some((c) => c.kind === 'suited' && c.beast && c.arcane && c.name === 'Ash')).toBe(true);
     expect(new Set(pool.map((c) => c.id))).toEqual(new Set(result.room.legacy!.beastCompanionPool.map((c) => c.id)));
+
+    client.close();
+  });
+
+  it("Mission 9's Ash joins the Beast Companion pool — not the party — even for a campaign that never played Missions 3 or 4", async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    // A restored save sitting at Mission 9 with nothing but the 40 starting cards: no Mission 3 Mages, no
+    // Mission 4 beasts, an empty pool. John jumps straight into later missions routinely, so this is normal play.
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:restore', {
+      name: 'Wren',
+      save: { party: buildInitialParty(), missionsCompleted: [], currentMission: 9, permanentRules: [] },
+    });
+    expect(created.ok).toBe(true);
+
+    // Jumping 9 -> 10 grants Mission 9's reward and nothing earlier.
+    const result = rooms.startLegacyMission(created.code, created.playerId, 10);
+    if ('error' in result) throw new Error(result.error);
+    const pool = result.room.legacy!.beastCompanionPool;
+    expect(pool.length).toBe(1);
+    expect(pool[0]).toMatchObject({ name: 'Ash', beast: true, arcane: true, rank: 'B', suit: 'S' });
+    // He is a pool card, not a roster addition — same routing Mission 4's four get.
+    expect(result.room.legacy!.party.some((c) => c.kind === 'suited' && c.name === 'Ash')).toBe(false);
+
+    // And he can then be picked to ride along into an attempt, like any other Beast Companion.
+    const selected = await rooms.setBeastCompanionSelection(created.code, created.playerId, pool[0].id);
+    if ('error' in selected) throw new Error(selected.error);
+    const restarted = rooms.restartGame(created.code, created.playerId);
+    if ('error' in restarted) throw new Error(restarted.error);
+    const started = rooms.startLegacyMission(created.code, created.playerId, 10);
+    if ('error' in started) throw new Error(started.error);
+    const inPlay = [...started.room.gameState.tavernDeck, ...started.room.gameState.players.flatMap((p) => p.hand)];
+    expect(inPlay.some((c) => c.id === pool[0].id)).toBe(true);
 
     client.close();
   });

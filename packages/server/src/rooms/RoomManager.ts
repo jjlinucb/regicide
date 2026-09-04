@@ -436,8 +436,9 @@ export class RoomManager {
    * correction (a full solo playthrough, see tutorial_vids/summaries/mission-4.md): Mission 4's "reward" isn't 4
    * permanent recruits, it's "keep the four in a box; each mission attempt you may include one in your reserve
    * deck." They go to legacy.beastCompanionPool instead of legacy.party — a rotating pool, not a roster addition —
-   * consumed by startLegacyMission/setBeastCompanionSelection. Data-driven, not Mission-4-specific: any future
-   * mission's beast-flagged recruits would route the same way.
+   * consumed by startLegacyMission/setBeastCompanionSelection. Data-driven, not Mission-4-specific — which is
+   * what makes Mission 9's Ash (the Mage Beast, John 2026-09-04) a pure data addition: he lands in the same pool,
+   * taking it to 5, with no code path of his own.
    */
   private grantMissionReward(
     legacy: LegacyRoomData,

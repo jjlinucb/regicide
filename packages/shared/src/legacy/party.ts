@@ -88,7 +88,7 @@ export interface RecruitSpec {
   special?: boolean;
   /** Required for MAGE, REAVER, GUARDIAN, DRUID, and EVERGREEN recruits only — none has a suit of its own, so the card's (immunity-only) suit must be chosen explicitly. Ignored for the 4 base classes, which always take their class's suit. */
   suit?: Suit;
-  /** Mission 4's Beast Companion reward (x4): marks the built card with SuitedCard.beast (see rules.ts's isBeastCompanion). Tied to one of the 4 base classes like any other recruit — just also plays by the Animal/Beast Companion pairing rule. */
+  /** A Beast Companion reward recruit (Mission 4's four, Mission 9's Ash): marks the built card with SuitedCard.beast (see rules.ts's isBeastCompanion), so it plays by the Animal/Beast Companion pairing rule. Orthogonal to `class` — Mission 4's four are each one of the 4 base classes, while Ash is a MAGE, and so comes out `arcane` as well as `beast` (see the `spec.class === 'MAGE'` line below). */
   beast?: boolean;
   /** A named recruit that carries a real suit (for immunity bookkeeping/identity) but whose class power never resolves — same SuitedCard.noSuitPower flag a Mercenary "19" uses, just on an otherwise-ordinary named recruit instead. Used by Mission 4's Gøran, who joins inert and has his suit switched on later (see MissionReward.suitByName). Mission 5's Myla used to be the other case, before she stopped being a recruit at all. */
   noSuitPower?: boolean;

@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
 import { redactStateFor } from '../game/redact.js';
 import { makeRng } from '../game/deck.js';
-import { cardSuits, missionZoneValueSum } from '../game/rules.js';
+import { cardSuits, cardValue, isBeastCompanion, isMageCard, missionZoneValueSum } from '../game/rules.js';
 import type { Card, EngineResult, GameAction, GameState, LegacyEnemySpec, Rank, SuitedCard } from '../game/types.js';
-import { CLASS_THEME } from './classes.js';
+import { CLASS_THEME, classForCard } from './classes.js';
 import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
 import { getMission, MISSIONS, missionEnemiesToSpecs, type MissionEnemySpec } from './missions.js';
 import {
@@ -29,6 +29,7 @@ import {
   buildInitialParty,
   buildRecruitCard,
   guardianStickerEligible,
+  hasSpecialClass,
   reaverStickerEligible,
 } from './party.js';
 
@@ -5217,7 +5218,9 @@ describe('legacy: mission 9 reward (Evergreen Mother relic, Goran upgraded to Ev
     const mission9 = getMission(9)!;
     expect(mission9.reward.relics).toEqual(['EVERGREEN_MOTHER']);
     expect(mission9.reward.mageStickerRankChoice).toBe(true);
-    expect(mission9.reward.recruits.length).toBe(0); // no brand-new recruit — sourced correction
+    // No brand-new PARTY recruit — sourced correction. The one recruit here is Ash, a beast-flagged card that
+    // never joins the roster at all (RoomManager routes it to the beastCompanionPool); see the Ash suite below.
+    expect(mission9.reward.recruits.filter((r) => !r.beast).length).toBe(0);
     expect(mission9.reward.upgradeEvergreenCard).toBe('Goran');
 
     // Goran doesn't exist in this campaign's party until Mission 4's own reward introduces him — apply both
@@ -5251,6 +5254,109 @@ describe('legacy: mission 9 reward (Evergreen Mother relic, Goran upgraded to Ev
     expect(stillUnupgraded?.kind === 'suited' && stillUnupgraded.evergreen).toBeFalsy();
     const goranCard = party.find((c) => c.kind === 'suited' && c.name === 'Goran');
     expect(goranCard?.kind === 'suited' && goranCard.evergreen).toBe(true);
+  });
+});
+
+describe('legacy: mission 9 reward — Ash, the Mage Beast (John, 2026-09-04, live play)', () => {
+  function ashSpec() {
+    return getMission(9)!.reward.recruits.find((r) => r.name === 'Ash')!;
+  }
+  function ashCard(): SuitedCard {
+    return buildRecruitCard(ashSpec()) as SuitedCard;
+  }
+
+  it("is a rank-'B' Beast Companion carrying the MAGE class — the built card is both `beast` and `arcane`, and its Spades is bookkeeping only", () => {
+    expect(ashSpec()).toMatchObject({ name: 'Ash', class: 'MAGE', rank: 'B', suit: 'S', beast: true });
+
+    const ash = ashCard();
+    expect(ash.beast).toBe(true);
+    expect(ash.arcane).toBe(true);
+    expect(ash.rank).toBe('B');
+    expect(ash.suit).toBe('S'); // immunity/identity bookkeeping — a Mage's suit never resolves a power
+    expect(ash.special).toBeUndefined(); // no ARCANE_SURGE — an ordinary Mage, not a standout one
+    // Both rules recognise the same card at once, on different axes.
+    expect(isBeastCompanion(ash)).toBe(true);
+    expect(isMageCard(ash)).toBe(true);
+    // With no partner to copy, a beast is worth its rank-'B' 1 — same as Mission 4's four.
+    expect(cardValue(ash)).toBe(1);
+    // Mage-ness wins the display theme too, so he never reads as a Paladin off his placeholder suit.
+    expect(classForCard(ash).id).toBe('MAGE');
+  });
+
+  it('MISSION 3 IS UNCHANGED: it still grants ten Mage recruits, one per non-royal rank, none of them a beast', () => {
+    const mission3 = getMission(3)!;
+    expect(mission3.reward.recruits.length).toBe(10);
+    expect(mission3.reward.recruits.every((r) => r.class === 'MAGE' && !r.beast)).toBe(true);
+    expect(mission3.reward.recruits.map((r) => r.rank).sort()).toEqual(['10', '2', '3', '4', '5', '6', '7', '8', '9', 'A']);
+  });
+
+  it("THE HEADLINE: played as a pair, BOTH rules fire — the beast rule sets the play's value, and that value is what the Mage reveal then counts off the reserve deck", () => {
+    const enemy: LegacyEnemySpec = { name: 'Warded Foe', suit: 'S', health: 90, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const ash = ashCard();
+    const partner = suited('H', '7');
+    const spare = suited('D', '2'); // never played — just keeps the post-attack defend from being impossible
+    state = rig(state, [ash, partner, spare]);
+    // A fully known reserve deck: 14 identical Hearts 2s, so the reveal's size is unambiguous and whichever
+    // card is chosen adds exactly 2. Hearts (not Clubs) so no Warrior doubling muddies the damage total.
+    state.tavernDeck = Array.from({ length: 14 }, () => suited('H', '2'));
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [ash.id, partner.id] }));
+    state = res.state;
+
+    // Beast rule: Ash copies the 7 instead of contributing his own 1, so the play is worth 14, not 8.
+    // Mage rule: his reveal then turns up exactly that many cards — 14 — not 8, and not his printed 1.
+    expect(state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+    expect(state.mageReveal?.candidates.length).toBe(14);
+
+    const chosen = state.mageReveal!.candidates[0];
+    res = ensureOk(applyAction(state, { type: 'CHOOSE_MAGE_REVEAL_CARD', playerId: state.players[0].id, cardId: chosen.id }));
+    state = res.state;
+
+    // 14 (the beast-copied pair) + 2 (the revealed card folded in) = 16.
+    expect(state.currentEnemy?.damageTaken).toBe(16);
+    // ...and Ash's own printed Spades still resolved nothing: the enemy's attack is untouched.
+    expect(state.currentEnemy?.spadesShield).toBe(0);
+  });
+
+  it('played alone, the same pairing rule leaves him at his own printed 1 — so his reveal is a single card', () => {
+    const enemy: LegacyEnemySpec = { name: 'Warded Foe', suit: 'C', health: 90, attack: 1 };
+    let state = startMission(1, [enemy]);
+    const ash = ashCard();
+    state = rig(state, [ash]);
+    state.tavernDeck = [suited('H', '9'), suited('H', '3')];
+
+    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [ash.id] }));
+
+    expect(res.state.turnPhase).toBe('AWAIT_MAGE_REVEAL');
+    expect(res.state.mageReveal?.candidates.length).toBe(1);
+    expect(res.state.mageReveal?.candidates[0].rank).toBe('9');
+  });
+
+  it('CORRUPTION AND STICKERS: he falls out of the existing predicates with no special case — a special class AND a rank outside 2-9', () => {
+    const ash = ashCard();
+    expect(hasSpecialClass(ash)).toBe(true);
+    expect(canBeCorrupted(ash)).toBe(false);
+    // Every "give one card a bonus class sticker" reward refuses him too, on its own rank/class filter.
+    expect(guardianStickerEligible(ash)).toBe(false);
+    expect(druidStickerEligible(ash)).toBe(false);
+    expect(chanterStickerEligible(ash)).toBe(false);
+    expect(reaverStickerEligible(ash)).toBe(false);
+    // Mission 9's own Mage-sticker reward can't land on him either — on top of the arcane check, its two
+    // offerable ranks are 4 and 8, and his is 'B'. A party of one Ash offers the player no rank at all.
+    expect(MAGE_STICKER_RANKS.every((rank) => !mageStickerEligible(ash, rank))).toBe(true);
+    expect(mageStickerRankOptions([ash])).toEqual([]);
+    // And the corrupt-a-card step leaves a party of one Ash untouched.
+    expect(applyCorruptAnotherCard([ash], new Set(), () => 0)).toEqual([ash]);
+  });
+
+  it('THE JUMP PATH: his grant depends on nothing from Missions 3 or 4 — a party that played neither still gets him', () => {
+    // A starting party only: no Mission 3 Mages, no Mission 4 beasts, no Goran.
+    const party = applyReward(buildInitialParty(), getMission(9)!.reward);
+    const ash = party.find((c) => c.kind === 'suited' && c.name === 'Ash');
+    expect(ash?.kind === 'suited' && ash.beast && ash.arcane).toBe(true);
+    // (Server-side a beast-flagged recruit is routed to the rotating beastCompanionPool rather than the party —
+    // see legacy.integration.test.ts. applyReward itself has no such split, and doesn't need one.)
   });
 });
 
@@ -5816,6 +5922,53 @@ describe('legacy: mission 11 beast-deck start-of-turn flip', () => {
     expect(res2.state.beastDeckDiscard.map((c) => c.id)).toEqual(beastDiscardBefore);
     expect(res2.state.skipNextBeastDeckFlip).toBe(false);
     expect(res2.state.log.some((e) => e.message.includes('spared it a flip'))).toBe(true);
+  });
+});
+
+describe('legacy: mission 11 with Ash in the beast deck (a beast that is also a Mage)', () => {
+  function ashCard(): SuitedCard {
+    return buildRecruitCard(getMission(9)!.reward.recruits.find((r) => r.name === 'Ash')!) as SuitedCard;
+  }
+
+  it("takes all 5 beasts — Mission 4's four plus Ash — into the deck, none of them drawable this mission", () => {
+    const beasts = [...mission4BeastCards(), ashCard()];
+    const state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
+
+    const pool = [...state.beastDeck, ...state.beastDeckDiscard];
+    expect(pool.length).toBe(5);
+    expect(new Set(pool.map((c) => c.id))).toEqual(new Set(beasts.map((c) => c.id)));
+    const inCirculation = [...state.players.flatMap((p) => p.hand), ...state.tavernDeck];
+    expect(inCirculation.some((c) => c.kind === 'suited' && c.name === 'Ash')).toBe(false);
+  });
+
+  it("Ash's flip fires his PRINTED suit's effect (Spades — the reserve deck's top card is discarded); `arcane` neither diverts nor suppresses it", () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.beastDeck = [ashCard()];
+    state.beastDeckDiscard = [];
+    const reserveTop = suited('D', '3');
+    state.tavernDeck = [reserveTop, ...state.tavernDeck];
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    expect(res.state.tavernDeck.some((c) => c.id === reserveTop.id)).toBe(false);
+    expect(res.state.discardPile.some((c) => c.id === reserveTop.id)).toBe(true);
+  });
+
+  it('an odd-sized 5-beast pool still cycles: once the deck runs dry it reshuffles from the used pile and carries on', () => {
+    const beasts = [...mission4BeastCards(), ashCard()];
+    let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    // Jump the cycle to the moment it turns over, with all 5 beasts already spent.
+    const all = [...state.beastDeck, ...state.beastDeckDiscard];
+    expect(all.length).toBe(5);
+    state.beastDeck = [];
+    state.beastDeckDiscard = all;
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    expect(res.state.beastDeck.length).toBe(4);
+    expect(res.state.beastDeckDiscard.length).toBe(1);
   });
 });
 

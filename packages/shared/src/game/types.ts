@@ -168,7 +168,9 @@ export interface SuitedCard {
    */
   secondClassChanter?: boolean;
   /**
-   * Legacy-only: marks a Beast Companion (Mission 4's reward, x4, each tied to a specific character). Works like
+   * Legacy-only: marks a Beast Companion (Mission 4's reward, x4, plus Mission 9's Ash — each tied to a specific
+   * character). Independent of the card's class: Mission 4's four are Warrior/Bard/Cleric/Paladin, while Ash is
+   * also `arcane`, so both this rule and the Mage reveal fire on the same play. Works like
    * an Animal Companion (see rules.ts's isAnimalCompanion) — playable alone, or paired with exactly one other
    * card — but instead of contributing its own printed value (an Ace's flat 1) to the pair's total, it copies
    * the strength of whatever card it's paired with (see rules.ts's validatePlayShape).
@@ -860,13 +862,13 @@ export interface GameState {
   beastDeckMechanic: boolean;
   /**
    * Legacy-only (Mission 11): the face-down deck built from every Beast Companion card in the campaign party
-   * (Mission 4's reward pool, see SuitedCard.beast / deck.ts's buildBeastDeck) — pulled out of circulation and
-   * seeded here at mission start instead of joining the reserve deck, so no Beast card is available to draw or
+   * (Mission 4's four plus Mission 9's Ash, see SuitedCard.beast / deck.ts's buildBeastDeck) — pulled out of
+   * circulation and seeded here at mission start instead of joining the reserve deck, so no Beast card is available to draw or
    * play this mission. Its top card flips for a one-shot effect at the start of every turn (see
    * flipBeastDeckCard), moving to `beastDeckDiscard`; once empty, it reshuffles from there and the cycle
    * continues. Every Beast Companion card was never removed from the persisted campaign roster to begin with (same
    * "sits out, comes back automatically" shape as this mission's sidelined Esme) — this `beastDeck` is only the
-   * mission's temporary in-fight copy, so all 4 simply return to the party unchanged at mission end.
+   * mission's temporary in-fight copy, so every one of them simply returns to the pool unchanged at mission end.
    */
   beastDeck: Card[];
   /** Legacy-only (Mission 11): beast-deck cards already flipped this mission — reshuffled back into `beastDeck` once it runs dry (see flipBeastDeckCard). */

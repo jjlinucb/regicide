@@ -135,9 +135,16 @@ function specialRecruit(name: string, cls: ClassId, rank: RecruitSpec['rank'], s
 }
 
 /**
- * Mission 4's Beast Companion reward (x4): a recruit that plays by the Animal/Beast Companion pairing rule (see
- * rules.ts's isBeastCompanion) instead of the combo rule — paired with one other card, it copies that card's
- * strength instead of contributing its own printed value.
+ * A Beast Companion reward recruit (Mission 4's four, and Mission 9's Ash): plays by the Animal/Beast Companion
+ * pairing rule (see rules.ts's isBeastCompanion) instead of the combo rule — paired with one other card, it
+ * copies that card's strength instead of contributing its own printed value. Always rank 'B', the beasts' own
+ * rank (cardValue 1 when there's no partner to copy).
+ *
+ * `cls` is a full class, not a decoration: passed one of the 4 base classes it behaves like any other recruit of
+ * that class, and passed 'MAGE' the card comes out `beast` AND `arcane` at once — party.ts's buildRecruitCard
+ * already flags arcane off `spec.class`, so no separate builder is needed for a Mage beast (see Mission 9's Ash).
+ * Beast-flagged recruits never join `legacy.party`: RoomManager's grantMissionReward routes every one of them to
+ * the rotating `beastCompanionPool` instead, whichever mission granted it.
  */
 function beastRecruit(name: string, cls: ClassId, rank: RecruitSpec['rank'], suit?: Suit): RecruitSpec {
   return { name, class: cls, rank, suit, beast: true };
@@ -1168,7 +1175,28 @@ export const MISSIONS: Mission[] = [
     // rank-2-9-base-class eligibility rule (party.ts's canBeCorrupted). Corrupted RELICS are just a tier name.
     startingRelics: ['CORRUPTED_EVERGREEN_MOTHER'],
     reward: {
-      recruits: [],
+      // JOHN, 2026-09-04 (live play): this mission also hands over "Ash", the Mage Beast — "a beast like Goran's
+      // beasts", but carrying the Mage class instead of one of the four base ones. So: rank 'B' like every other
+      // Beast Companion (see beastRecruit above), and `class: 'MAGE'`, which buildRecruitCard turns into `arcane`
+      // on top of `beast`. Both rules then fire when he's played, on different axes — the beast rule sets the
+      // play's VALUE (paired with one card, he copies that card's strength instead of his own 1), and the Mage
+      // rule opens his reveal off the reserve deck at that resulting value (see engine.ts's resolveCommittedPlay,
+      // which computes validatePlayShape first and feeds its total into mageRevealCount).
+      //
+      // His SPADES is bookkeeping only, and deliberately not a fifth base class: a Mage card's suit never joins
+      // the combined suit-power resolution and never blocks on enemy immunity either (see
+      // continueResolveCommittedPlay's resolvesOwnSuitPower), so unlike Mission 4's four — who are Warrior/Bard/
+      // Cleric/Paladin for real, one per suit — Ash has no base class at all. The one place his suit is actually
+      // read is Mission 11's beast-deck flip (engine.ts's flipBeastDeckCard, keyed on the printed suit), where a
+      // 5th beast necessarily doubles up some suit in the cycle; Spades is the mildest of the four to double
+      // (the reserve deck's top card falls to the discard pile, recoverable by a Hearts heal) rather than Clubs'
+      // permanent banish or the two that take a card out of a player's hand.
+      //
+      // Like Mission 4's beasts, he does NOT join legacy.party — RoomManager's grantMissionReward routes every
+      // beast-flagged recruit to the rotating beastCompanionPool (one rides along per attempt; Mission 11 takes
+      // the whole pool at once). Nothing about Mission 3 changes: its ten Mage recruits, one per non-royal rank,
+      // are correct and untouched.
+      recruits: [beastRecruit('Ash', 'MAGE', 'B', 'S')],
       relics: ['EVERGREEN_MOTHER'],
       mageStickerRankChoice: true,
       upgradeEvergreenCard: 'Goran',
@@ -1286,15 +1314,16 @@ export const MISSIONS: Mission[] = [
     // roster itself is never touched) — she simply isn't available to draw, hold, or play this mission. See
     // `reward.upgradeSidelinedCard` below, which targets this same identity once the mission is won.
     sidelineIdentity: { suit: 'C', rank: '6' },
-    // Mission 4's Beast Companion cards are pulled out of the campaign party and shuffled into a face-down deck
-    // that sits in the mission zone for this fight only — no Beast card is available to draw or play this
-    // mission (an unrelated Mage-aligned party member is still usable as normal; see deck.ts's buildBeastDeck).
+    // Every Beast Companion card the campaign has collected (Mission 4's four, plus Mission 9's Ash) is pulled
+    // out and shuffled into a face-down deck that sits in the mission zone for this fight only — no Beast card is
+    // available to draw or play this mission, Ash included, while an ordinary Mage party member (not beast-
+    // flagged) is still usable as normal, since this only ever filters on `beast` (see deck.ts's buildBeastDeck).
     // At the start of every turn its top card flips for a one-shot effect keyed to its SUIT (sourced correction —
     // the previously-shipped version keyed this off the card's derived CLASS instead; see engine.ts's
     // flipBeastDeckCard). Once it runs out it reshuffles from its own used-card pile and the cycle continues —
-    // since the beast deck is always exactly the 4 base-suited Beast Companions, one full cycle always flips all 4
-    // exactly once before clearing and restarting. An exact kill spares the very next turn's flip (see
-    // GameState.skipNextBeastDeckFlip).
+    // one full cycle flips every beast in the pool exactly once before clearing and restarting (the four suits,
+    // one each, plus Ash's own printed Spades doubling that one suit up). An exact kill spares the very next
+    // turn's flip (see GameState.skipNextBeastDeckFlip).
     beastDeckMechanic: true,
     // The current enemy draws bonus strength AND class-immunity from whatever cards currently sit on top of the
     // discard pile and the banish pile — both recomputed live, so a Cleric heal reshuffling the discard pile (or
