@@ -856,8 +856,9 @@ export const MISSIONS: Mission[] = [
     // COMMENT CORRECTION (22-agent playtest cross-check, 2026-08-28 — see mission-playtest-cross-check-2026-08-28
     // memory): an earlier version of this very comment framed "finish the chain, and its purge, before this wave
     // drops" as the mission's real goal, with nothing sourcing the deadline. The chain needs 9 placements after
-    // the preseeded Ace (see presetMissionZone/extraReserveCards below), and a placement window opens only right
-    // after a kill (see engine.ts's zoneOpenForPlacement), so Wave 1's 6 Trolls open just 6 windows.
+    // the preseeded Ace (see presetMissionZone/extraReserveCards below) — six coverable by a Pilgrim, the last
+    // three only by ordinary party cards, see the Pilgrim-range correction below — and a placement window opens
+    // only right after a kill (see engine.ts's zoneOpenForPlacement), so Wave 1's 6 Trolls open just 6 windows.
     // A SECOND CORRECTION (2026-09-03): this comment used to call a Wave-1 finish "mathematically impossible" on
     // that basis, which is wrong — windows aren't 1:1 with placements. A window stays open until the turn moves
     // on, and its pool is the defeated enemy's whole table pile, so several cards can go in per kill (confirmed
@@ -932,10 +933,19 @@ export const MISSIONS: Mission[] = [
     // flag.
     ascendingZone: true,
     // "Scrap," the Pilgrim Puppy, is the chain's permanent anchor — seeded straight into the zone at value 1 (an
-    // Ace), never re-placed. The other 9 Pilgrims (values 2-10, the last being Goran himself) are shuffled into
-    // the reserve deck alongside the party, ordinary cards in every other respect, plus the one "2/5" wildcard
-    // the source names above (see zoneWildcard) and the 4 Chanter cards this mission's reward now enters the
-    // fight WITH instead of granting after it (see the reward comment below).
+    // Ace), never re-placed. The other Pilgrims are shuffled into the reserve deck alongside the party, ordinary
+    // cards in every other respect, plus the one "2/5" wildcard the source names above (see zoneWildcard) and the
+    // 4 Chanter cards this mission's reward now enters the fight WITH instead of granting after it (see the
+    // reward comment below).
+    //
+    // CORRECTION (2026-09-03, John's live play — "pilgrims are 1-7 only"): the Pilgrims run 1 through 7, i.e. the
+    // seeded Ace plus six in the deck, NOT the 2-through-10 run of nine this shipped with. That's the whole
+    // difficulty point of the chain and it was being given away: slots 8, 9 and 10 have no Pilgrim to fill them,
+    // so the last three placements can only ever be ordinary party cards, each of which buffs the current enemy's
+    // attack for as long as it sits in the zone (see ascendingZoneAttackBuff). The chain still needs the same 9
+    // placements after the anchor — six of them are now free and three are not, where before all nine were free.
+    // This also retires a card that should never have existed: a "Goran" Pilgrim printed at rank 10, contradicting
+    // his rank 8 everywhere else in the campaign, invented purely to cap the old 2-10 run.
     presetMissionZone: [pilgrim('Scrap', 'H', 'A')],
     extraReserveCards: [
       pilgrim('Old Yarrow', 'S', '2'),
@@ -944,9 +954,6 @@ export const MISSIONS: Mission[] = [
       pilgrim('Sister Halvard', 'H', '5'),
       pilgrim('Corin Drizzlecoat', 'S', '6'),
       pilgrim('Fenna Longrope', 'D', '7'),
-      pilgrim('Uncle Thom', 'C', '8'),
-      pilgrim('Widow Aeliss', 'H', '9'),
-      pilgrim('Goran', 'S', '10'),
       zoneWildcard('The Wandering Coin', 'C'),
       chanterCompanion('Sela Windchant', 'D', '3'),
       chanterCompanion('Orin Deepvoice', 'H', '5'),
