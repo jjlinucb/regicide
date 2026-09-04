@@ -90,7 +90,7 @@ export interface RecruitSpec {
   suit?: Suit;
   /** Mission 4's Beast Companion reward (x4): marks the built card with SuitedCard.beast (see rules.ts's isBeastCompanion). Tied to one of the 4 base classes like any other recruit — just also plays by the Animal/Beast Companion pairing rule. */
   beast?: boolean;
-  /** Mission 5's Myla, sourced fix: a named recruit that carries a real suit (for immunity bookkeeping/identity) but whose class power never resolves — same SuitedCard.noSuitPower flag a Mercenary "19" uses, just on an otherwise-ordinary named recruit instead. */
+  /** A named recruit that carries a real suit (for immunity bookkeeping/identity) but whose class power never resolves — same SuitedCard.noSuitPower flag a Mercenary "19" uses, just on an otherwise-ordinary named recruit instead. Used by Mission 4's Gøran, who joins inert and has his suit switched on later (see MissionReward.suitByName). Mission 5's Myla used to be the other case, before she stopped being a recruit at all. */
   noSuitPower?: boolean;
 }
 

@@ -1763,12 +1763,13 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
       ? corruptedEnemyBuild.enemies
       : orderedEnemies.map(makeLegacyEnemy);
   let partyForReserve = corruptedEnemyBuild ? corruptedEnemyBuild.leftoverParty : action.party;
-  // BUG FIX: a preset mission-zone/banish-pile companion (missions.ts's zoneCompanion/reaverCompanion, whose own
-  // doc comment promises the card is "never part of the reserve deck or party") can share a name with a card the
-  // player already permanently recruited via an earlier mission's reward — Mission 6's Myla, recruited at Mission
-  // 5, is exactly this case. Without this filter she'd exist twice: once locked into presetMissionZone, and once
+  // Defensive: a preset mission-zone/banish-pile companion (missions.ts's zoneCompanion/reaverCompanion, whose
+  // own doc comment promises the card is "never part of the reserve deck or party") must not share a name with a
+  // card the player has permanently recruited, or it would exist twice — once locked into the preset zone, once
   // still sitting in the party, drawable and playable like any other card. Matched by name, the only stable
   // identity these preset companions carry (see zoneCompanion's id being a derived slug, not a real card id).
+  // No mission currently trips this: Myla was the one real case, and she's no longer recruited at all (see
+  // Mission 5's reward comment). Kept as a guard because the collision is silent and easy to reintroduce.
   const presetCompanionNames = new Set(
     [...(action.presetMissionZone ?? []), ...(action.presetBanishPile ?? [])]
       .map((c) => (c.kind === 'suited' ? c.name : undefined))
