@@ -755,6 +755,12 @@ export const MISSIONS: Mission[] = [
     standingJesters: true,
     sidelineHighArcana: true,
     randomizeEnemyTierOrder: true,
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [recruit('Haror', 'REAVER', '5', 'S')],
       dualClassStickers: 4,
@@ -830,6 +836,12 @@ export const MISSIONS: Mission[] = [
     // applyCorruptAnotherCard), same as Missions 1/5/8.
     standingJesters: true,
     sidelineHighArcana: true,
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [recruit('Ferro', 'GUARDIAN', '3', 'S')],
       relics: ['AZURE_EMBLEM'],
@@ -909,6 +921,12 @@ export const MISSIONS: Mission[] = [
     // would complete the set — still unimplemented, see that mission's reward comment.
     standingJesters: true,
     sidelineHighArcana: true,
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [recruit('Alanta', 'DRUID', '7', 'C')],
       druidStickerChoice: true,
@@ -1075,6 +1093,12 @@ export const MISSIONS: Mission[] = [
     //    player-choice shape Missions 5/6/7's Reaver/Guardian/Druid stickers already use.
     standingJesters: true,
     sidelineHighArcana: true,
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [specialRecruit('Bram the Refrainkeeper', 'CHANTER', '9', 'S')],
       corruptAnotherCard: true,
@@ -1216,6 +1240,12 @@ export const MISSIONS: Mission[] = [
     // (SuitedCard.corrupted) are a real mechanic with real rules — immunity-ignoring, a banish cost, and a strict
     // rank-2-9-base-class eligibility rule (party.ts's canBeCorrupted). Corrupted RELICS are just a tier name.
     startingRelics: ['CORRUPTED_EVERGREEN_MOTHER'],
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       // JOHN, 2026-09-04 (live play): this mission also hands over "Ash", the Mage Beast — "a beast like Goran's
       // beasts", but carrying the Mage class instead of one of the four base ones. So: rank 'B' like every other
@@ -1319,6 +1349,12 @@ export const MISSIONS: Mission[] = [
     // deck.ts's buildCorruptedPartyEnemies' leftoverParty), so there is nothing for a reward to restore.
     standingJesters: true,
     sidelineHighArcana: true,
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [],
       // Permanent removal, NOT sidelining: Goran does not come back. Deliberately not modeled with
@@ -1504,6 +1540,12 @@ export const MISSIONS: Mission[] = [
     // pasted community research describes an un-banishable restored-card "immunity shield" and a Paladin power
     // that bypasses enemy immunity outright; neither appears anywhere in the transcript, so neither was used —
     // same standard this file has held to reward-by-reward since Mission 1.
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [],
     },

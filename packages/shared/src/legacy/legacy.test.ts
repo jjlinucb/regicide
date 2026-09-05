@@ -6680,6 +6680,50 @@ describe('legacy: mission 11 pile-top immunity reaches the client', () => {
   });
 });
 
+describe('legacy: cleanup ordering is permanent from Mission 4 on (John, 2026-09-05)', () => {
+  it('every mission from 4 to 12 carries discardCleanupLowToHigh', () => {
+    for (let id = 4; id <= 12; id++) {
+      expect(getMission(id)!.discardCleanupLowToHigh, `mission ${id}`).toBe(true);
+    }
+  });
+
+  it('and no mission before 4 does — the rule is introduced there, not retroactive', () => {
+    for (let id = 1; id <= 3; id++) {
+      expect(getMission(id)!.discardCleanupLowToHigh, `mission ${id}`).toBeUndefined();
+    }
+  });
+
+  it('orders a whole batch lowest-on-top, reading low-to-high down the pile', () => {
+    // Mission 11 routes a defeated enemy's table cards to the banish pile as one cleanup batch.
+    const enemyA: LegacyEnemySpec = { name: 'Warden A', suit: 'D', health: 30, attack: 1 };
+    const enemyB: LegacyEnemySpec = { name: 'Warden B', suit: 'H', health: 20, attack: 10 };
+    const res0 = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'cleanup-ordering-test',
+      party: buildInitialParty(),
+      enemies: [enemyA, enemyB],
+      jesterCount: 0,
+      pileTopEnemyBonus: true,
+      discardCleanupLowToHigh: true,
+    });
+    if (!res0.ok) throw new Error(res0.error);
+    let state = rig(res0.state, [suited('C', '9')], {
+      tableCards: [suited('H', '7'), suited('D', '2'), suited('S', '4')],
+      damageTaken: 25,
+    });
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    ).state;
+
+    // Reading from the top down, past the felled enemy's own card: 2, 4, 7, 9 — the whole batch in order.
+    const topDown = [...state.banishPile].reverse().slice(1).map((c) => cardValue(c));
+    expect(topDown).toEqual([2, 4, 7, 9]);
+  });
+});
+
 describe('legacy: mission 11 reward (Esme returns permanently upgraded)', () => {
   it("completes the mission immediately (WON) when the last enemy falls — no beast-card choice window", () => {
     const beasts = mission4BeastCards();
