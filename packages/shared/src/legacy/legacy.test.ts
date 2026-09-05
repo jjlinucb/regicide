@@ -6481,11 +6481,16 @@ describe('legacy: mission 11 banish-pile cleanup ordering fix (discardCleanupLow
 
     expect(state.currentEnemy?.name).toBe('Warden B'); // the 9 overkills Warden A's remaining 5 health
     expect(state.discardPile.length).toBe(0); // pileTopEnemyBonus routes a defeated enemy's table cards to BANISH, not here
-    expect(state.banishPile.length).toBe(3);
+    // 4, not 3: the felled enemy's own card is banished on top of its table cards (banishDefeatedEnemyCard).
+    expect(state.banishPile.length).toBe(4);
+    // The three TABLE cards beneath the corpse are still sorted low-to-high — the sort governs the batch it was
+    // always about, it just no longer decides the pile's top card.
+    expect(state.banishPile.slice(0, 3).map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['9', '3', '2']);
     const top = state.banishPile[state.banishPile.length - 1];
-    expect(top.kind === 'suited' && top.rank).toBe('2'); // lowest of the batch, regardless of table order
-    // Warden B's live attack reads only that lowest card: 10 base + 0 (discard pile empty) + 2 (banish pile top).
-    expect(resolvedEnemyAttack(state)).toBe(12);
+    expect(top.kind === 'suited' && top.name).toBe('Warden A');
+    expect(top.kind === 'suited' && top.noSuitPower).toBe(true); // strength but no class
+    // Warden B's live attack reads the corpse: 10 base + 0 (discard pile empty) + 1 (Warden A's own attack).
+    expect(resolvedEnemyAttack(state)).toBe(11);
   });
 
   it("without the flag, the kill (overkill) preserves table-card order on the banish pile too, so the finishing card can land on top and buff the next enemy at its worst", () => {
@@ -6500,9 +6505,9 @@ describe('legacy: mission 11 banish-pile cleanup ordering fix (discardCleanupLow
     state = res.state;
 
     // Whatever order the cards accumulated on the table lands in the banish pile unchanged — the finishing card
-    // (9) ends up on top, the pre-fix worst case.
-    expect(state.banishPile.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['2', '3', '9']);
-    expect(resolvedEnemyAttack(state)).toBe(19); // 10 base + 0 (discard) + 9 (unsorted banish-pile top)
+    // (9) still ends up above them, the pre-fix worst case — with the felled enemy's own card on top of the lot.
+    expect(state.banishPile.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['2', '3', '9', 'A']);
+    expect(resolvedEnemyAttack(state)).toBe(11); // 10 base + 0 (discard) + 1 (the corpse, whatever sits beneath it)
   });
 
   it('a single-card banish is left alone regardless of the flag — nothing to order (mirrors pushToDiscardPile\'s own single-card guard)', () => {
@@ -6515,9 +6520,61 @@ describe('legacy: mission 11 banish-pile cleanup ordering fix (discardCleanupLow
     );
     state = res.state;
 
-    expect(state.banishPile.length).toBe(1);
-    const [only] = state.banishPile;
-    expect(only.kind === 'suited' && only.rank).toBe('9');
+    // The finishing card, then the felled enemy's own card on top of it — no batch to order in either case.
+    expect(state.banishPile.length).toBe(2);
+    const [first, top] = state.banishPile;
+    expect(first.kind === 'suited' && first.rank).toBe('9');
+    expect(top.kind === 'suited' && top.name).toBe('Warden A');
+  });
+});
+
+describe('legacy: mission 11 a felled enemy is banished where it fell (John, 2026-09-05, live play)', () => {
+  it("a defeated Warden lands on the banish pile worth 10 — its own attack — and hands the next enemy +10", () => {
+    let state = startMission11(1);
+    // Kill the first Warden outright: 30 health, no table cards, so the corpse is the only thing on the pile.
+    state = rig(state, [suited('D', '9')], { maxHealth: 9, damageTaken: 0, baseAttack: 10, spadesShield: 0 });
+    state.banishPile = [];
+    state.discardPile = [];
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    ).state;
+
+    const top = state.banishPile[state.banishPile.length - 1];
+    expect(top.kind === 'suited' && top.rank).toBe('10');
+    expect(cardValue(top)).toBe(10);
+    // The next Warden: 10 base + 10 from the corpse on the banish pile.
+    expect(resolvedEnemyAttack(state)).toBe(20);
+  });
+
+  it('the corpse contributes strength but NO class — it can never block a suit', () => {
+    let state = startMission11(1);
+    state = rig(state, [suited('D', '9')], { maxHealth: 9, damageTaken: 0, baseAttack: 10, spadesShield: 0 });
+    state.banishPile = [];
+    state.discardPile = [];
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    ).state;
+
+    // The next Warden is noClass and the discard pile is empty, so the corpse is the ONLY immunity candidate —
+    // and it grants none, leaving all four classes playable.
+    expect(pileTopImmuneSuits(state.discardPile, state.banishPile, state.currentEnemy!)).toEqual([]);
+  });
+
+  it("Evil Goran's own corpse is worth 20, matching the strength he attacked with", () => {
+    const goran = missionEnemiesToSpecs(getMission(11)!.enemies).find((e) => e.name === 'Evil Goran')!;
+    let state = startMission11(1);
+    state = rig(state, [suited('D', '9')], { ...makeLegacyEnemy(goran), maxHealth: 9, damageTaken: 0, spadesShield: 0 });
+    state.banishPile = [];
+    state.castleDeck = [makeLegacyEnemy(goran)]; // something left to fight, so the mission doesn't end on the kill
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    ).state;
+
+    const top = state.banishPile[state.banishPile.length - 1];
+    expect(cardValue(top)).toBe(20);
   });
 });
 

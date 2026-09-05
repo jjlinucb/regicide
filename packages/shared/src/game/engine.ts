@@ -1,4 +1,4 @@
-import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit, SuitedCard, TurnPhase } from './types.js';
+import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, GameAction, GameState, PlayerState, Rank, SpecialAbilityId, Suit, SuitedCard, TurnPhase } from './types.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,
@@ -1561,6 +1561,54 @@ function dealDamageAndCheckDefeat(
  * and resume here afterward, the same way CHOOSE_EXACT_KILL_RESCUE resumes its own
  * mission's flow from a dedicated resolve function. `attackIncludesGuardian` — see dealDamageAndCheckDefeat.
  */
+/**
+ * The rank whose cardValue is (as close as the Rank union allows to) `value` — chosen for its VALUE, not its
+ * face. Used to mint a felled enemy's banish-pile card at exactly the strength it attacked with: Mission 11's
+ * two tiers land on '10' for a Warden and 'K' (20) for Evil Goran. Descending so each branch is an exact match
+ * wherever the union has one, and rounds DOWN otherwise rather than inflating a corpse past the enemy it came
+ * from.
+ */
+function rankForValue(value: number): Rank {
+  if (value >= 25) return '25';
+  if (value >= 20) return 'K';
+  if (value >= 19) return '19';
+  if (value >= 15) return 'Q';
+  if (value >= 12) return '12';
+  if (value >= 2) return String(Math.min(value, 10)) as Rank;
+  return 'A';
+}
+
+/**
+ * Mission 11 only (John's ruling, live play 2026-09-05): a defeated enemy's own card goes onto the BANISH pile
+ * too, on top of its played table cards — so the corpse itself keeps feeding the pile-top mechanic that defines
+ * this mission (see GameState.pileTopEnemyBonus).
+ *
+ * It contributes STRENGTH but no CLASS: the card is built with `noSuitPower`, which rules.ts's pileTopImmuneSuits
+ * already skips outright (the same treatment a Mercenary "19" gets), while banishPileTopValue reads its rank
+ * normally. The rank IS the enemy's own attack — 10 for a Warden, 20 for Evil Goran — so killing a Warden hands
+ * the next enemy a flat +10 until something else covers it.
+ *
+ * Pushed as its own single-card batch deliberately: banishCards leaves a lone card unsorted, so this lands on
+ * TOP rather than being sorted in among the table cards by discardCleanupLowToHigh (where a 10 would usually sink
+ * beneath them and contribute nothing). The +10 is the point — a kill should make the next fight harder, and the
+ * player's low-card-on-top play is a lever against the cards they choose to spend, not against the corpse.
+ */
+function banishDefeatedEnemyCard(state: GameState, enemy: EnemyState): void {
+  const corpse: Card = {
+    id: `felled-${enemy.suit}${enemy.rank}-${Date.now()}-${Math.floor(nextRandom(state) * 1e6)}`,
+    kind: 'suited',
+    suit: enemy.suit,
+    rank: rankForValue(enemy.baseAttack),
+    name: enemy.name,
+    noSuitPower: true,
+  };
+  state.banishPile.push(corpse);
+  log(
+    state,
+    `${enemyLabel(enemy)} is banished where it fell — strength ${enemy.baseAttack} on top of the banish pile, but no class with it.`,
+  );
+}
+
 function finishEnemyDefeatTail(
   state: GameState,
   enemy: EnemyState,
@@ -1573,6 +1621,7 @@ function finishEnemyDefeatTail(
     // resolvedEnemyAttack / resolveSuitPowers's blocked check). Mission 12 reuses the same rule as step two of its
     // own three-step cleanup (see the restoredCardMechanic block above for step one, and just below for step three).
     banishCards(state, enemy.tableCards);
+    if (state.pileTopEnemyBonus) banishDefeatedEnemyCard(state, enemy);
   } else if (state.ruleset === 'legacy' && state.ascendingZone && !state.zoneClosed) {
     // Mission 8, sourced fix (see GameAction's PLACE_IN_ZONE / GameState.zoneCommittedPlay): the ascending zone's
     // placement no longer costs a fresh hand card — it instead reuses a card already committed to THIS kill's
