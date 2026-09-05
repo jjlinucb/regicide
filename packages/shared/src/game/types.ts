@@ -327,6 +327,13 @@ export interface LegacyEnemySpec {
   rankLabel?: string;
 }
 
+/**
+ * The classes with no suit of their own (see legacy/classes.ts) that a Mission 11 pile top can make an enemy
+ * immune to — see rules.ts's pileTopImmuneClasses. Declared here rather than beside that function so
+ * ClientGameState can name it without types.ts importing rules.ts.
+ */
+export type SuitlessImmuneClass = 'MAGE' | 'REAVER' | 'GUARDIAN' | 'DRUID' | 'CHANTER';
+
 export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
 
 /**
@@ -1209,6 +1216,15 @@ export interface ClientGameState {
   currentEnemy: EnemyState | null;
   /** See engine.ts's resolvedEnemyAttack — the enemy's true current attack after every mission-specific buff/shield is folded in. Null when there's no current enemy. */
   liveEnemyAttack: number | null;
+  /**
+   * Mission 11 only: the classes the current enemy blocks right now because of what sits on top of the discard
+   * and banish piles — the four base classes as suits (see rules.ts's pileTopImmuneSuits) plus the suit-less ones
+   * by name (pileTopImmuneClasses). Computed server-side so the client never reimplements the rule, and shipped
+   * because for a noClass Warden this is the ONLY immunity there is: without it the player sees an empty Immune
+   * row and no way to know what a play will fail to resolve. Both are empty on every other mission.
+   */
+  pileImmuneSuits: Suit[];
+  pileImmuneClasses: SuitlessImmuneClass[];
   castleDeckCount: number;
   tavernDeckCount: number;
   discardPile: Card[];

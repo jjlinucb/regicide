@@ -1,5 +1,6 @@
 import type { ClientGameState, GameState } from './types.js';
 import { resolvedEnemyAttack } from './engine.js';
+import { pileTopImmuneClasses, pileTopImmuneSuits } from './rules.js';
 
 /** Produces the per-player view of state: every hand except the viewer's own is collapsed to a count. */
 export function redactStateFor(state: GameState, viewerPlayerId: string): ClientGameState {
@@ -19,6 +20,16 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     pendingDamage: state.pendingDamage,
     currentEnemy: state.currentEnemy,
     liveEnemyAttack: state.currentEnemy ? resolvedEnemyAttack(state) : null,
+    // Mission 11's live pile-top immunity — see ClientGameState.pileImmuneSuits. Gated on the mission's own flag
+    // so every other mission ships two empty arrays rather than a rule that doesn't apply there.
+    pileImmuneSuits:
+      state.pileTopEnemyBonus && state.currentEnemy && !state.currentEnemy.immunityBroken
+        ? pileTopImmuneSuits(state.discardPile, state.banishPile, state.currentEnemy)
+        : [],
+    pileImmuneClasses:
+      state.pileTopEnemyBonus && state.currentEnemy && !state.currentEnemy.immunityBroken
+        ? pileTopImmuneClasses(state.discardPile, state.banishPile)
+        : [],
     castleDeckCount: state.castleDeck.length,
     tavernDeckCount: state.tavernDeck.length,
     discardPile: state.discardPile,

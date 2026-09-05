@@ -1,5 +1,4 @@
-import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, GameAction, GameState, PlayerState, Rank, SpecialAbilityId, Suit, SuitedCard, TurnPhase } from './types.js';
-import type { SuitlessImmuneClass } from './rules.js';
+import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, GameAction, GameState, PlayerState, Rank, SpecialAbilityId, Suit, SuitedCard, SuitlessImmuneClass, TurnPhase } from './types.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,

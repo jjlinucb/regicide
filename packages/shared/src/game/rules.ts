@@ -1,4 +1,4 @@
-import type { Card, EnemyState, Rank, Suit } from './types.js';
+import type { Card, EnemyState, Rank, Suit, SuitlessImmuneClass } from './types.js';
 import { classForCard } from '../legacy/classes.js';
 
 /** Value of a card both as an attack value and as a discard-to-defend value (rules are identical for both uses). */
@@ -278,8 +278,7 @@ export function banishPileTopValue(banishPile: Card[]): number {
  * exactly as readily as to one of the four base classes, so a pile top is read for its real CLASS rather than
  * the basic suit such a card only borrows for bookkeeping.
  */
-const SUITLESS_IMMUNE_CLASSES = ['MAGE', 'REAVER', 'GUARDIAN', 'DRUID', 'CHANTER'] as const;
-export type SuitlessImmuneClass = (typeof SUITLESS_IMMUNE_CLASSES)[number];
+const SUITLESS_IMMUNE_CLASSES: readonly SuitlessImmuneClass[] = ['MAGE', 'REAVER', 'GUARDIAN', 'DRUID', 'CHANTER'];
 
 function suitlessClassOf(card: Card): SuitlessImmuneClass | null {
   if (card.kind !== 'suited' || card.noSuitPower) return null;

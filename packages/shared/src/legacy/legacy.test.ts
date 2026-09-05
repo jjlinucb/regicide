@@ -6658,6 +6658,28 @@ describe('legacy: mission 11 pile tops can block the suit-less classes too (John
   });
 });
 
+describe('legacy: mission 11 pile-top immunity reaches the client', () => {
+  it('ships both the suit and the suit-less class the pile tops currently block', () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [suited('H', '4')];
+    state.banishPile = [{ ...suited('C', '6'), druid: true } as Card];
+
+    const view = redactStateFor(state, state.players[0].id);
+
+    expect(view.pileImmuneSuits).toEqual(['H']);
+    expect(view.pileImmuneClasses).toEqual(['DRUID']);
+  });
+
+  it('ships empty arrays on a mission without the pile-top mechanic', () => {
+    const state = startMission(1, [{ name: 'Plain Enemy', suit: 'H', health: 20, attack: 5 }]);
+    const view = redactStateFor(state, state.players[0].id);
+
+    expect(view.pileImmuneSuits).toEqual([]);
+    expect(view.pileImmuneClasses).toEqual([]);
+  });
+});
+
 describe('legacy: mission 11 reward (Esme returns permanently upgraded)', () => {
   it("completes the mission immediately (WON) when the last enemy falls — no beast-card choice window", () => {
     const beasts = mission4BeastCards();

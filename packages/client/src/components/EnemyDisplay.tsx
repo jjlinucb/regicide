@@ -1,5 +1,5 @@
-import type { EnemyState, Suit } from '@regicide/shared';
-import { SUIT_TO_CLASS } from '@regicide/shared';
+import type { EnemyState, Suit, SuitlessImmuneClass } from '@regicide/shared';
+import { CLASS_THEME, SUIT_TO_CLASS } from '@regicide/shared';
 import { PlayingCard } from './PlayingCard';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
@@ -12,6 +12,24 @@ function ImmunityChip({ suit, legacy }: { suit: Suit; legacy: boolean }) {
   return (
     <span className="immunity-chip" style={{ color: cls.color, borderColor: cls.color }} title={`Immune to ${cls.name}`}>
       {legacy ? cls.glyph : SUIT_GLYPH[suit]}
+    </span>
+  );
+}
+
+/**
+ * The same chip for a class with no suit of its own (Mission 11's pile-top immunity — see
+ * ClientGameState.pileImmuneClasses). Keyed by class rather than suit, since these classes borrow a printed suit
+ * that has nothing to do with what they block.
+ */
+function ClassImmunityChip({ cls }: { cls: SuitlessImmuneClass }) {
+  const theme = CLASS_THEME[cls];
+  return (
+    <span
+      className="immunity-chip"
+      style={{ color: theme.color, borderColor: theme.color }}
+      title={`Immune to ${theme.name}`}
+    >
+      {theme.glyph}
     </span>
   );
 }
@@ -31,12 +49,21 @@ export function EnemyDisplay({
   enemy,
   liveAttack,
   zoneImmuneSuits,
+  pileImmuneSuits,
+  pileImmuneClasses,
 }: {
   enemy: EnemyState;
   /** See ClientGameState.liveEnemyAttack — the engine's own resolved total, every mission's buff formula already folded in (Mission 10's multiply-before-shield included, which no flat ledger term could otherwise represent). */
   liveAttack: number;
   /** Extra classes stacked on from mission-zone flips (Mission 3 and others), on top of the enemy's own suit(s). */
   zoneImmuneSuits?: Suit[];
+  /**
+   * Mission 11's live pile-top immunity (see ClientGameState.pileImmuneSuits/pileImmuneClasses). Shown with the
+   * rest, because for a noClass Warden it is the enemy's ONLY immunity — and it moves every time either pile's
+   * top card changes, so it has to be read off the board rather than remembered.
+   */
+  pileImmuneSuits?: Suit[];
+  pileImmuneClasses?: SuitlessImmuneClass[];
 }) {
   const healthRemaining = Math.max(0, enemy.maxHealth - enemy.damageTaken);
   const healthPct = Math.round((healthRemaining / enemy.maxHealth) * 100);
@@ -48,9 +75,13 @@ export function EnemyDisplay({
   const isLegacy = Boolean(enemy.name);
   const red = !isLegacy && RED_SUITS.has(enemy.suit);
 
+  // A noClass enemy (Mission 11's Wardens) contributes no suit of its own — everything it blocks comes from the
+  // mission zone or the pile tops.
+  const ownSuits: Suit[] = enemy.noClass ? [] : [enemy.suit, ...(enemy.secondSuit ? [enemy.secondSuit] : [])];
   const immuneSuits: Suit[] = enemy.immunityBroken
     ? []
-    : Array.from(new Set([enemy.suit, ...(enemy.secondSuit ? [enemy.secondSuit] : []), ...(zoneImmuneSuits ?? [])]));
+    : Array.from(new Set([...ownSuits, ...(zoneImmuneSuits ?? []), ...(pileImmuneSuits ?? [])]));
+  const immuneClasses: SuitlessImmuneClass[] = enemy.immunityBroken ? [] : (pileImmuneClasses ?? []);
 
   return (
     <div className="enemy-card">
@@ -63,11 +94,14 @@ export function EnemyDisplay({
       <div className={`enemy-title${red ? ' red' : ''}`}>
         {isLegacy ? enemy.name : `${RANK_NAME[enemy.rank]} of ${SUIT_GLYPH[enemy.suit]}`}
       </div>
-      {immuneSuits.length > 0 && (
+      {(immuneSuits.length > 0 || immuneClasses.length > 0) && (
         <div className="immunity-row">
           <span className="immunity-label">Immune:</span>
           {immuneSuits.map((s) => (
             <ImmunityChip key={s} suit={s} legacy={isLegacy} />
+          ))}
+          {immuneClasses.map((c) => (
+            <ClassImmunityChip key={c} cls={c} />
           ))}
         </div>
       )}
