@@ -25,7 +25,6 @@ import {
   MAGE_STICKER_RANKS,
   applyReaverStickerChoice,
   applyReward,
-  applyRestoredPartyCards,
   applySecondSuitByName,
   buildInitialParty,
   buildRecruitCard,
@@ -462,8 +461,8 @@ describe('legacy: jester claim', () => {
     const oldHand = [suited('S', '5')];
     state.players[1].hand = oldHand;
 
-    // Player 2 (not the jester's player) claims it — a flat, suit-less attack that ignores this Hearts-class
-    // enemy's own-class immunity, and does NOT trigger any class power (see resolveJesterAttack).
+    // Player 2 (not the jester's player) claims it — a flat, suit-less attack that does NOT trigger any class
+    // power of its own, and grants no immunity negation either (John, 2026-09-04; see resolveJesterAttack).
     res = ensureOk(applyAction(state, { type: 'CLAIM_JESTER', playerId: p2.id }));
     state = res.state;
 
@@ -4958,11 +4957,11 @@ describe("legacy: Myla's immunity can never be pierced (Mission 9 boss — John,
     expect(s.currentEnemy?.spadesShield).toBe(6); // pierced, as everywhere else in the campaign
   });
 
-  it('a claimed Jester still deals its 8 damage and still skips her counter-attack — it just never strips the immunity', () => {
-    // Note on what this can and can't observe: a Jester attack resolves as a lone suit-less synthetic card (see
-    // resolveJesterAttack's noSuitPower), so no class power is in flight for the immunity to block or let
-    // through. The rule is encoded at the same choke point as the other routes; the log line is the only place
-    // it currently surfaces. What matters mechanically is that the rest of the Jester is untouched.
+  it('a claimed Jester deals its 8 damage and skips her counter-attack — and negates no immunity, hers or anyone\'s', () => {
+    // A Jester attack resolves as a lone suit-less synthetic card (see resolveJesterAttack's noSuitPower), so no
+    // class power is ever in flight for immunity to block or let through — which is why John's 2026-09-04 ruling
+    // ("8 damage, a hand refill, the turn passes, and that is the whole card") changed no outcome anywhere, only
+    // a log line and a dead flag. What matters mechanically is that the rest of the Jester is untouched.
     const state = startMission(2, [myla], 2);
     const [p1, p2] = state.players;
     const j = jester();
@@ -4976,15 +4975,24 @@ describe("legacy: Myla's immunity can never be pierced (Mission 9 boss — John,
     expect(res.state.log.map((e) => e.message).join('\n')).not.toContain('ignoring immunity');
   });
 
-  it('CONTROL: a claimed Jester still breaks immunity against every other enemy', () => {
-    const state = startMission(2, [lorekeeper], 2);
-    const [p1, p2] = state.players;
-    const j = jester();
-    const rigged = rig(state, [j]);
-    let res = ensureOk(applyAction(rigged, { type: 'PLAY_JESTER', playerId: p1.id, cardId: j.id }));
-    res = ensureOk(applyAction(res.state, { type: 'CLAIM_JESTER', playerId: p2.id }));
-    expect(res.state.log.map((e) => e.message).join('\n')).toContain('ignoring immunity');
-  });
+  it(
+    'ORDINARY ENEMY, SAME RESULT: a claimed Jester negates no immunity there either — John, 2026-09-04. This was ' +
+      'a CONTROL case asserting the opposite, on the strength of a log line alone; the flag behind that line ' +
+      'could never change an outcome, and has been deleted along with the line.',
+    () => {
+      const state = startMission(2, [lorekeeper], 2);
+      const [p1, p2] = state.players;
+      const j = jester();
+      const rigged = rig(state, [j]);
+      let res = ensureOk(applyAction(rigged, { type: 'PLAY_JESTER', playerId: p1.id, cardId: j.id }));
+      res = ensureOk(applyAction(res.state, { type: 'CLAIM_JESTER', playerId: p2.id }));
+
+      expect(res.state.currentEnemy?.damageTaken).toBe(8);
+      expect(res.state.pendingDamage).toBe(0);
+      expect(res.state.currentEnemy?.immunityBroken).toBe(false);
+      expect(res.state.log.map((e) => e.message).join('\n')).not.toContain('ignoring immunity');
+    },
+  );
 
   it('is scoped to Myla as an ENEMY — Missions 5 and 6 only ever seed her as a card, and their enemies are untouched', () => {
     // She is a zoneCompanion card in Mission 5's banish pile and Mission 6's mission zone, never an enemy there.
@@ -5646,8 +5654,8 @@ describe('legacy: mission 10 class powers (corrupted-hero enemies)', () => {
   });
 });
 
-describe('legacy: mission 10 mission-zone defeat handling + deck-rehabilitation reward', () => {
-  function startMission10(): GameState {
+describe('legacy: mission 10 defeat handling — the mission zone, and the hero underneath it', () => {
+  function startMission10(opts: { jesterCount?: number } = {}): GameState {
     const res = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',
       playerIds: ['p0'],
@@ -5655,15 +5663,16 @@ describe('legacy: mission 10 mission-zone defeat handling + deck-rehabilitation 
       seed: 'mission-10-defeat-test',
       party: buildInitialParty(),
       enemies: [],
-      jesterCount: 0,
+      jesterCount: opts.jesterCount ?? 0,
       corruptedPartyEnemies: true,
       startOfTurnZoneFlip: false, // isolated from the unrelated start-of-turn flip mechanic
+      standingJesters: (opts.jesterCount ?? 0) > 0,
     });
     if (!res.ok) throw new Error(res.error);
     return res.state;
   }
 
-  it('an exact kill sends the whole mission zone to the discard pile and restores the fallen hero, cleansed', () => {
+  it('an exact kill sends the whole mission zone to the discard pile — the ONLY thing exactness buys on this mission', () => {
     let state = startMission10();
     // Warrior suit avoids the enemy-Paladin damage-taken reduction, keeping the exact-kill math simple.
     state = rig(state, [suited('D', '9')], { suit: 'C', baseAttack: 0, maxHealth: 9, damageTaken: 0 });
@@ -5678,63 +5687,156 @@ describe('legacy: mission 10 mission-zone defeat handling + deck-rehabilitation 
     expect(res.state.missionZone.length).toBe(0);
     expect(res.state.banishPile.length).toBe(0);
     for (const c of zoneCards) expect(res.state.discardPile.some((d) => d.id === c.id)).toBe(true);
-    expect(res.state.restoredPartyCards.map((c) => c.id)).toEqual([heroSourceCard.id]);
+    // The hero comes back too — but that has nothing to do with the exactness (see the overkill case below).
+    expect(res.state.discardPile.some((d) => d.id === heroSourceCard.id)).toBe(true);
   });
 
-  it('an overkill (non-exact) banishes the whole mission zone instead, and restores nothing', () => {
+  it(
+    'an OVERKILL banishes the mission zone but still returns the hero to the discard pile — John, 2026-09-04. ' +
+      'Regression test for the replaced community-research rule, under which an overkill left the hero lost for ' +
+      'good and only an exact hit cleansed them.',
+    () => {
+      let state = startMission10();
+      state = rig(state, [suited('D', '9')], { suit: 'C', baseAttack: 0, maxHealth: 5, damageTaken: 0 });
+      const zoneCards = [suited('H', '2'), suited('D', '3')];
+      state.missionZone = zoneCards;
+      const heroSourceCard = state.currentEnemy!.sourceCard!;
+
+      const res = ensureOk(
+        applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+      );
+
+      expect(res.state.missionZone.length).toBe(0);
+      for (const c of zoneCards) expect(res.state.banishPile.some((d) => d.id === c.id)).toBe(true);
+      expect(res.state.discardPile.some((d) => zoneCards.some((c) => c.id === d.id))).toBe(false);
+      expect(res.state.discardPile.some((d) => d.id === heroSourceCard.id)).toBe(true);
+    },
+  );
+
+  it('the hero lands in the discard pile CLEANSED, as a copy — the campaign card it was twisted from is never mutated', () => {
     let state = startMission10();
     state = rig(state, [suited('D', '9')], { suit: 'C', baseAttack: 0, maxHealth: 5, damageTaken: 0 });
-    const zoneCards = [suited('H', '2'), suited('D', '3')];
-    state.missionZone = zoneCards;
+    // White-box: this mission's eight enemies are the campaign's own corrupted party members, so the realistic
+    // case is a `corrupted` source card. buildCorruptedPartyEnemies never clones it — it is the same object the
+    // persisted roster holds, which is exactly why the engine must not clear the flag in place.
+    const heroSourceCard = state.currentEnemy!.sourceCard!;
+    if (heroSourceCard.kind === 'suited') heroSourceCard.corrupted = true;
 
     const res = ensureOk(
       applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
     );
 
-    expect(res.state.missionZone.length).toBe(0);
-    for (const c of zoneCards) expect(res.state.banishPile.some((d) => d.id === c.id)).toBe(true);
-    expect(res.state.discardPile.some((d) => zoneCards.some((c) => c.id === d.id))).toBe(false);
-    expect(res.state.restoredPartyCards.length).toBe(0);
+    const discarded = res.state.discardPile.find((c) => c.id === heroSourceCard.id)!;
+    expect(discarded).toBeDefined();
+    expect(discarded.kind === 'suited' && discarded.corrupted).toBeFalsy(); // no corrupted-card cost to play them again
+    expect(discarded.kind === 'suited' && discarded.restored).toBeFalsy(); // and no Mission 12 immunity bypass either
+    expect(discarded).not.toBe(heroSourceCard); // a copy…
+    expect(heroSourceCard.kind === 'suited' && heroSourceCard.corrupted).toBe(true); // …so the roster card keeps its corruption for Mission 12
   });
-});
 
-describe('legacy: mission 10 reward (applyRestoredPartyCards — "deck rehabilitation")', () => {
   it(
-    'REPLACES (not skips) a party card whose id matches a restored card, cleansing its `corrupted` flag — this is ' +
-      "the realistic case: RoomManager never removes the chosen card from the party when it becomes a Mission " +
-      '10 enemy, so the restored card IS the same still-corrupted party card, still present at the same id. ' +
-      'Regression test for a silent no-op: the old skip-if-present dedup treated this normal case as the rare ' +
-      "\"came back another way\" edge case and threw the restoration away entirely.",
+    'a Cleric enemy drags the hero you just cleansed straight back out of the discard pile into the mission zone, ' +
+      "powering up the next boss's attack",
     () => {
-      const party = buildInitialParty();
-      const stillCorrupted = { ...party[0], corrupted: true };
-      const partyWithCorruption = party.map((c) => (c.id === stillCorrupted.id ? stillCorrupted : c));
+      // Killed with a standing Jester (a real Mission 10 mechanic) rather than a card from hand, so the kill
+      // leaves no spent attack cards sitting on top of the hero in the discard pile — with a card kill the play's
+      // own cards settle above them (finishEnemyDefeatTail), and the drag would take one of those first.
+      let state = startMission10({ jesterCount: 2 });
+      state = rig(state, [suited('D', '4')], { suit: 'C', baseAttack: 0, maxHealth: 8, damageTaken: 0 });
+      const heroSourceCard = state.currentEnemy!.sourceCard!;
+      const heroValue = cardValue(heroSourceCard);
 
-      const next = applyRestoredPartyCards(partyWithCorruption, [stillCorrupted]);
+      // The Jester's flat 8 exactly fells this 8-health boss; the same player then continues their turn.
+      let next = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: state.players[0].id })).state;
+      expect(next.discardPile[next.discardPile.length - 1].id).toBe(heroSourceCard.id);
 
-      expect(next.length).toBe(party.length); // replaced in place, not appended as a duplicate
-      expect(next.filter((c) => c.id === stillCorrupted.id).length).toBe(1);
-      const restored = next.find((c) => c.id === stillCorrupted.id)!;
-      expect(restored.kind).toBe('suited');
-      expect(restored.kind === 'suited' && restored.corrupted).toBeFalsy();
+      // Pin the freshly-revealed boss as a Cleric with no attack of its own, so the only thing moving the number
+      // below is the mission zone. startOfTurnZoneFlip is the flag that makes the zone buff the enemy's attack at
+      // all (see resolvedEnemyAttack), so it has to be on here — with the reserve deck emptied so its own
+      // start-of-turn flip has nothing to add and the hero is the only card that reaches the zone.
+      next = rig(next, [suited('D', '2')]);
+      next.startOfTurnZoneFlip = true;
+      next.tavernDeck = [];
+      next.currentEnemy!.suit = 'H';
+      expect(classForCard(next.currentEnemy!).id).toBe('CLERIC');
+      next.currentEnemy!.baseAttack = 0;
+      next.currentEnemy!.maxHealth = 500;
+      next.currentEnemy!.damageTaken = 0;
+      expect(resolvedEnemyAttack(next)).toBe(0);
+
+      // End a turn against it: a Cleric's end-of-turn power drags the discard pile's top card into the zone.
+      const res = ensureOk(
+        applyAction(next, { type: 'PLAY_CARDS', playerId: next.players[0].id, cardIds: [next.players[0].hand[0].id] }),
+      );
+
+      expect(res.state.missionZone.map((c) => c.id)).toContain(heroSourceCard.id);
+      expect(res.state.discardPile.some((c) => c.id === heroSourceCard.id)).toBe(false);
+      // Mission 10's zone feeds bonus STRENGTH onto the current enemy's live attack (see resolvedEnemyAttack).
+      expect(resolvedEnemyAttack(res.state)).toBe(Math.min(heroValue, 10)); // 10 = MISSION_10_ZONE_BONUS_CAP
     },
   );
 
-  it('appends a restored card whose id is genuinely absent from the party (defensive fallback)', () => {
-    const party = buildInitialParty();
-    const brandNew: Card = { id: 'restored-hero-1', kind: 'suited', suit: 'H', rank: '5', name: 'Cleansed Hero', corrupted: true };
+  it(
+    'the reserve deck GROWS BACK: a cleansed hero in the discard pile heals into it on a Cleric play and can be ' +
+      'drawn and replayed at no corrupted-card cost — nothing on this mission assumes the deck only shrinks',
+    () => {
+      let state = startMission10({ jesterCount: 2 });
+      state = rig(state, [suited('D', '4')], { suit: 'C', baseAttack: 0, maxHealth: 8, damageTaken: 0 });
+      const heroSourceCard = state.currentEnemy!.sourceCard!;
+      if (heroSourceCard.kind === 'suited') heroSourceCard.corrupted = true;
 
-    const next = applyRestoredPartyCards(party, [brandNew]);
+      let next = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: state.players[0].id })).state;
+      expect(next.discardPile.some((c) => c.id === heroSourceCard.id)).toBe(true);
 
-    expect(next.length).toBe(party.length + 1);
-    const added = next.find((c) => c.id === 'restored-hero-1');
-    expect(added).toBeDefined();
-    expect(added!.kind === 'suited' && added!.corrupted).toBeFalsy(); // appended cards are cleansed too
-  });
+      // Isolate the heal: empty the reserve deck and the rest of the discard pile, then play a Hearts (Cleric)
+      // card big enough to shuffle the whole discard pile back under the reserve deck.
+      next.tavernDeck = [];
+      next.discardPile = next.discardPile.filter((c) => c.id === heroSourceCard.id);
+      next.currentEnemy!.suit = 'C'; // Warrior — not immune to the Cleric card about to be played
+      next.currentEnemy!.baseAttack = 0;
+      next.currentEnemy!.maxHealth = 500;
+      next.currentEnemy!.damageTaken = 0;
+      next = rig(next, [suited('H', '9')]);
 
-  it('is a no-op (same reference) for an empty restored list', () => {
-    const party = buildInitialParty();
-    expect(applyRestoredPartyCards(party, [])).toBe(party);
+      const healed = ensureOk(
+        applyAction(next, { type: 'PLAY_CARDS', playerId: next.players[0].id, cardIds: [next.players[0].hand[0].id] }),
+      ).state;
+
+      expect(healed.tavernDeck.length).toBeGreaterThan(0); // the deck grew back from empty
+      const backInDeck = healed.tavernDeck.find((c) => c.id === heroSourceCard.id)!;
+      expect(backInDeck).toBeDefined();
+      expect(backInDeck.kind === 'suited' && backInDeck.corrupted).toBeFalsy();
+
+      // Playing them again charges nothing: a corrupted card banishes the reserve deck's top as its cost, and
+      // this one is cleansed, so nothing is banished at all.
+      const replay = rig(healed, [backInDeck], { suit: 'C', baseAttack: 0, maxHealth: 500, damageTaken: 0 });
+      const banishedBeforeReplay = replay.banishPile.length;
+      const res = ensureOk(
+        applyAction(replay, { type: 'PLAY_CARDS', playerId: replay.players[0].id, cardIds: [backInDeck.id] }),
+      );
+      expect(res.state.banishPile.length).toBe(banishedBeforeReplay);
+    },
+  );
+
+  it('all eight heroes come back over the course of the mission — nothing is lost for good', () => {
+    let state = startMission10();
+    const heroIds: string[] = [];
+    // Fell the whole ladder with overkills, the case the replaced rule threw away entirely.
+    for (let i = 0; i < CORRUPTED_PARTY_ENEMY_COUNT; i++) {
+      expect(state.currentEnemy).not.toBeNull();
+      heroIds.push(state.currentEnemy!.sourceCard!.id);
+      state = rig(state, [suited('D', '9')], { suit: 'C', baseAttack: 0, maxHealth: 1, damageTaken: 0 });
+      state = ensureOk(
+        applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+      ).state;
+    }
+
+    expect(state.phase).toBe('WON');
+    expect(new Set(heroIds).size).toBe(CORRUPTED_PARTY_ENEMY_COUNT);
+    for (const id of heroIds) {
+      expect(state.discardPile.filter((c) => c.id === id).length).toBe(1); // back, exactly once
+      expect(state.banishPile.some((c) => c.id === id)).toBe(false);
+    }
   });
 });
 

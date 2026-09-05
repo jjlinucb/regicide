@@ -1104,18 +1104,19 @@ function resolveMageRevealChoice(state: GameState, action: Extract<GameAction, {
 /**
  * Resolves suit/class powers for a play of the given total value against the current enemy. Returns the damage
  * multiplier to apply (1 normally, 2 for Clubs, 3 for Clubs + a Cleave card). `ignoreImmunity` is Legacy-only:
- * true for an attack combined with a claimed Jester, which ignores immunity for that attack only (unlike classic
- * Regicide's Jester, this does NOT permanently set enemy.immunityBroken).
+ * true for a play carrying Gøran's Evergreen or a corrupted/restored card (see continueResolveCommittedPlay's
+ * ignoreImmunityForPlay), which ignores immunity for that play only — it never sets enemy.immunityBroken.
  *
- * DECISION (see the Spades branch below): since Legacy's own Jester claim never sets enemy.immunityBroken — that's
- * deliberate and tested, not a bug, see legacy.test.ts's "not a permanent immunity break" case — a Spades play
- * blocked by immunity under ruleset 'legacy' banks into enemy.blockedSpadesShield but can NEVER be redeemed:
- * the only code that ever folds blockedSpadesShield into real spadesShield is activateJester, which is classic
- * Regicide's Jester action and is never reachable in a Legacy game (Legacy uses playJester/claimJester instead,
- * gated separately). Rewiring claimJester to also permanently break immunity was considered and rejected — it
- * would contradict the sourced, footage-confirmed, already-tested one-shot behavior above, for every Legacy
- * mission's Jester interactions, not just the dual-immune/Paladin edge case this was found from. Instead, the log
- * message below is ruleset-aware so it never promises a payoff that can't happen.
+ * A LEGACY JESTER DOES NOT SET IT. It used to (`Boolean(claimedJester)`), reaching this function through a
+ * synthetic noSuitPower card that has no class power to unblock, so the flag could never change an outcome —
+ * deleted per John's ruling, 2026-09-04; see ignoreImmunityForPlay's own comment.
+ *
+ * DECISION (see the Spades branch below): since no Legacy path ever sets enemy.immunityBroken — that's deliberate
+ * and tested, not a bug, see legacy.test.ts's "not a permanent immunity break" case — a Spades play blocked by
+ * immunity under ruleset 'legacy' banks into enemy.blockedSpadesShield but can NEVER be redeemed: the only code
+ * that ever folds blockedSpadesShield into real spadesShield is activateJester, which is classic Regicide's
+ * Jester action and is never reachable in a Legacy game (Legacy uses playJester/claimJester instead, gated
+ * separately).
  */
 function resolveSuitPowers(
   state: GameState,
@@ -1424,15 +1425,30 @@ function dealDamageAndCheckDefeat(
         }
         state.missionZone = [];
       }
-      // Community research's "deck rehabilitation" reward (uncertain — the transcript documents no reward for
-      // this mission at all; see legacy/missions.ts's Mission 10 entry): an exact-damage kill cleanses this
-      // corrupted hero — its original, untouched party card is tracked here and restored to the campaign roster
-      // at mission end (see GameState.restoredPartyCards / party.ts's applyRestoredPartyCards). An overkill
-      // leaves the hero lost for good — no restoration, same as any other Legacy enemy's defeat.
-      if (exact && enemy.sourceCard) {
-        state.restoredPartyCards.push(enemy.sourceCard);
-        const heroLabel = enemy.sourceCard.kind === 'suited' ? enemy.sourceCard.name ?? enemyLabel(enemy) : enemyLabel(enemy);
-        log(state, `${heroLabel}'s corruption breaks under the exact hit — cleansed, they may return to the party.`);
+      // JOHN'S RULING (live play, 2026-09-04): defeating a Mission 10 boss ALWAYS returns the hero underneath it
+      // to the party's own discard pile, cleansed — exact kill or overkill, it makes no difference. They're one of
+      // your own party members; all eight come back over the course of the mission as you work down the ladder,
+      // and nothing is lost for good. Exactness buys exactly one thing on this mission, and it's the block above:
+      // the mission zone falls to the discard pile instead of being banished.
+      //
+      // REPLACES a community-research reading (this mission has no transcribed reward at all — see
+      // legacy/missions.ts's Mission 10 entry) in which only an EXACT kill cleansed the hero, and did so onto a
+      // post-mission list (the since-deleted GameState.restoredPartyCards) that rewrote the campaign roster at
+      // mission end rather than putting a card back in play. Live play superseded it on both counts.
+      //
+      // The discarded hero is a CLEANSED COPY, not the roster object: `corrupted` cleared so drawing and playing
+      // them later this mission charges no corrupted-card cost (see applyCorruptedCost), while the persisted
+      // campaign card keeps its corruption for Mission 12's restored-card mechanic to redeem. Deliberately NOT
+      // marked `restored` — that flag is Mission 12's relic upgrade and carries a whole-play immunity bypass of
+      // its own (see continueResolveCommittedPlay's playIncludesImmunityIgnoringCard), which no source or ruling
+      // grants here. Nothing puts the hero back on the campaign roster because nothing ever took them off it:
+      // buildCorruptedPartyEnemies' leftoverParty only shapes this mission's ephemeral reserve deck.
+      if (enemy.sourceCard) {
+        const hero = enemy.sourceCard;
+        const cleansedHero: Card = hero.kind === 'suited' ? { ...hero, corrupted: false } : hero;
+        pushToDiscardPile(state, [cleansedHero]);
+        const heroLabel = hero.kind === 'suited' ? hero.name ?? enemyLabel(enemy) : enemyLabel(enemy);
+        log(state, `${heroLabel}'s corruption breaks — cleansed, they fall to the discard pile and can fight again.`);
       }
     }
     if (state.zoneVengeanceOnKill) {
@@ -1796,7 +1812,6 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.capturedPiles = [];
   state.corruptedPartyEnemies = false;
   state.startOfTurnZoneFlip = false;
-  state.restoredPartyCards = [];
   state.beastDeckMechanic = false;
   state.beastDeck = [];
   state.beastDeckDiscard = [];
@@ -2004,7 +2019,6 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.capturedPiles = capturedPiles;
   state.corruptedPartyEnemies = corruptedPartyEnemies;
   state.startOfTurnZoneFlip = action.startOfTurnZoneFlip ?? false;
-  state.restoredPartyCards = [];
   state.beastDeckMechanic = beastDeckMechanic;
   state.beastDeck = beastBuild ? beastBuild.beastDeck : [];
   state.beastDeckDiscard = [];
@@ -2308,16 +2322,28 @@ function continueResolveCommittedPlay(
   // redundant for played cards and kept only for arcaneImmuneSuits (a corrupted MAGE'S chosen reveal card, whose
   // trigger is itself a played corrupted card and so already covered — belt and braces).
   const playIncludesImmunityIgnoringCard = resolvingCards.some((c) => c.kind === 'suited' && (c.corrupted || c.restored));
-  // JOHN, 2026-09-04: Myla (Mission 9's boss) is the one enemy whose immunity can never be pierced — not by a
-  // claimed Jester, not by Gøran's Evergreen, not by a corrupted or restored card, and not by a corrupted Mage's
-  // revealed suit (immunityIgnoringSuits below, the one immunity bypass that doesn't route through the flag
-  // here). Her Bard + Paladin immunity holds for the whole fight; see rules.ts's hasUnpierceableImmunity for the
-  // scoping. Nothing else about a Jester changes: it still lands its 8 damage and still skips her counter-attack
-  // (see the claimedJester check further down), it just doesn't strip the immunity any more.
+  // JOHN, 2026-09-04: Myla (Mission 9's boss) is the one enemy whose immunity can never be pierced — not by
+  // Gøran's Evergreen, not by a corrupted or restored card, and not by a corrupted Mage's revealed suit
+  // (immunityIgnoringSuits below, the one immunity bypass that doesn't route through the flag here). Her Bard +
+  // Paladin immunity holds for the whole fight; see rules.ts's hasUnpierceableImmunity for the scoping.
   const immunityIsUnpierceable =
     state.ruleset === 'legacy' && state.currentEnemy != null && hasUnpierceableImmunity(state.currentEnemy);
-  const ignoreImmunityForPlay =
-    !immunityIsUnpierceable && (Boolean(claimedJester) || evergreenActive || playIncludesImmunityIgnoringCard);
+  // NO JESTER CLAUSE HERE, DELIBERATELY. `Boolean(claimedJester)` used to be the first term of this expression
+  // and was DELETED, not merely defused — JOHN'S RULING (2026-09-04): a Jester deals its 8 damage, refills your
+  // hand and passes the turn. That is the whole card. There is no immunity negation, and no window afterwards to
+  // hang one on (a non-killing claim ends the turn immediately).
+  //
+  // It never did anything either way, which is why nothing about play changes: resolveJesterAttack is the ONLY
+  // producer of a non-null `claimedJester`, and the single play it builds is one synthetic `noSuitPower` card, so
+  // `effectiveSuits` is empty and resolveSuitPowers — the sole consumer of this flag — has no class power to
+  // unblock. Enemy immunity has never touched raw damage.
+  //
+  // Deleted rather than kept and labelled the way revealForMage's corrupted-Mage branch above is (PR #92's
+  // "DEFENSIVE, NOT A RULE"): that branch guards a state an OLD SAVE FILE can still hand the engine, and deleting
+  // it would make such a card strictly more broken. Nothing can hand the engine this one — it is unreachable by
+  // construction at its only call site — and keeping it would leave a whole-play immunity bypass armed to fire
+  // the moment anyone gave the Jester's synthetic attack a real suit. That is a rule lying in wait, not a guard.
+  const ignoreImmunityForPlay = !immunityIsUnpierceable && (evergreenActive || playIncludesImmunityIgnoringCard);
   if (evergreenActive) {
     log(
       state,
@@ -2350,7 +2376,7 @@ function continueResolveCommittedPlay(
   log(
     state,
     `${player.name} plays ${cards.length > 1 ? 'a combo' : 'a card'} for ${damage}${
-      claimedJester ? `, combined with the claimed Jester${ignoreImmunityForPlay ? ' — ignoring immunity' : ' — but the immunity holds'}` : ''
+      claimedJester ? ', combined with the claimed Jester' : ''
     }.`,
   );
   if (state.ruleset === 'legacy') checkPilgrimRescue(state, cards);
@@ -2769,17 +2795,6 @@ function playJester(state: GameState, action: Extract<GameAction, { type: 'PLAY_
 }
 
 /**
- * What a Jester claim/use actually promises against the enemy in front of it. Every enemy but one loses its
- * immunity to that attack; Myla (Mission 9's boss) never does — see rules.ts's hasUnpierceableImmunity — so the
- * log doesn't tell the table she did.
- */
-function jesterImmunityClause(state: GameState): string {
-  return state.currentEnemy && hasUnpierceableImmunity(state.currentEnemy)
-    ? 'though this enemy\'s immunity holds regardless'
-    : 'ignoring immunity';
-}
-
-/**
  * Legacy-only: claims an open Jester window. Validated against the window being open, not turn ownership — any
  * player may claim. Resolves immediately as its own attack (see below) rather than handing the claimant a
  * separate PLAY_CARDS step, matching the base game's own printed Jester text ("play it on its own, instead of
@@ -2799,7 +2814,7 @@ function claimJester(state: GameState, action: Extract<GameAction, { type: 'CLAI
   state.currentPlayerIndex = state.players.findIndex((p) => p.id === player.id);
   state.turnPhase = 'AWAIT_PLAY';
   state.kinfolkBankedThisTurn = false;
-  log(state, `${player.name} claims the Jester — a free 8-strength attack, ${jesterImmunityClause(state)}.`);
+  log(state, `${player.name} claims the Jester — a free 8-strength attack, and no counter-attack in return.`);
   return resolveJesterAttack(state, player, jesterCard, 'discard');
 }
 
@@ -2819,7 +2834,7 @@ function useStandingJester(state: GameState, action: Extract<GameAction, { type:
   const jesterCard = state.standingJesters[0];
   state.standingJesters = state.standingJesters.slice(1);
   state.lastActionWasYield[state.currentPlayerIndex] = false;
-  log(state, `${player.name} calls on a standing Jester — a free 8-strength attack, ${jesterImmunityClause(state)}.`);
+  log(state, `${player.name} calls on a standing Jester — a free 8-strength attack, and no counter-attack in return.`);
   return resolveJesterAttack(state, player, jesterCard, 'topUp');
 }
 
@@ -2834,8 +2849,8 @@ function useStandingJester(state: GameState, action: Extract<GameAction, { type:
  * heal/draw/double-damage/reduce-enemy-attack) — a flat, suit-less 8-strength hit, per the base game's actual
  * printed Jester (which has no suit at all). This used to let the claimant choose a real suit and get that
  * class's power too; dropped per John's own call, since the choice never had a source behind it and the base
- * game's Jester doesn't work that way. Immunity-ignoring is driven entirely by `claimedJester` being non-null in
- * resolveCommittedPlay/resolveSuitPowers, not by the suit, so dropping the suit doesn't touch that at all.
+ * game's Jester doesn't work that way. A Jester grants no immunity negation either — John's ruling, 2026-09-04:
+ * 8 damage, a hand refill, and the turn passes, and that is the whole card (see ignoreImmunityForPlay).
  *
  * `refillMode` picks which hand-refill power applies afterward — 'discard' is the base game's own printed Jester
  * power (discard the whole hand, redraw to max — CLAIM_JESTER); 'topUp' is Mission 2/3's own unsourced house rule
@@ -3599,7 +3614,6 @@ export function createLobbyState(): GameState {
     capturedPiles: [],
     corruptedPartyEnemies: false,
     startOfTurnZoneFlip: false,
-    restoredPartyCards: [],
     beastDeckMechanic: false,
     beastDeck: [],
     beastDeckDiscard: [],

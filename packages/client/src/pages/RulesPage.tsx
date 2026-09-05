@@ -221,8 +221,9 @@ function LegacyTab() {
             </li>
             <li>
               <strong>The Jester</strong> works differently here: play it into the middle of the table, and any
-              player — including you — may claim it. Claiming resolves as a free 8-strength attack in a class of
-              your choosing, ignoring that enemy's immunity, then discards your hand and deals you a fresh one.
+              player — including you — may claim it. Claiming resolves as a flat, class-less 8-strength attack
+              that the enemy cannot answer, then discards your hand and deals you a fresh one. It does not negate
+              the enemy's immunity.
             </li>
             <li>Multi-card attacks (Kinfolk and Animal) resolve every class power once, at the combined strength.</li>
             <li>Communication rules are the same as classic Regicide — no hinting at your hand.</li>
