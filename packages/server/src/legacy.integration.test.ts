@@ -547,10 +547,15 @@ describe('legacy campaign integration', () => {
     expect(pool.some((c) => c.kind === 'suited' && c.name === 'Ash')).toBe(false);
     // The Mage beast still survived the round trip into the mission with BOTH flags intact — it just landed in
     // the playable party rather than the beast deck.
-    const ash = result.room.gameState.players
-      .flatMap((p) => p.hand)
-      .concat(result.room.gameState.tavernDeck)
-      .find((c) => c.kind === 'suited' && c.name === 'Ash');
+    // Searched across every in-play zone, not just hands and the reserve deck: the beast deck flips once at
+    // mission start, and a Paladin/Cleric/Bard flip can move Ash straight to the discard or banish pile before
+    // anyone acts. Wherever he lands, he's in the mission rather than in the beast deck.
+    const ash = [
+      ...result.room.gameState.players.flatMap((p) => p.hand),
+      ...result.room.gameState.tavernDeck,
+      ...result.room.gameState.discardPile,
+      ...result.room.gameState.banishPile,
+    ].find((c) => c.kind === 'suited' && c.name === 'Ash');
     expect(ash).toMatchObject({ beast: true, arcane: true });
 
     client.close();

@@ -9,6 +9,7 @@ import {
   isMageCard,
   isSuitBlockedByImmunity,
   missionZoneValueSum,
+  pileTopImmuneClasses,
   pileTopImmuneSuits,
 } from '../game/rules.js';
 import type { Card, EngineResult, GameAction, GameState, LegacyEnemySpec, Rank, SuitedCard } from '../game/types.js';
@@ -6575,6 +6576,85 @@ describe('legacy: mission 11 a felled enemy is banished where it fell (John, 202
 
     const top = state.banishPile[state.banishPile.length - 1];
     expect(cardValue(top)).toBe(20);
+  });
+});
+
+describe('legacy: mission 11 pile tops can block the suit-less classes too (John, 2026-09-05)', () => {
+  it('a Reaver on a pile top grants REAVER immunity, not the basic suit it borrows', () => {
+    const reaver: Card = { ...suited('C', '6'), name: 'Vex', reaver: true };
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [reaver];
+    state.banishPile = [];
+
+    expect(pileTopImmuneClasses(state.discardPile, state.banishPile)).toEqual(['REAVER']);
+    // Its printed Clubs is bookkeeping, not a class it can lend the enemy.
+    expect(pileTopImmuneSuits(state.discardPile, state.banishPile, state.currentEnemy!)).toEqual([]);
+  });
+
+  it("blocks a played Reaver's doubling, but the card still deals its damage", () => {
+    const reaver: Card = { ...suited('C', '6'), name: 'Vex', reaver: true };
+    let state = startMission11(1);
+    state = rig(state, [reaver], { maxHealth: 200, damageTaken: 0, baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [{ ...suited('S', '4'), name: 'Другой', reaver: true } as Card];
+    state.banishPile = [];
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [reaver.id] }),
+    );
+
+    // 6 damage, not 12: the Reaver's own double is blocked, the hit itself is not.
+    expect(res.state.currentEnemy!.damageTaken).toBe(6);
+    expect(res.state.log.some((e) => e.message.includes('immune to that class'))).toBe(true);
+  });
+
+  it("CONTROL: with nothing Reaver-ish on either pile, the same play doubles as normal", () => {
+    const reaver: Card = { ...suited('C', '6'), name: 'Vex', reaver: true };
+    let state = startMission11(1);
+    state = rig(state, [reaver], { maxHealth: 200, damageTaken: 0, baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [];
+    state.banishPile = [];
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [reaver.id] }));
+    // The reveal-and-add package runs first when it ISN'T blocked — decline it (reveal 0) so the comparison with
+    // the blocked case above is purely about the doubling.
+    expect(res.state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
+    res = ensureOk(applyAction(res.state, { type: 'CHOOSE_REAVER_REVEAL_COUNT', playerId: state.players[0].id, count: 1 }));
+    // Pick the revealed card, adding its value on top — the doubling is what this test is really watching.
+    const picked = res.state.reaverReveal!.candidates[0];
+    res = ensureOk(
+      applyAction(res.state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: picked.id }),
+    );
+
+    // (6 + the revealed card's value) doubled — strictly more than the blocked case's flat 6.
+    expect(res.state.currentEnemy!.damageTaken).toBe((6 + cardValue(picked)) * 2);
+    expect(res.state.currentEnemy!.damageTaken).toBeGreaterThan(6);
+  });
+
+  it("blocks a Mage's reveal-and-chain when a Mage sits on a pile top", () => {
+    const mage: Card = { ...suited('S', '7'), name: 'Wend', arcane: true };
+    let state = startMission11(1);
+    state = rig(state, [mage], { maxHealth: 200, damageTaken: 0, baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [{ ...suited('H', '3'), name: 'Other Mage', arcane: true } as Card];
+    state.banishPile = [];
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage.id] }),
+    );
+
+    // No reveal window opened, and the play resolved straight through for its plain value.
+    expect(res.state.turnPhase).not.toBe('AWAIT_MAGE_REVEAL');
+    expect(res.state.currentEnemy!.damageTaken).toBe(7);
+    expect(res.state.log.some((e) => e.message.includes("Mage's reveal is blocked"))).toBe(true);
+  });
+
+  it('each pile top grants at most its own one class, so the two piles can block two different ones', () => {
+    const state = startMission11(1);
+    const discard = [{ ...suited('C', '6'), reaver: true } as Card];
+    const banish = [{ ...suited('H', '4'), druid: true } as Card];
+
+    expect(new Set(pileTopImmuneClasses(discard, banish))).toEqual(new Set(['REAVER', 'DRUID']));
+    expect(pileTopImmuneSuits(discard, banish, state.currentEnemy!)).toEqual([]);
   });
 });
 

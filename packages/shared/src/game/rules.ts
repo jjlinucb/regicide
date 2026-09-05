@@ -1,4 +1,5 @@
 import type { Card, EnemyState, Rank, Suit } from './types.js';
+import { classForCard } from '../legacy/classes.js';
 
 /** Value of a card both as an attack value and as a discard-to-defend value (rules are identical for both uses). */
 export function cardValue(card: Card): number {
@@ -271,6 +272,42 @@ export function banishPileTopValue(banishPile: Card[]): number {
  * already-tested mechanic (see that function's own doc comment for why a prior attempt to reuse Mission 3's cap
  * there had to be reverted).
  */
+/**
+ * The newer classes a pile top can block — the ones with no suit of their own (see legacy/classes.ts). John's
+ * ruling, live play 2026-09-05: a Mission 11 enemy can be immune to Mage, Reaver, Guardian, Druid or Chanter
+ * exactly as readily as to one of the four base classes, so a pile top is read for its real CLASS rather than
+ * the basic suit such a card only borrows for bookkeeping.
+ */
+const SUITLESS_IMMUNE_CLASSES = ['MAGE', 'REAVER', 'GUARDIAN', 'DRUID', 'CHANTER'] as const;
+export type SuitlessImmuneClass = (typeof SUITLESS_IMMUNE_CLASSES)[number];
+
+function suitlessClassOf(card: Card): SuitlessImmuneClass | null {
+  if (card.kind !== 'suited' || card.noSuitPower) return null;
+  const cls = classForCard(card).id;
+  return (SUITLESS_IMMUNE_CLASSES as readonly string[]).includes(cls) ? (cls as SuitlessImmuneClass) : null;
+}
+
+/**
+ * Legacy-only (Mission 11): the suit-less class(es) the current enemy blocks because of what sits on top of the
+ * discard and banish piles right now — the counterpart to pileTopImmuneSuits, which covers the four base
+ * classes. Same shape and same live recomputation; a pile top grants EITHER a base suit (there) or one of these
+ * (here), never both, since a card has exactly one real class.
+ *
+ * Blocking one of these stops that class's POWER only (John's ruling): the card is still playable and still
+ * deals its damage, exactly as an immune Cleric still hits without healing. See engine.ts's resolveSuitPowers,
+ * which gates the Reaver double, the Guardian shield, and the Druid and Chanter windows on this.
+ */
+export function pileTopImmuneClasses(discardPile: Card[], banishPile: Card[]): SuitlessImmuneClass[] {
+  const classes = new Set<SuitlessImmuneClass>();
+  for (const pile of [discardPile, banishPile]) {
+    const top = pile[pile.length - 1];
+    if (!top) continue;
+    const cls = suitlessClassOf(top);
+    if (cls) classes.add(cls);
+  }
+  return Array.from(classes);
+}
+
 export function pileTopImmuneSuits(discardPile: Card[], banishPile: Card[], enemy: EnemyState): Suit[] {
   // A noClass enemy contributes no inherent suit to bound against (see EnemyState.noClass), so both pile tops
   // are free to each grant one — 0-2 blocked classes in total, entirely determined by what's sitting on the piles.
@@ -283,6 +320,9 @@ export function pileTopImmuneSuits(discardPile: Card[], banishPile: Card[], enem
     // A Mercenary "19" (see SuitedCard.noSuitPower) carries an inert placeholder suit and must never contribute
     // immunity here, same as it's excluded from the combined suit-power resolution when actually played.
     if (top?.kind !== 'suited' || top.noSuitPower) continue;
+    // A card whose real class is one of the suit-less ones grants THAT class instead (see
+    // pileTopImmuneClasses) — the basic suit it carries is bookkeeping, not a class it can lend an enemy.
+    if (suitlessClassOf(top)) continue;
     for (const s of cardSuits(top)) {
       if (!totalImmuneSuits.has(s)) {
         totalImmuneSuits.add(s);

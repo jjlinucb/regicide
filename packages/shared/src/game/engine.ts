@@ -1,4 +1,5 @@
 import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, GameAction, GameState, PlayerState, Rank, SpecialAbilityId, Suit, SuitedCard, TurnPhase } from './types.js';
+import type { SuitlessImmuneClass } from './rules.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,
@@ -31,6 +32,7 @@ import {
   MAX_SOLO_JESTERS,
   matchesAscendingZoneSlot,
   missionZoneValueSum,
+  pileTopImmuneClasses,
   pileTopImmuneSuits,
   validatePlayShape,
 } from './rules.js';
@@ -874,7 +876,11 @@ function startReaverPhase(
   arcaneCards: SuitedCard[],
   arcaneImmuneSuits: Suit[],
 ): EngineResult {
-  const reaverTrigger = state.ruleset === 'legacy' ? cards.find(isReaverCard) : undefined;
+  // A REAVER-immune enemy blocks the whole "Reveal and Add" package, the reveal included — it is one class
+  // power, the same way a blocked Mage reveals nothing (see enemyBlocksClass). The doubling is blocked
+  // separately in continueResolveCommittedPlay, which is what a play that got this far still has to pass.
+  const reaverBlocked = enemyBlocksClass(state, 'REAVER');
+  const reaverTrigger = state.ruleset === 'legacy' && !reaverBlocked ? cards.find(isReaverCard) : undefined;
   if (reaverTrigger) {
     if (state.tavernDeck.length === 0) {
       return revealForReaver(state, player.id, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, totalValue, reaverTrigger);
@@ -2196,6 +2202,18 @@ function resumeEndlessSave(state: GameState, action: Extract<GameAction, { type:
  * since neither path has done anything by that point that would change what that check reports; claimJester never
  * passes it (defaults to false) since a Jester claim isn't a response to a rejected yield.
  */
+/**
+ * Mission 11 (John, 2026-09-05): whether the current enemy blocks one of the suit-less classes right now,
+ * because a card of that class sits on top of the discard or banish pile (see rules.ts's pileTopImmuneClasses).
+ * Recomputed on every call, like every other part of this mission's pile-top mechanic — both piles keep moving.
+ * A claimed Jester breaks the enemy's immunity and clears this along with everything else.
+ */
+function enemyBlocksClass(state: GameState, cls: SuitlessImmuneClass): boolean {
+  if (state.ruleset !== 'legacy' || !state.pileTopEnemyBonus) return false;
+  if (!state.currentEnemy || state.currentEnemy.immunityBroken) return false;
+  return pileTopImmuneClasses(state.discardPile, state.banishPile).includes(cls);
+}
+
 function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null, forcedPlay = false): EngineResult {
   const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
@@ -2204,7 +2222,15 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   // card (or secondClassArcane bonus-sticker card) in the play triggers its own independent reveal off the top of
   // the reserve deck, always before every other class power resolves (see continueResolveCommittedPlay) —
   // resolved first here since the chosen bonus feeds into the play's own effective total value.
-  const mageQueue = state.ruleset === 'legacy' ? cards.filter(isMageCard) : [];
+  // Mission 11 (John, 2026-09-05): a MAGE-immune enemy blocks the reveal-and-chain outright, since that IS the
+  // Mage's class power — the cards are still played and still deal their damage, they just draw nothing off the
+  // reserve deck. Checked here rather than in continueResolveCommittedPlay's classBlocked, because the reveal
+  // runs before that function is ever reached (see rules.ts's pileTopImmuneClasses).
+  const mageImmune = enemyBlocksClass(state, 'MAGE');
+  const mageQueue = state.ruleset === 'legacy' && !mageImmune ? cards.filter(isMageCard) : [];
+  if (mageImmune && cards.some(isMageCard)) {
+    log(state, "The Mage's reveal is blocked — the enemy is immune to that class via the discard/banish piles.");
+  }
   if (mageQueue.length > 0) {
     const [trigger] = mageQueue;
     const rest = mageQueue.slice(1);
@@ -2287,8 +2313,27 @@ function continueResolveCommittedPlay(
   // Warrior (Clubs) card compounds into quadruple damage. Reuses isReaverCard (not a raw `.reaver` check) so a
   // secondClassReaver sticker card (Mission 5's reaverStickerChoice reward) gets the same doubling, not just the
   // reveal — the whole "Reveal and Add" package, exactly like a pure Reaver card.
+  // Mission 11 (John's ruling, live play 2026-09-05): the pile tops can block a SUIT-LESS class too — Mage,
+  // Reaver, Guardian, Druid or Chanter — not just one of the four base classes (see rules.ts's
+  // pileTopImmuneClasses). Blocking one stops that class's POWER only: the card is still played and still deals
+  // its damage, exactly as an immune Cleric still hits without healing. An Evergreen card ignores immunity as it
+  // always has (see evergreenActive below), and nothing here touches Myla's unpierceable ward.
+  // A claimed Jester breaks the enemy's immunity outright, this alongside everything else.
+  const immuneClasses = new Set(
+    state.pileTopEnemyBonus && state.currentEnemy && !state.currentEnemy.immunityBroken
+      ? pileTopImmuneClasses(state.discardPile, state.banishPile)
+      : [],
+  );
+  const classBlocked = (cls: SuitlessImmuneClass, label: string): boolean => {
+    if (!immuneClasses.has(cls)) return false;
+    log(state, `${label} is blocked — the enemy is immune to that class via the discard/banish piles.`);
+    return true;
+  };
+
   const reaverCards = resolvingCards.filter(isReaverCard);
-  const reaverMultiplier = state.ruleset === 'legacy' && reaverCards.length > 0 ? 2 : 1;
+  const reaverActive =
+    state.ruleset === 'legacy' && reaverCards.length > 0 && !classBlocked('REAVER', reaverCards[0]?.name ?? 'A Reaver');
+  const reaverMultiplier = reaverActive ? 2 : 1;
 
   // Guardians (Mission 6): playing one raises an absolute shield that blocks the enemy's very next attack
   // entirely, regardless of the card's own value — spent the instant it's used, not a stacking reduction.
@@ -2301,7 +2346,11 @@ function continueResolveCommittedPlay(
     (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian || c.secondClassGuardian),
   );
   let guardianBlocksNextAttack = false;
-  if (state.ruleset === 'legacy' && guardianCards.length > 0) {
+  if (
+    state.ruleset === 'legacy' &&
+    guardianCards.length > 0 &&
+    !classBlocked('GUARDIAN', guardianCards[0].name ?? 'A Guardian')
+  ) {
     const enemy = state.currentEnemy!;
     if (hasSpecial(guardianCards, 'AEGIS')) {
       enemy.spadesShield = enemy.baseAttack;
@@ -2321,7 +2370,8 @@ function continueResolveCommittedPlay(
   const druidCards = resolvingCards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.druid || c.secondClassDruid),
   );
-  const regrowthActive = state.ruleset === 'legacy' && druidCards.length > 0;
+  const regrowthActive =
+    state.ruleset === 'legacy' && druidCards.length > 0 && !classBlocked('DRUID', druidCards[0]?.name ?? 'A Druid');
   if (regrowthActive) {
     log(state, `${druidCards[0].name ?? 'A Druid'} channels Regrowth — the discard pile is dealt out across the table.`);
   }
@@ -2339,7 +2389,8 @@ function continueResolveCommittedPlay(
   const chanterCards = resolvingCards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.chanter || c.secondClassChanter),
   );
-  const chantTriggered = state.ruleset === 'legacy' && chanterCards.length > 0;
+  const chantTriggered =
+    state.ruleset === 'legacy' && chanterCards.length > 0 && !classBlocked('CHANTER', chanterCards[0]?.name ?? 'A Chanter');
 
   // Gøran's Evergreen (Mission 9): playing his card resolves all four base class powers at once — heal, draw,
   // double damage, reduce enemy strength — and ignores enemy immunity, regardless of which suits are actually in
