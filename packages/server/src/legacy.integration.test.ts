@@ -514,7 +514,14 @@ describe('legacy campaign integration', () => {
     if ('error' in restarted) throw new Error(restarted.error);
     const started = rooms.startLegacyMission(created.code, created.playerId, 10);
     if ('error' in started) throw new Error(started.error);
-    const inPlay = [...started.room.gameState.tavernDeck, ...started.room.gameState.players.flatMap((p) => p.hand)];
+    // The mission zone counts as "in play" too, and has to: Mission 10 flips the reserve deck's top card into it
+    // at the very first turn's start (engine.ts's flipStartOfTurnZoneCard), so roughly 1 attempt in 35 puts Ash
+    // there instead of in the deck or a hand. Leaving it out made this assertion flake at about that rate.
+    const inPlay = [
+      ...started.room.gameState.tavernDeck,
+      ...started.room.gameState.missionZone,
+      ...started.room.gameState.players.flatMap((p) => p.hand),
+    ];
     expect(inPlay.some((c) => c.id === pool[0].id)).toBe(true);
 
     client.close();
@@ -783,6 +790,73 @@ describe('legacy campaign integration', () => {
     const awarded = applied.room.legacy!.party.find((c) => c.id === applied.awardedCardId)!;
     expect(awarded.kind === 'suited' && awarded.rank).toBe('8');
     expect(mageStickerEligible(awarded, '8')).toBe(false); // it carries the sticker now, so it's out of the pool
+
+    client.close();
+  });
+
+  it('the Corrupted Evergreen Mother is banked permanently at Mission 9 and is still on the table in Mission 10 (John, 2026-09-04 — the relic is not healed at Mission 9)', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Iris' });
+
+    // Jumping to 10 back-grants Missions 1-9's rewards, so this walks the real campaign path, not a rigged save.
+    const result = rooms.startLegacyMission(created.code, created.playerId, 10);
+    if ('error' in result) throw new Error(result.error);
+
+    // Permanent, not mission-scoped: startingRelics would have evaporated the moment Mission 9 ended.
+    expect(result.room.legacy!.permanentRules).toContain('CORRUPTED_EVERGREEN_MOTHER');
+    // No mission grants the healed tier any more — John hasn't said where it heals.
+    expect(result.room.legacy!.permanentRules).not.toContain('EVERGREEN_MOTHER');
+    // And it is genuinely live in the Mission 10 fight, not merely recorded on the campaign.
+    expect(result.room.gameState.relics).toContain('CORRUPTED_EVERGREEN_MOTHER');
+    expect(result.room.gameState.phase).toBe('IN_PROGRESS');
+
+    client.close();
+  });
+
+  it('Missions 11 and 12 carry the corrupted relic too — it never heals along the way', async () => {
+    for (const missionId of [11, 12]) {
+      const client = ioClient(`http://localhost:${port}`);
+      await waitFor(client, 'connect');
+      const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', {
+        name: `Rune${missionId}`,
+      });
+      const result = rooms.startLegacyMission(created.code, created.playerId, missionId);
+      if ('error' in result) throw new Error(result.error);
+      expect(result.room.gameState.relics).toContain('CORRUPTED_EVERGREEN_MOTHER');
+      expect(result.room.gameState.relics).not.toContain('EVERGREEN_MOTHER');
+      expect(result.room.gameState.phase).toBe('IN_PROGRESS');
+      client.close();
+    }
+  });
+
+  it('a campaign that walks Missions 1-9 through RoomManager reaches Mission 10 with exactly one corrupted card per rank 2-9', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Odette' });
+
+    const result = rooms.startLegacyMission(created.code, created.playerId, 10);
+    if ('error' in result) throw new Error(result.error);
+
+    // The persisted roster, not the in-mission party: Mission 10 pulls its 8 enemies out of the fight's copy.
+    const corrupted = result.room.legacy!.party.filter((c) => c.kind === 'suited' && c.corrupted);
+    expect(corrupted.length).toBe(8);
+    expect(corrupted.map((c) => (c.kind === 'suited' ? String(c.rank) : '')).sort()).toEqual(['2', '3', '4', '5', '6', '7', '8', '9']);
+
+    // And the fight's own 8-enemy queue is those same cards — the random fallback never ran.
+    const queue = [result.room.gameState.currentEnemy!, ...result.room.gameState.castleDeck];
+    expect(queue.length).toBe(8);
+    expect(queue.every((e) => e.sourceCard?.kind === 'suited' && e.sourceCard.corrupted)).toBe(true);
+    expect(queue.map((e) => (e.sourceCard!.kind === 'suited' ? String(e.sourceCard!.rank) : ''))).toEqual([
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+    ]);
 
     client.close();
   });

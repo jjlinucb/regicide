@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
 import { redactStateFor } from '../game/redact.js';
-import { makeRng } from '../game/deck.js';
+import { buildCorruptedPartyEnemies, CORRUPTED_PARTY_ENEMY_COUNT, makeRng } from '../game/deck.js';
 import { cardSuits, cardValue, isBeastCompanion, isMageCard, missionZoneValueSum } from '../game/rules.js';
 import type { Card, EngineResult, GameAction, GameState, LegacyEnemySpec, Rank, SuitedCard } from '../game/types.js';
 import { CLASS_THEME, classForCard } from './classes.js';
@@ -11,6 +11,7 @@ import {
   applyChanterStickerChoice,
   applyCorruptAnotherCard,
   canBeCorrupted,
+  corruptedRanks,
   applyDruidStickerChoice,
   applyExtraSuitByName,
   applyDualClassStickers,
@@ -5155,7 +5156,10 @@ describe("legacy: Mission 9's Mage sticker is a rank choice, with a random recip
   });
 });
 
-describe('legacy: Evergreen Mother relic (Mission 9 reward — corrupted-card cost redirect)', () => {
+// The HEALED tier's own behavior. No mission grants it any more (John, 2026-09-04 — the relic stays corrupted
+// through Mission 10 and possibly 11), so these cover the relic itself, not a reachable campaign state; the
+// corrupted tier, which every mission from 9 on actually holds, is covered by the "two Evergreen Mothers" suite.
+describe('legacy: Evergreen Mother relic (the healed tier — corrupted-card cost redirect)', () => {
   function startWithRelic(n: number, enemies: LegacyEnemySpec[]): GameState {
     const ids = Array.from({ length: n }, (_, i) => `p${i}`);
     const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
@@ -5212,11 +5216,13 @@ describe('legacy: Evergreen Mother relic (Mission 9 reward — corrupted-card co
   });
 });
 
-describe('legacy: mission 9 reward (Evergreen Mother relic, Goran upgraded to Evergreen in place, Mage sticker)', () => {
-  it('SOURCED FIX: grants no new recruit here — instead upgrades the existing Goran (introduced by Mission 4\'s own reward) to Evergreen, plus the Evergreen Mother relic and a bonus Mage sticker', () => {
+describe('legacy: mission 9 reward (Corrupted Evergreen Mother relic, Goran upgraded to Evergreen in place, Mage sticker)', () => {
+  it('SOURCED FIX: grants no new recruit here — instead upgrades the existing Goran (introduced by Mission 4\'s own reward) to Evergreen, plus the Corrupted Evergreen Mother relic and a bonus Mage sticker', () => {
     const mission4 = getMission(4)!;
     const mission9 = getMission(9)!;
-    expect(mission9.reward.relics).toEqual(['EVERGREEN_MOTHER']);
+    // The CORRUPTED tier, not the healed one — John, 2026-09-04: the relic stays corrupted through Mission 10
+    // and possibly Mission 11. See the "relic stays corrupted" suite below.
+    expect(mission9.reward.relics).toEqual(['CORRUPTED_EVERGREEN_MOTHER']);
     expect(mission9.reward.mageStickerRankChoice).toBe(true);
     // No brand-new PARTY recruit — sourced correction. The one recruit here is Ash, a beast-flagged card that
     // never joins the roster at all (RoomManager routes it to the beastCompanionPool); see the Ash suite below.
@@ -5413,8 +5419,9 @@ describe('legacy: mission 10 setup (Pride to Fall)', () => {
       "see legacy-missions-transcript-mismatches memory doc's Mission 10 section",
     () => {
       const party = buildInitialParty();
-      // Mark exactly 3 party cards corrupted (fewer than the 8 the queue needs — realistic today, since no
-      // earlier mission's reward path actually sets this flag yet; see deck.ts's buildCorruptedPartyEnemies).
+      // Mark exactly 3 party cards corrupted — fewer than the 8 the queue needs, i.e. a PARTIAL history: a save
+      // that jumped in partway, or one written before the eight-mission ladder existed. A campaign played
+      // straight through arrives with all 8 (see the "completed campaign" suite at the end of this file).
       const corruptedIds = new Set(party.slice(0, 3).map((c) => c.id));
       const seededParty = party.map((c) => (corruptedIds.has(c.id) ? { ...c, corrupted: true } : c));
 
@@ -5424,15 +5431,16 @@ describe('legacy: mission 10 setup (Pride to Fall)', () => {
 
       // All 3 corrupted members were pulled into the queue...
       for (const id of corruptedIds) expect(queueSourceIds.has(id)).toBe(true);
-      // ...and the remaining 5 slots fell back to the old random-sample-from-the-whole-party behavior to fill
-      // out the queue, exactly as before this fix, since only 3 corrupted members exist to draw from.
+      // ...and the remaining 5 slots fell back to a random sample to fill out the queue, since only 3 corrupted
+      // members exist to draw from.
       expect(queue.length).toBe(8);
     },
   );
 
-  it('falls back to a random sample from the whole party when no member is corrupted yet (today\'s realistic campaign state)', () => {
-    // buildInitialParty() never marks anything corrupted — no earlier mission's reward path does that yet — so
-    // this is the actual state a real campaign reaches Mission 10 in today, not a hypothetical.
+  it('falls back to a random sample from the whole party when no member is corrupted at all (the jump path)', () => {
+    // buildInitialParty() marks nothing corrupted. Not the normal route into Mission 10 any more — a completed
+    // campaign brings 8 corrupted cards with it — but still the state a directly-seeded party arrives in, and
+    // eight enemies have to exist either way.
     const state = startMission10(1, { startOfTurnZoneFlip: false });
     const queue = [state.currentEnemy!, ...state.castleDeck];
     expect(queue.length).toBe(8);
@@ -6847,7 +6855,7 @@ describe('legacy: Mercenary any-suit Ace (wildSuit)', () => {
   });
 });
 
-describe('legacy: mission 9 — the two Evergreen Mother relics (John, 2026-09-04)', () => {
+describe('legacy: mission 9 — the two Evergreen Mother relics, only one of which any mission grants (John, 2026-09-04)', () => {
   /** Starts a mission exactly as RoomManager does: the campaign's permanently earned relics, plus the mission's own. */
   function startWithRelics(n: number, enemies: LegacyEnemySpec[], opts: { relics?: string[]; startingRelics?: string[] }): GameState {
     const ids = Array.from({ length: n }, (_, i) => `p${i}`);
@@ -6883,11 +6891,20 @@ describe('legacy: mission 9 — the two Evergreen Mother relics (John, 2026-09-0
     };
   }
 
-  it('starts holding the corrupted relic and rewards the healed one — two distinct relics, not one in two states', () => {
+  it('puts the corrupted relic on the table at setup AND banks that same corrupted relic permanently — it is not healed here (John, 2026-09-04)', () => {
     const mission9 = getMission(9)!;
     expect(mission9.startingRelics).toEqual(['CORRUPTED_EVERGREEN_MOTHER']);
-    expect(mission9.reward.relics).toEqual(['EVERGREEN_MOTHER']);
-    expect(mission9.startingRelics).not.toEqual(mission9.reward.relics);
+    expect(mission9.reward.relics).toEqual(['CORRUPTED_EVERGREEN_MOTHER']);
+  });
+
+  it('NO MISSION grants the healed Evergreen Mother — John has not said where the relic heals', () => {
+    const granting = MISSIONS.filter(
+      (m) => m.startingRelics?.includes('EVERGREEN_MOTHER') || m.reward.relics?.includes('EVERGREEN_MOTHER'),
+    );
+    expect(granting.map((m) => m.id)).toEqual([]);
+    // The relic is still DEFINED and still works (see the regression test further down) — it is unreachable, not
+    // deleted. When John says whether it arrives after Mission 10 or Mission 11, this expectation flips to [10]
+    // or [11] and the answer is a one-line data change on that mission's reward.
   });
 
   it('is the only mission that puts a relic on the table at setup', () => {
@@ -6912,15 +6929,29 @@ describe('legacy: mission 9 — the two Evergreen Mother relics (John, 2026-09-0
     expect(cost.banished).toBe(1);
   });
 
-  it('a replay after winning holds BOTH relics, each listed once, and the cost is still paid only once', () => {
+  it('a replay after winning holds the corrupted relic ONCE, from both grants at once, and pays the cost only once', () => {
+    // The real replay shape now that Mission 9 both starts with and rewards the SAME relic: permanentRules
+    // already has it, and startingRelics adds it again. Merged through a Set, so it must land exactly once.
     const state = startWithRelics(2, [boss], {
-      relics: ['EVERGREEN_MOTHER'], // banked permanently by the earlier clear
+      relics: ['CORRUPTED_EVERGREEN_MOTHER'], // banked permanently by the earlier clear
+      startingRelics: ['CORRUPTED_EVERGREEN_MOTHER'],
+    });
+    expect(state.relics).toEqual(['CORRUPTED_EVERGREEN_MOTHER']);
+
+    const cost = playCorruptedCard(state);
+    expect(cost.otherHandSpent).toBe(1);
+    expect(cost.banished).toBe(1);
+  });
+
+  it('a save written while Mission 9 still granted the healed tier holds both, each once, and pays the cost once', () => {
+    const state = startWithRelics(2, [boss], {
+      relics: ['EVERGREEN_MOTHER'], // no mission grants this any more — only an older save can carry it
       startingRelics: ['CORRUPTED_EVERGREEN_MOTHER'],
     });
     expect(state.relics.filter((r) => r === 'EVERGREEN_MOTHER').length).toBe(1);
     expect(state.relics.filter((r) => r === 'CORRUPTED_EVERGREEN_MOTHER').length).toBe(1);
 
-    // Both relics carry the same power today, so this is the guard against the grant double-firing.
+    // Both relics carry the same power today, so this is the guard against the cost double-firing.
     const cost = playCorruptedCard(state);
     expect(cost.otherHandSpent).toBe(1);
     expect(cost.banished).toBe(1);
@@ -6931,7 +6962,14 @@ describe('legacy: mission 9 — the two Evergreen Mother relics (John, 2026-09-0
     expect(state.relics).toEqual(['KINFOLK_FLUTE']);
   });
 
-  it('REGRESSION: Missions 10-12 are unchanged — the healed relic alone still redirects the corrupted-card cost', () => {
+  it('the corrupted relic ALONE redirects the cost — this is what Missions 10-12 now carry', () => {
+    const state = startWithRelics(2, [boss], { relics: ['CORRUPTED_EVERGREEN_MOTHER'] });
+    const cost = playCorruptedCard(state);
+    expect(cost.tavernSpent).toBe(0);
+    expect(cost.otherHandSpent).toBe(1);
+  });
+
+  it('the healed relic alone still redirects the cost too — unreachable from mission data, kept working for older saves', () => {
     const state = startWithRelics(2, [boss], { relics: ['EVERGREEN_MOTHER'] });
     const cost = playCorruptedCard(state);
     expect(cost.tavernSpent).toBe(0);
@@ -7079,5 +7117,191 @@ describe('legacy: the other direction — an already-corrupted card can never GA
     expect(guardianStickerEligible({ ...suited('H', '8'), name: 'Ealda Mercyhand' })).toBe(true);
     expect(druidStickerEligible(suited('D', '4'))).toBe(true);
     expect(chanterStickerEligible(suited('C', '2'))).toBe(true);
+  });
+});
+
+describe('legacy: the eight-mission corruption ladder — one corrupted card per rank (John, 2026-09-04)', () => {
+  /** The missions that corrupt a card, in campaign order. Eight of them, for the eight corruptible ranks. */
+  const CORRUPTING_MISSIONS = [1, 2, 3, 4, 5, 6, 7, 8];
+  const CORRUPTIBLE_RANKS: Rank[] = ['2', '3', '4', '5', '6', '7', '8', '9'];
+  const SEEDS = ['ladder-a', 'ladder-b', 'ladder-c', 'ladder-d', 'ladder-e', 'ladder-f'];
+
+  function pickOne<T>(items: T[], rng: () => number): T {
+    return items[Math.floor(rng() * items.length)];
+  }
+
+  /**
+   * Walks a campaign's party from the 40 starting cards through Mission `last`, the way RoomManager actually
+   * does it: applyReward per mission with beast recruits routed away from the roster (grantMissionReward sends
+   * those to beastCompanionPool), then the player's own sticker pick for whichever missions offer one. Those
+   * picks are deliberately never auto-applied by applyReward, and they matter here — a sticker permanently
+   * removes a card from the corruption pool (canBeCorrupted rejects a special class), so a walk that skipped
+   * them would be testing an easier campaign than the real one.
+   *
+   * Returns how many candidates each sticker reward had at the moment it was offered, so one walk answers both
+   * questions this suite asks: does the ladder cover every rank, and can a sticker ever run dry.
+   */
+  function playThrough(
+    last: number,
+    rng: () => number,
+  ): { party: Card[]; stickers: { mission: number; sticker: string; candidates: number }[] } {
+    let party = buildInitialParty();
+    const stickers: { mission: number; sticker: string; candidates: number }[] = [];
+    for (let id = 1; id <= last; id++) {
+      const mission = getMission(id)!;
+      party = applyReward(party, { ...mission.reward, recruits: mission.reward.recruits.filter((r) => !r.beast) }, rng);
+      const record = (sticker: string, candidates: number) => stickers.push({ mission: id, sticker, candidates });
+      if (mission.reward.reaverStickerChoice) {
+        const options = party.filter(reaverStickerEligible);
+        record('REAVER', options.length);
+        if (options.length > 0) party = applyReaverStickerChoice(party, pickOne(options, rng).id);
+      }
+      if (mission.reward.guardianStickerChoice) {
+        const options = party.filter(guardianStickerEligible);
+        record('GUARDIAN', options.length);
+        if (options.length > 0) party = applyGuardianStickerChoice(party, pickOne(options, rng).id);
+      }
+      if (mission.reward.druidStickerChoice) {
+        const options = party.filter(druidStickerEligible);
+        record('DRUID', options.length);
+        if (options.length > 0) party = applyDruidStickerChoice(party, pickOne(options, rng).id);
+      }
+      if (mission.reward.chanterStickerChoice) {
+        const options = party.filter(chanterStickerEligible);
+        record('CHANTER', options.length);
+        if (options.length > 0) party = applyChanterStickerChoice(party, pickOne(options, rng).id);
+      }
+      if (mission.reward.mageStickerRankChoice) {
+        // This sticker's candidates are RANKS, not cards — the player picks 4 or 8, the rng picks within it.
+        const ranks = mageStickerRankOptions(party);
+        record('MAGE', ranks.length);
+        if (ranks.length > 0) party = applyMageStickerRankChoice(party, pickOne(ranks, rng), rng);
+      }
+    }
+    return { party, stickers };
+  }
+
+  const corruptedCards = (party: Card[]): SuitedCard[] =>
+    party.filter((c): c is SuitedCard => c.kind === 'suited' && Boolean(c.corrupted));
+
+  it('exactly eight missions corrupt a card — Missions 1 through 8, one per corruptible rank', () => {
+    expect(MISSIONS.filter((m) => m.reward.corruptAnotherCard).map((m) => m.id)).toEqual(CORRUPTING_MISSIONS);
+    // The three numbers that have to agree for Mission 10's queue to be fillable from real history alone.
+    expect(CORRUPTING_MISSIONS.length).toBe(CORRUPTIBLE_RANKS.length);
+    expect(CORRUPTING_MISSIONS.length).toBe(CORRUPTED_PARTY_ENEMY_COUNT);
+  });
+
+  it('Missions 2 and 3 are the two John added (live play 2026-09-04), alongside their own existing rewards', () => {
+    const mission2 = getMission(2)!;
+    const mission3 = getMission(3)!;
+    expect(mission2.reward.corruptAnotherCard).toBe(true);
+    expect(mission2.reward.dualClassStickers).toBe(4); // still does what it did before
+    expect(mission3.reward.corruptAnotherCard).toBe(true);
+    expect(mission3.reward.recruits.length).toBe(10); // the ten Mages are untouched
+  });
+
+  it('corruptedRanks reports every rank holding a corrupted card, whatever set the flag', () => {
+    expect(corruptedRanks(buildInitialParty())).toEqual(new Set());
+    const party: Card[] = [
+      { ...suited('H', '4'), corrupted: true },
+      { ...suited('S', '9'), corrupted: true },
+      suited('C', '5'),
+      // Outside the corruptible ranks, so nothing could corrupt it today — but it IS corrupted, so it claims
+      // its rank all the same. Deliberately not filtered through canBeCorrupted; see the function's own doc.
+      { ...suited('D', 'A'), corrupted: true },
+      jester(),
+    ];
+    expect(corruptedRanks(party)).toEqual(new Set(['4', '9', 'A']));
+  });
+
+  it('never corrupts a second card of a rank that already has one — "you would never have 2 sevens corrupted"', () => {
+    const party: Card[] = [
+      { ...suited('H', '7'), name: 'Brother Coen', corrupted: true },
+      { ...suited('S', '7'), name: 'Garrick Stonewall' },
+      { ...suited('C', '3'), name: 'Doran Steelhide' },
+    ];
+    for (const roll of [0, 0.5, 0.99]) {
+      const next = applyCorruptAnotherCard(party, new Set(), () => roll);
+      // The other seven is off the table whatever the rng wanted, so the 3 is the only card that can be taken.
+      expect(corruptedCards(next).map((c) => c.name)).toEqual(['Brother Coen', 'Doran Steelhide']);
+    }
+  });
+
+  it('is a no-op when every otherwise-eligible card sits at an already-corrupted rank', () => {
+    const party: Card[] = [{ ...suited('H', '7'), corrupted: true }, suited('S', '7'), suited('D', '7')];
+    expect(applyCorruptAnotherCard(party, new Set(), () => 0)).toEqual(party);
+  });
+
+  it('a completed campaign arrives at Mission 10 with exactly one corrupted card per rank 2-9', () => {
+    for (const seed of SEEDS) {
+      const { party } = playThrough(9, makeRng(seed));
+      const corrupted = corruptedCards(party);
+      expect(corrupted.length).toBe(CORRUPTED_PARTY_ENEMY_COUNT);
+      expect([...corruptedRanks(party)].sort()).toEqual([...CORRUPTIBLE_RANKS].sort());
+      // Every one of them is still rank-and-file: canBeCorrupted's rule held all the way down the ladder.
+      for (const c of corrupted) {
+        expect(hasSpecialClass(c)).toBe(false);
+        expect(c.name).not.toBe('Goran');
+      }
+    }
+  });
+
+  it('holds under the unseeded picks live play actually uses, not just a handful of seeds', () => {
+    for (let i = 0; i < 40; i++) {
+      const { party } = playThrough(9, Math.random);
+      expect(corruptedCards(party).length).toBe(CORRUPTED_PARTY_ENEMY_COUNT);
+      expect([...corruptedRanks(party)].sort()).toEqual([...CORRUPTIBLE_RANKS].sort());
+    }
+  });
+
+  it('no sticker reward runs out of candidates on the way — the rank-4-or-8 Mage sticker included', () => {
+    for (const seed of SEEDS) {
+      const { stickers } = playThrough(9, makeRng(seed));
+      expect(stickers.map((s) => s.sticker)).toEqual(['REAVER', 'GUARDIAN', 'DRUID', 'CHANTER', 'MAGE']);
+      for (const s of stickers) expect(s.candidates).toBeGreaterThan(0);
+      // Why the four card-pickers can't run dry: each one's rank holds 4 base-class cards, its own
+      // colour-family rule bars 1, and the ladder corrupts at most 1 card at that rank — 2 always survive.
+      for (const s of stickers.filter((x) => x.sticker !== 'MAGE')) expect(s.candidates).toBeGreaterThanOrEqual(2);
+      // And the tightest pool in the campaign: Mission 9's Mage sticker offers only ranks 4 and 8, and one
+      // corruption per rank leaves 3 candidates at each — so BOTH ranks stay open, never just one.
+      expect(stickers.find((s) => s.sticker === 'MAGE')!.candidates).toBe(2);
+    }
+  });
+
+  it("Mission 10 built from a completed campaign never reaches buildCorruptedPartyEnemies' fallback", () => {
+    const { party } = playThrough(9, makeRng('mission-10-from-a-real-campaign'));
+    const { enemies, leftoverParty } = buildCorruptedPartyEnemies(party, makeRng('queue'));
+
+    expect(enemies.length).toBe(CORRUPTED_PARTY_ENEMY_COUNT);
+    // Every slot came from a genuinely corrupted party member — no random sample was needed to fill one.
+    expect(enemies.every((e) => e.sourceCard?.kind === 'suited' && e.sourceCard.corrupted)).toBe(true);
+    // One per rank, and since the queue sorts weakest-to-strongest by card value, that reads straight off as 2-9.
+    expect(enemies.map((e) => (e.sourceCard!.kind === 'suited' ? e.sourceCard!.rank : ''))).toEqual(CORRUPTIBLE_RANKS);
+    // All 8 were pulled out of circulation, so nothing corrupted is left to draw into the reserve deck.
+    expect(leftoverParty.some((c) => c.kind === 'suited' && c.corrupted)).toBe(false);
+  });
+
+  it('and the same holds through the engine, not just the deck builder', () => {
+    const { party } = playThrough(9, makeRng('mission-10-through-the-engine'));
+    const res = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'mission-10-ladder',
+      party,
+      enemies: [],
+      jesterCount: 0,
+      corruptedPartyEnemies: true,
+      startOfTurnZoneFlip: true,
+      relics: ['CORRUPTED_EVERGREEN_MOTHER'], // what Mission 9's reward now banks — see the relic suite above
+    });
+    if (!res.ok) throw new Error(res.error);
+    const queue = [res.state.currentEnemy!, ...res.state.castleDeck];
+
+    expect(queue.length).toBe(CORRUPTED_PARTY_ENEMY_COUNT);
+    expect(queue.every((e) => e.sourceCard?.kind === 'suited' && e.sourceCard.corrupted)).toBe(true);
+    expect(queue.map((e) => (e.sourceCard!.kind === 'suited' ? e.sourceCard!.rank : ''))).toEqual(CORRUPTIBLE_RANKS);
+    // The corrupted relic is live for the fight, carried in from Mission 9's reward.
+    expect(res.state.relics).toEqual(['CORRUPTED_EVERGREEN_MOTHER']);
   });
 });

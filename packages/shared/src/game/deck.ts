@@ -200,16 +200,21 @@ export const CORRUPTED_PARTY_ENEMY_COUNT = 8;
  * Sourced correction (regicidelegacy.com's compendium, corroborated by BoardGameGeek threads and an independent
  * fan digital reimplementation — see the legacy-missions-transcript-mismatches memory doc's Mission 10 section):
  * the fight is supposed to be built from party members ALREADY marked corrupted earlier in the campaign
- * (SuitedCard.corrupted), not sampled fresh at random the way this shipped originally. In the actual current
- * campaign, though, no earlier mission's reward path sets that flag on a party card yet — the "corrupt another
- * card" reward step several earlier missions (2, 5, 8) are separately documented as missing isn't implemented,
- * and fixing that is out of scope here — so in practice `corrupted` below the fold-line is checked honestly and
- * usually comes up empty. This prioritizes any already-corrupted members first (so the sourced rule takes over
- * the instant an earlier mission starts corrupting cards for real) and only falls back to the old
- * random-sample-from-the-whole-party behavior to fill out whatever slots corrupted members don't cover — which,
- * against today's actual party state, is effectively all 8. Which corrupted members (or, on the fallback path,
- * which random ones) get pulled beyond "prefer corrupted" isn't specified by the transcript beyond "eight," so
- * the random tie-break remains a judgment call, not a transcript detail, exactly as before.
+ * (SuitedCard.corrupted), not sampled fresh at random the way this shipped originally. So: already-corrupted
+ * members are taken first, and the random-sample-from-the-whole-party behavior only fills whatever slots they
+ * don't cover.
+ *
+ * THE CORRUPTED PATH IS NOW THE NORMAL ONE (2026-09-04). This comment used to say the opposite — that no mission
+ * actually set the flag, so the fallback did all the work. Missions 1-8 each corrupt exactly one card, under a
+ * one-per-rank rule (legacy/party.ts's corruptedRanks / applyCorruptAnotherCard), which is exactly
+ * CORRUPTED_PARTY_ENEMY_COUNT cards spanning exactly the eight corruptible ranks. A party that played the
+ * campaign through fills all 8 slots from real corrupted members and never touches the fallback.
+ *
+ * The fallback stays for the party that arrives WITHOUT that history — a jump straight into Mission 10 from a
+ * save predating the ladder, or any future path that seeds a party directly. Eight enemies must exist either
+ * way. Which corrupted members (or, on the fallback path, which random ones) get pulled beyond "prefer
+ * corrupted" isn't specified by the transcript beyond "eight," so the random tie-break remains a judgment call,
+ * not a transcript detail, exactly as before.
  *
  * Each enemy's health is fixed at 5x its (base) strength per the transcript — a flat multiple set here at
  * spec-build time, never recalculated later even though the enemy's *dealt* attack climbs with the mission zone
