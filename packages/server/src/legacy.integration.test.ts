@@ -540,13 +540,18 @@ describe('legacy campaign integration', () => {
     // 5, not 4: jumping to 11 grants Missions 1-10's rewards, and Mission 9's includes Ash the Mage Beast.
     expect(result.room.legacy?.beastCompanionPool.length).toBe(5);
     expect(result.room.gameState.beastDeckMechanic).toBe(true);
-    // All 5 beast cards are accounted for between the face-down deck and its used-card pile, same as the
-    // shared-package Mission 11 test (which builds its party the old way, directly from the missions' recruit specs).
+    // Only the FOUR suited beasts reach the deck: Ash is a Mage beast and is excluded from it (John, 2026-09-05
+    // — see deck.ts's buildBeastDeck), staying playable as an ordinary Mage card instead.
     const pool = [...result.room.gameState.beastDeck, ...result.room.gameState.beastDeckDiscard];
-    expect(pool.length).toBe(5);
-    // The Mage beast survived the round trip through the pool with BOTH flags intact.
-    expect(pool.some((c) => c.kind === 'suited' && c.beast && c.arcane && c.name === 'Ash')).toBe(true);
-    expect(new Set(pool.map((c) => c.id))).toEqual(new Set(result.room.legacy!.beastCompanionPool.map((c) => c.id)));
+    expect(pool.length).toBe(4);
+    expect(pool.some((c) => c.kind === 'suited' && c.name === 'Ash')).toBe(false);
+    // The Mage beast still survived the round trip into the mission with BOTH flags intact — it just landed in
+    // the playable party rather than the beast deck.
+    const ash = result.room.gameState.players
+      .flatMap((p) => p.hand)
+      .concat(result.room.gameState.tavernDeck)
+      .find((c) => c.kind === 'suited' && c.name === 'Ash');
+    expect(ash).toMatchObject({ beast: true, arcane: true });
 
     client.close();
   });

@@ -473,16 +473,12 @@ function flipBeastDeckCard(state: GameState): void {
   const label = card.name ?? `the ${card.rank}`;
   const suit = card.suit;
 
-  // PROVISIONAL (John's ruling, 2026-09-04) — a holding position, NOT a settled model. Ash (Mission 9's reward,
-  // and the only Mage beast that exists) is a MAGE beast, not a Spades beast, so he fires no basic-suit effect
-  // here: the flip still happens and the card still moves to beastDeckDiscard like any other, it just resolves
-  // nothing. His 'S' is storage, not a card face — `Suit` is 'H' | 'D' | 'C' | 'S' and SuitedCard.suit is
-  // required, so a Mage card has to borrow some basic suit to exist at all. Reading that borrowed suit here was
-  // making a 5-card pool fire Spades twice per cycle; passing on him restores the four real beasts covering the
-  // four suits exactly once each. John is weighing the structural fix instead — giving the Mage its own symbol in
-  // the `Suit` union rather than borrowing a basic one, which would also touch Mission 3's ten Mage recruits —
-  // and deferred it deliberately, partly because he may not keep Ash in Mission 11's pool at all. Revisit both
-  // together; until then this is a cheap stand-in, not the intended model.
+  // Mage beasts never enter this deck (John's ruling, 2026-09-05, superseding the earlier provisional
+  // "flips as a blank" stand-in) — Ash is excluded at build time and stays playable as an ordinary Mage party
+  // card instead, so the deck is exactly the four base suits, one each (see deck.ts's buildBeastDeck). This
+  // guard only exists so a future Mage beast slipping into the pool can't resolve some borrowed basic suit's
+  // effect; `Suit` is 'H' | 'D' | 'C' | 'S' and SuitedCard.suit is required, so a Mage card has to carry some
+  // basic suit to exist at all, and that suit is storage, not a card face.
   if (isMageCard(card)) {
     log(state, `${label} flips (Mage) — no suit effect fires; a Mage answers to no basic suit.`);
     return;

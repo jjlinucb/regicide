@@ -854,7 +854,8 @@ export interface GameState {
   beastDeckMechanic: boolean;
   /**
    * Legacy-only (Mission 11): the face-down deck built from every Beast Companion card in the campaign party
-   * (Mission 4's four plus Mission 9's Ash, see SuitedCard.beast / deck.ts's buildBeastDeck) — pulled out of
+   * (Mission 4's four suited beasts; Mission 9's Mage beast Ash is excluded and stays playable — see
+   * SuitedCard.beast / deck.ts's buildBeastDeck) — pulled out of
    * circulation and seeded here at mission start instead of joining the reserve deck, so no Beast card is available to draw or
    * play this mission. Its top card flips for a one-shot effect at the start of every turn (see
    * flipBeastDeckCard), moving to `beastDeckDiscard`; once empty, it reshuffles from there and the cycle

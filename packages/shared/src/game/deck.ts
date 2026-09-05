@@ -1,5 +1,5 @@
 import type { Card, CapturedPile, EnemyState, LegacyEnemySpec, Suit, SuitedCard } from './types.js';
-import { cardValue } from './rules.js';
+import { cardValue, isMageCard } from './rules.js';
 
 const SUITS: Suit[] = ['H', 'D', 'C', 'S'];
 const NUMBER_RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10'] as const;
@@ -264,14 +264,20 @@ export function buildCorruptedPartyEnemies(
 }
 
 /**
- * Legacy-only (Mission 11, "Descent into Darkness"): pulls every Beast Companion card (Mission 4's four plus
- * Mission 9's Ash, see SuitedCard.beast) out of the campaign party and shuffles them into a face-down deck that
- * sits in the mission zone for this fight only — none of them are available to draw or play this mission (see
+ * Legacy-only (Mission 11, "Descent into Darkness"): pulls the four SUITED Beast Companion cards (Mission 4's
+ * reward, see SuitedCard.beast) out of the campaign party and shuffles them into a face-down deck that sits in
+ * the mission zone for this fight only — none of those four are available to draw or play this mission (see
  * GameState.beastDeck). Returns the deck plus whatever's left of the party for the caller to build the mission's
  * reserve deck from — same "pull cards out, return the leftover" shape as buildCorruptedPartyEnemies above.
+ *
+ * Mage beasts are EXCLUDED (John's ruling, 2026-09-05, replacing the provisional "flips as a blank" stand-in in
+ * engine.ts's flipBeastDeckCard): Ash — Mission 9's reward, and the only Mage beast that exists — is not part of
+ * this deck at all. The deck is exactly the four base suits, one each, so a full cycle flips every suit exactly
+ * once before reshuffling, with no dead flip in it. Ash stays in `leftoverParty` and is therefore playable this
+ * mission as an ordinary Mage party card.
  */
 export function buildBeastDeck(party: Card[], rng: () => number): { beastDeck: Card[]; leftoverParty: Card[] } {
-  const beastCards = party.filter((c) => c.kind === 'suited' && c.beast);
+  const beastCards = party.filter((c) => c.kind === 'suited' && c.beast && !isMageCard(c));
   const beastIds = new Set(beastCards.map((c) => c.id));
   const leftoverParty = party.filter((c) => !beastIds.has(c.id));
   return { beastDeck: shuffle(beastCards, rng), leftoverParty };

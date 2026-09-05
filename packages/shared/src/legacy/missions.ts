@@ -1355,16 +1355,17 @@ export const MISSIONS: Mission[] = [
     // roster itself is never touched) — she simply isn't available to draw, hold, or play this mission. See
     // `reward.upgradeSidelinedCard` below, which targets this same identity once the mission is won.
     sidelineIdentity: { suit: 'C', rank: '6' },
-    // Every Beast Companion card the campaign has collected (Mission 4's four, plus Mission 9's Ash) is pulled
-    // out and shuffled into a face-down deck that sits in the mission zone for this fight only — no Beast card is
-    // available to draw or play this mission, Ash included, while an ordinary Mage party member (not beast-
-    // flagged) is still usable as normal, since this only ever filters on `beast` (see deck.ts's buildBeastDeck).
+    // The four suited Beast Companion cards (Mission 4's reward) are pulled out and shuffled into a face-down
+    // deck that sits in the mission zone for this fight only — none of the four is available to draw or play
+    // this mission. Mission 9's Ash is a MAGE beast and is deliberately NOT part of this deck (John's ruling,
+    // 2026-09-05); he stays in the party and plays as an ordinary Mage card, as does any other Mage party
+    // member (see deck.ts's buildBeastDeck, which filters on `beast && !isMageCard`).
     // At the start of every turn its top card flips for a one-shot effect keyed to its SUIT (sourced correction —
     // the previously-shipped version keyed this off the card's derived CLASS instead; see engine.ts's
     // flipBeastDeckCard). Once it runs out it reshuffles from its own used-card pile and the cycle continues —
-    // one full cycle flips every beast in the pool exactly once before clearing and restarting (the four suits,
-    // one each, plus Ash — a Mage beast, who flips as a blank and fires nothing). An exact kill spares the very next
-    // turn's flip (see GameState.skipNextBeastDeckFlip).
+    // one full cycle flips every beast in the pool exactly once before clearing and restarting — the four suits,
+    // one each, with no dead flip in the cycle. An exact kill spares the very next turn's flip (see
+    // GameState.skipNextBeastDeckFlip).
     beastDeckMechanic: true,
     // The current enemy draws bonus strength AND class-immunity from whatever cards currently sit on top of the
     // discard pile and the banish pile — both recomputed live, so a Cleric heal reshuffling the discard pile (or

@@ -6132,73 +6132,43 @@ describe('legacy: mission 11 beast-deck start-of-turn flip', () => {
   });
 });
 
-describe('legacy: mission 11 with Ash in the beast deck (a beast that is also a Mage)', () => {
+describe('legacy: mission 11 beast deck excludes Ash (John, 2026-09-05, live play)', () => {
   function ashCard(): SuitedCard {
     return buildRecruitCard(getMission(9)!.reward.recruits.find((r) => r.name === 'Ash')!) as SuitedCard;
   }
 
-  it("takes all 5 beasts — Mission 4's four plus Ash — into the deck, none of them drawable this mission", () => {
+  it("takes only Mission 4's four suited beasts into the deck — Ash, a Mage beast, is not part of it", () => {
     const beasts = [...mission4BeastCards(), ashCard()];
     const state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
 
     const pool = [...state.beastDeck, ...state.beastDeckDiscard];
-    expect(pool.length).toBe(5);
-    expect(new Set(pool.map((c) => c.id))).toEqual(new Set(beasts.map((c) => c.id)));
+    expect(pool.length).toBe(4);
+    expect(pool.some((c) => c.kind === 'suited' && c.name === 'Ash')).toBe(false);
+    expect(new Set(pool.map((c) => (c.kind === 'suited' ? c.suit : '?')))).toEqual(new Set(['H', 'D', 'C', 'S']));
+  });
+
+  it('leaves Ash playable this mission — he stays in circulation as an ordinary Mage party card', () => {
+    const beasts = [...mission4BeastCards(), ashCard()];
+    const state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
+
     const inCirculation = [...state.players.flatMap((p) => p.hand), ...state.tavernDeck];
-    expect(inCirculation.some((c) => c.kind === 'suited' && c.name === 'Ash')).toBe(false);
+    expect(inCirculation.some((c) => c.kind === 'suited' && c.name === 'Ash')).toBe(true);
+    // ...while the four he came in with are all pulled out of circulation as before.
+    for (const beast of mission4BeastCards()) {
+      expect(inCirculation.some((c) => c.id === beast.id)).toBe(false);
+    }
   });
 
-  it("Ash flips as a blank — a Mage beast fires NO basic-suit effect, so his printed Spades no longer discards the reserve top", () => {
-    let state = startMission11(1);
-    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
-    state.beastDeck = [ashCard()];
-    state.beastDeckDiscard = [];
-    const reserveTop = suited('D', '3');
-    state.tavernDeck = [reserveTop, ...state.tavernDeck];
-    const handBefore = state.players[0].hand.map((c) => c.id);
-    state.discardPile = [suited('C', '9')];
-    const discardBefore = state.discardPile.map((c) => c.id);
-    const banishBefore = state.banishPile.length;
-
-    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
-
-    // The Spades (Paladin) effect this used to fire: the reserve deck's top card falls to the discard pile.
-    expect(res.state.tavernDeck[0]?.id).toBe(reserveTop.id);
-    expect(res.state.discardPile.map((c) => c.id)).toEqual(discardBefore);
-    // ...and no OTHER suit's effect stood in for it either — hand and banish pile are untouched.
-    expect(res.state.players[0].hand.map((c) => c.id)).toEqual(handBefore);
-    expect(res.state.banishPile.length).toBe(banishBefore);
-    // The flip itself still happened: the card moved to the used pile, and the log says it was a blank.
-    expect(res.state.beastDeck.length).toBe(0);
-    expect(res.state.beastDeckDiscard.map((c) => c.name)).toEqual(['Ash']);
-    expect(res.state.log.some((e) => e.message.includes('no suit effect fires'))).toBe(true);
-  });
-
-  it("CONTROL: an ordinary beast in the same slot DOES fire its printed suit — it's the Mage class doing the work, not the flip being inert", () => {
-    let state = startMission11(1);
-    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
-    // Mission 4's Paladin beast: same printed Spades as Ash, no Mage class.
-    state.beastDeck = [mission4BeastCards().find((c) => c.suit === 'S')!];
-    state.beastDeckDiscard = [];
-    const reserveTop = suited('D', '3');
-    state.tavernDeck = [reserveTop, ...state.tavernDeck];
-
-    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
-
-    expect(res.state.tavernDeck.some((c) => c.id === reserveTop.id)).toBe(false);
-    expect(res.state.discardPile.some((c) => c.id === reserveTop.id)).toBe(true);
-  });
-
-  it('a full 5-card cycle fires each of the four suits exactly once, with Ash as the pass', () => {
+  it('a full cycle fires each of the four suits exactly once, with no dead flip in it', () => {
     const beasts = [...mission4BeastCards(), ashCard()];
     let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
     state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
     state.beastDeck = [...state.beastDeck, ...state.beastDeckDiscard];
     state.beastDeckDiscard = [];
-    expect(state.beastDeck.length).toBe(5);
+    expect(state.beastDeck.length).toBe(4);
 
     const fired: string[] = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       const before = state.log.length;
       // Keep both piles and the hand stocked so no effect no-ops for want of a target.
       state.players[0].hand = [suited('H', '4'), suited('D', '5')];
@@ -6211,26 +6181,26 @@ describe('legacy: mission 11 with Ash in the beast deck (a beast that is also a 
       }
     }
 
-    expect(fired.length).toBe(5);
-    expect(fired.filter((c) => c === 'Mage').length).toBe(1); // Ash, the pass
+    expect(fired.length).toBe(4);
+    expect(fired.filter((c) => c === 'Mage').length).toBe(0); // no pass in the cycle any more
     for (const cls of ['Warrior', 'Paladin', 'Cleric', 'Bard']) {
       expect(fired.filter((c) => c === cls).length).toBe(1); // each real suit exactly once, none doubled
     }
   });
 
-  it('an odd-sized 5-beast pool still cycles: once the deck runs dry it reshuffles from the used pile and carries on', () => {
+  it('once the deck runs dry it reshuffles from the used pile and carries on', () => {
     const beasts = [...mission4BeastCards(), ashCard()];
     let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
     state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
-    // Jump the cycle to the moment it turns over, with all 5 beasts already spent.
+    // Jump the cycle to the moment it turns over, with all 4 beasts already spent.
     const all = [...state.beastDeck, ...state.beastDeckDiscard];
-    expect(all.length).toBe(5);
+    expect(all.length).toBe(4);
     state.beastDeck = [];
     state.beastDeckDiscard = all;
 
     const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
 
-    expect(res.state.beastDeck.length).toBe(4);
+    expect(res.state.beastDeck.length).toBe(3);
     expect(res.state.beastDeckDiscard.length).toBe(1);
   });
 });
