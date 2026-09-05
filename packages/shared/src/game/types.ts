@@ -251,6 +251,15 @@ export interface EnemyState {
   suit: Suit;
   /** Legacy-only: a second class this enemy is also immune to (e.g. a two-headed hydra). Absent for single-class enemies. */
   secondSuit?: Suit;
+  /**
+   * Legacy-only (Mission 11's Wardens), John's ruling from live play 2026-09-05: this enemy has NO class of its
+   * own. `suit` above is required by the shape and still drives the card face, but it grants no immunity — every
+   * class this enemy blocks comes from somewhere else, which in practice means the discard/banish pile tops (see
+   * GameState.pileTopEnemyBonus / rules.ts's pileTopImmuneSuits, which skips seeding the enemy's own suit for a
+   * noClass enemy, so the two pile tops can each contribute one and the enemy sits at 0-2 blocked classes rather
+   * than 1-3). Read by rules.ts's isSuitBlockedByImmunity, which returns false outright for a noClass enemy.
+   */
+  noClass?: boolean;
   rank: 'J' | 'Q' | 'K';
   /**
    * Legacy-only: the letter printed on this enemy's card face, overriding `rank` for display only. Legacy
@@ -310,6 +319,8 @@ export interface LegacyEnemySpec {
   suit: Suit;
   /** A second class this enemy is also immune to (e.g. a two-headed hydra). Absent for single-class enemies. */
   secondSuit?: Suit;
+  /** See EnemyState.noClass — this enemy has no class of its own, and `suit` is a card face only. */
+  noClass?: boolean;
   health: number;
   attack: number;
   /** See EnemyState.rankLabel. */

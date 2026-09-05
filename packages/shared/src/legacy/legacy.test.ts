@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
 import { redactStateFor } from '../game/redact.js';
-import { buildCorruptedPartyEnemies, CORRUPTED_PARTY_ENEMY_COUNT, makeRng } from '../game/deck.js';
-import { cardSuits, cardValue, isBeastCompanion, isMageCard, missionZoneValueSum } from '../game/rules.js';
+import { buildCorruptedPartyEnemies, CORRUPTED_PARTY_ENEMY_COUNT, makeLegacyEnemy, makeRng } from '../game/deck.js';
+import {
+  cardSuits,
+  cardValue,
+  isBeastCompanion,
+  isMageCard,
+  isSuitBlockedByImmunity,
+  missionZoneValueSum,
+  pileTopImmuneSuits,
+} from '../game/rules.js';
 import type { Card, EngineResult, GameAction, GameState, LegacyEnemySpec, Rank, SuitedCard } from '../game/types.js';
 import { CLASS_THEME, classForCard } from './classes.js';
 import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
@@ -6214,6 +6222,67 @@ describe('legacy: mission 11 beast deck excludes Ash (John, 2026-09-05, live pla
 
     expect(res.state.beastDeck.length).toBe(3);
     expect(res.state.beastDeckDiscard.length).toBe(1);
+  });
+});
+
+describe("legacy: mission 11 Wardens carry no class of their own (John, 2026-09-05, live play)", () => {
+  it('marks all four Wardens noClass, and leaves Evil Goran with his own class', () => {
+    const specs = missionEnemiesToSpecs(getMission(11)!.enemies);
+    const wardens = specs.filter((e) => e.rankLabel === 'W');
+    const goran = specs.find((e) => e.name === 'Evil Goran')!;
+
+    expect(wardens.length).toBe(4);
+    expect(wardens.every((e) => e.noClass)).toBe(true);
+    expect(goran.noClass).toBeUndefined();
+  });
+
+  it('blocks nothing on its own account — with both piles empty, all four classes get through', () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [];
+    state.banishPile = [];
+    const enemy = state.currentEnemy!;
+
+    expect(enemy.noClass).toBe(true);
+    for (const suit of ['H', 'D', 'C', 'S'] as const) {
+      expect(isSuitBlockedByImmunity(suit, enemy)).toBe(false);
+    }
+    expect(pileTopImmuneSuits(state.discardPile, state.banishPile, enemy)).toEqual([]);
+  });
+
+  it('blocks 1 class when only one pile has a top card, and 2 when both do', () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    const enemy = state.currentEnemy!;
+
+    state.discardPile = [suited('H', '4')];
+    state.banishPile = [];
+    expect(pileTopImmuneSuits(state.discardPile, state.banishPile, enemy)).toEqual(['H']);
+
+    state.banishPile = [suited('C', '7')];
+    expect(new Set(pileTopImmuneSuits(state.discardPile, state.banishPile, enemy))).toEqual(new Set(['H', 'C']));
+  });
+
+  it('never exceeds 2 blocked classes, even with dual-suited cards on both pile tops', () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    const enemy = state.currentEnemy!;
+    state.discardPile = [{ ...suited('H', '4'), secondSuit: 'D' } as Card];
+    state.banishPile = [{ ...suited('C', '7'), secondSuit: 'S' } as Card];
+
+    // One new class per pile top, so a Dual-class Stickers card can't stack a Warden to an all-4 lockout.
+    expect(pileTopImmuneSuits(state.discardPile, state.banishPile, enemy).length).toBe(2);
+  });
+
+  it("CONTROL: Evil Goran still blocks his own class on top of whatever the piles add", () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    // Goran is the 5th and last enemy; swap him in directly rather than fighting through the four Wardens.
+    const goran = makeLegacyEnemy(missionEnemiesToSpecs(getMission(11)!.enemies).find((e) => e.name === 'Evil Goran')!);
+    state.currentEnemy = goran;
+
+    expect(goran.noClass).toBeUndefined();
+    expect(isSuitBlockedByImmunity('S', goran)).toBe(true); // his own Paladin class
   });
 });
 

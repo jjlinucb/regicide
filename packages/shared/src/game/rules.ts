@@ -145,6 +145,9 @@ export const SOLO_JESTER_ABILITY_TEXT =
   'Winning with 0 used = Gold, 1 used = Silver, 2 used = Bronze.';
 
 export function isSuitBlockedByImmunity(suit: Suit, enemy: EnemyState): boolean {
+  // A noClass enemy (Mission 11's Wardens) is immune to nothing of its own — its printed suit is a card face,
+  // not a class. See EnemyState.noClass.
+  if (enemy.noClass) return false;
   return (suit === enemy.suit || suit === enemy.secondSuit) && !enemy.immunityBroken;
 }
 
@@ -269,7 +272,11 @@ export function banishPileTopValue(banishPile: Card[]): number {
  * there had to be reverted).
  */
 export function pileTopImmuneSuits(discardPile: Card[], banishPile: Card[], enemy: EnemyState): Suit[] {
-  const totalImmuneSuits = new Set<Suit>([enemy.suit, ...(enemy.secondSuit ? [enemy.secondSuit] : [])]);
+  // A noClass enemy contributes no inherent suit to bound against (see EnemyState.noClass), so both pile tops
+  // are free to each grant one — 0-2 blocked classes in total, entirely determined by what's sitting on the piles.
+  const totalImmuneSuits = new Set<Suit>(
+    enemy.noClass ? [] : [enemy.suit, ...(enemy.secondSuit ? [enemy.secondSuit] : [])],
+  );
   const suits = new Set<Suit>();
   for (const pile of [discardPile, banishPile]) {
     const top = pile[pile.length - 1];

@@ -67,6 +67,7 @@ export function makeLegacyEnemy(spec: LegacyEnemySpec): EnemyState {
   return {
     suit: spec.suit,
     secondSuit: spec.secondSuit,
+    noClass: spec.noClass,
     rank: 'J', // placeholder to satisfy EnemyState's shape — `rankLabel` is what actually gets displayed.
     rankLabel: spec.rankLabel,
     name: spec.name,

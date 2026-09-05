@@ -9,6 +9,12 @@ export interface MissionEnemySpec {
   class: ClassId;
   /** A second class this enemy is also immune to at once (e.g. a two-headed hydra). */
   secondClass?: ClassId;
+  /**
+   * See EnemyState.noClass — this enemy has no class of its own and is immune to nothing on its own account.
+   * `class` above still has to be set (the shape requires it) and still picks the card face's suit, but it
+   * grants no immunity.
+   */
+  noClass?: boolean;
   health: number;
   attack: number;
   /** See EnemyState.rankLabel — the letter shown on this enemy's card face. Set via rankLabel() below. */
@@ -115,6 +121,11 @@ export interface Mission {
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
   return { name, class: cls, secondClass: secondCls, health, attack };
+}
+
+/** Marks every enemy in the list as carrying no class of its own — see MissionEnemySpec.noClass. */
+function classless(enemies: MissionEnemySpec[]): MissionEnemySpec[] {
+  return enemies.map((e) => ({ ...e, noClass: true }));
 }
 
 /**
@@ -346,6 +357,7 @@ export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemyS
     name: e.name,
     suit: CLASS_THEME[e.class].suit!,
     secondSuit: e.secondClass ? CLASS_THEME[e.secondClass].suit : undefined,
+    noClass: e.noClass,
     health: e.health,
     attack: e.attack,
     rankLabel: e.rankLabel,
@@ -1333,18 +1345,27 @@ export const MISSIONS: Mission[] = [
     // real roster is 5 enemies: 4 weak mooks plus one much bigger final boss, "Evil Goran" — the 10/30 (mooks) and
     // 20/90 (boss) stats below are exactly the sourced figures. Which base class each mook carries, and which
     // single class the boss carries, is NOT specified by the source (only the two stat tiers and the boss's name
-    // are) — one mook per base class (matching every other mission's own convention) and a single, non-dual-immune
-    // class on the boss are both unsourced judgment calls, deliberately kept simple so the roster fix isn't
-    // quietly undone by an invented immunity stack.
+    // are) — a single, non-dual-immune class on the boss is an unsourced judgment call, kept simple so the roster
+    // fix isn't quietly undone by an invented immunity stack.
+    //
+    // JOHN'S RULING (live play, 2026-09-05): the four Wardens have NO CLASS OF THEIR OWN (see
+    // MissionEnemySpec.noClass). Each still names a class here — the shape requires one, and it picks the suit
+    // shown on the card face — but it grants zero immunity. Every class a Warden blocks comes from the
+    // discard/banish pile tops instead (see pileTopEnemyBonus below), which puts each one at 0-2 blocked classes
+    // that shift as the piles do, rather than a fixed printed class with up to 2 more stacked on top. Evil Goran
+    // keeps his own class: the ruling was about the mooks, and his is the fight an immunity stack should matter in.
     // Card faces: W for the Wardens, and G for Evil Goran — the same letter his own party card shows (see
     // PlayingCard's tieredRankLabel), which reads as the point of the fight.
     enemies: [
-      ...rankLabel('W', [
-        enemy('Warden of the Depths: Ashclad', 'WARRIOR', 30, 10),
-        enemy('Warden of the Depths: Bellsong', 'BARD', 30, 10),
-        enemy('Warden of the Depths: Hollowmourn', 'CLERIC', 30, 10),
-        enemy('Warden of the Depths: Ironvow', 'PALADIN', 30, 10),
-      ]),
+      ...rankLabel(
+        'W',
+        classless([
+          enemy('Warden of the Depths: Ashclad', 'WARRIOR', 30, 10),
+          enemy('Warden of the Depths: Bellsong', 'BARD', 30, 10),
+          enemy('Warden of the Depths: Hollowmourn', 'CLERIC', 30, 10),
+          enemy('Warden of the Depths: Ironvow', 'PALADIN', 30, 10),
+        ]),
+      ),
       ...rankLabel('G', [enemy('Evil Goran', 'PALADIN', 90, 20)]),
     ],
     // Sourced correction: the source names a specific card pulled from the party for this mission entirely — Esme,
