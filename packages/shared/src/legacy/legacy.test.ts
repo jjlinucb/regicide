@@ -6108,6 +6108,18 @@ describe('legacy: mission 11 beast-deck start-of-turn flip', () => {
     expect(res.state.log.some((e) => e.message.includes('reshuffles'))).toBe(true);
   });
 
+  it("flips a beast at mission start — the first turn's effect is already live before anyone plays", () => {
+    const state = startMission11(1);
+
+    // One card is already spent before the first player acts: the deck flipped at the mission's very first turn.
+    expect(state.beastDeckDiscard.length).toBe(1);
+    expect(state.beastDeck.length).toBe(3);
+    const flip = state.log.find((e) => /flips \((Warrior|Paladin|Cleric|Bard)\)/.test(e.message));
+    expect(flip).toBeDefined();
+    // ...and it resolved for real, rather than just being announced.
+    expect(flip!.message).not.toContain('nothing to');
+  });
+
   it('an exact kill skips the beast-deck flip on the very next turn', () => {
     let state = startMission11(1);
     // Exact-kill the current (first) enemy: Diamonds doesn't multiply, 5 damage on 5 health.

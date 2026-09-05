@@ -449,8 +449,8 @@ function applyEnemyPaladinDamageReduction(state: GameState, damage: number): num
  * (see resolveCorruptedEnemyEndOfTurnEffect) — so this always picks their lowest-value card. Once the deck runs
  * dry it reshuffles from its own used-card pile (GameState.beastDeckDiscard) and the cycle continues — one full
  * cycle flips every beast in the pool exactly once before clearing and restarting — the 4 base suits exactly
- * once, since Mission 9's Ash (the pool's 5th card, and its only MAGE beast) fires no suit effect at all and
- * passes instead (see the isMageCard check below). Skipped entirely for the turn right after an exact kill (see
+ * once, with no dead flip in the cycle, since Mission 9's Ash (a MAGE beast) is excluded from the deck at build
+ * time and stays playable instead. Skipped entirely for the turn right after an exact kill (see
  * GameState.skipNextBeastDeckFlip, consumed here). Called both once at mission start (the first player's first
  * turn) and from advanceToNextPlayer, same as every other start-of-turn flip in this file.
  */
