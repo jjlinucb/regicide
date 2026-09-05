@@ -448,12 +448,9 @@ function applyEnemyPaladinDamageReduction(state: GameState, damage: number): num
  * specified by the transcript for Hearts/Diamonds — same judgment call as Mission 10's enemy-Bard forced move
  * (see resolveCorruptedEnemyEndOfTurnEffect) — so this always picks their lowest-value card. Once the deck runs
  * dry it reshuffles from its own used-card pile (GameState.beastDeckDiscard) and the cycle continues — one full
- * cycle flips every beast in the pool exactly once before clearing and restarting. That used to mean all 4 suits
- * exactly once, back when the pool was exactly Mission 4's 4 base-suited beasts; Mission 9's Ash (a MAGE beast,
- * Spades — see missions.ts's Mission 9 reward) makes it 5, so one suit's effect now fires twice per cycle. His
- * printed suit is read here like any other beast's: this step is the dungeon's machinery keyed to a card face,
- * not a class power resolving, so `arcane` (which does suppress his own suit power when he's PLAYED, see
- * continueResolveCommittedPlay) has no bearing on it. Skipped entirely for the turn right after an exact kill (see
+ * cycle flips every beast in the pool exactly once before clearing and restarting — the 4 base suits exactly
+ * once, since Mission 9's Ash (the pool's 5th card, and its only MAGE beast) fires no suit effect at all and
+ * passes instead (see the isMageCard check below). Skipped entirely for the turn right after an exact kill (see
  * GameState.skipNextBeastDeckFlip, consumed here). Called both once at mission start (the first player's first
  * turn) and from advanceToNextPlayer, same as every other start-of-turn flip in this file.
  */
@@ -475,6 +472,21 @@ function flipBeastDeckCard(state: GameState): void {
   if (card.kind !== 'suited') return; // the beast pool is always suited cards — guarded defensively
   const label = card.name ?? `the ${card.rank}`;
   const suit = card.suit;
+
+  // PROVISIONAL (John's ruling, 2026-09-04) — a holding position, NOT a settled model. Ash (Mission 9's reward,
+  // and the only Mage beast that exists) is a MAGE beast, not a Spades beast, so he fires no basic-suit effect
+  // here: the flip still happens and the card still moves to beastDeckDiscard like any other, it just resolves
+  // nothing. His 'S' is storage, not a card face — `Suit` is 'H' | 'D' | 'C' | 'S' and SuitedCard.suit is
+  // required, so a Mage card has to borrow some basic suit to exist at all. Reading that borrowed suit here was
+  // making a 5-card pool fire Spades twice per cycle; passing on him restores the four real beasts covering the
+  // four suits exactly once each. John is weighing the structural fix instead — giving the Mage its own symbol in
+  // the `Suit` union rather than borrowing a basic one, which would also touch Mission 3's ten Mage recruits —
+  // and deferred it deliberately, partly because he may not keep Ash in Mission 11's pool at all. Revisit both
+  // together; until then this is a cheap stand-in, not the intended model.
+  if (isMageCard(card)) {
+    log(state, `${label} flips (Mage) — no suit effect fires; a Mage answers to no basic suit.`);
+    return;
+  }
 
   if (suit === 'C') {
     const banished = state.discardPile.pop();

@@ -1216,11 +1216,11 @@ export const MISSIONS: Mission[] = [
       // His SPADES is bookkeeping only, and deliberately not a fifth base class: a Mage card's suit never joins
       // the combined suit-power resolution and never blocks on enemy immunity either (see
       // continueResolveCommittedPlay's resolvesOwnSuitPower), so unlike Mission 4's four — who are Warrior/Bard/
-      // Cleric/Paladin for real, one per suit — Ash has no base class at all. The one place his suit is actually
-      // read is Mission 11's beast-deck flip (engine.ts's flipBeastDeckCard, keyed on the printed suit), where a
-      // 5th beast necessarily doubles up some suit in the cycle; Spades is the mildest of the four to double
-      // (the reserve deck's top card falls to the discard pile, recoverable by a Hearts heal) rather than Clubs'
-      // permanent banish or the two that take a card out of a player's hand.
+      // Cleric/Paladin for real, one per suit — Ash has no base class at all. Mission 11's beast-deck flip
+      // (engine.ts's flipBeastDeckCard) used to be the one place his suit was read anyway, which made a 5-card
+      // pool fire Spades twice per cycle; per John's 2026-09-04 ruling it now passes on any Mage beast instead,
+      // so his suit is read nowhere at all and the four real beasts still cover the four suits once each. That
+      // fix is explicitly provisional — see the comment on flipBeastDeckCard's own isMageCard check.
       //
       // Like Mission 4's beasts, he does NOT join legacy.party — RoomManager's grantMissionReward routes every
       // beast-flagged recruit to the rotating beastCompanionPool (one rides along per attempt; Mission 11 takes
@@ -1366,7 +1366,7 @@ export const MISSIONS: Mission[] = [
     // the previously-shipped version keyed this off the card's derived CLASS instead; see engine.ts's
     // flipBeastDeckCard). Once it runs out it reshuffles from its own used-card pile and the cycle continues —
     // one full cycle flips every beast in the pool exactly once before clearing and restarting (the four suits,
-    // one each, plus Ash's own printed Spades doubling that one suit up). An exact kill spares the very next
+    // one each, plus Ash — a Mage beast, who flips as a blank and fires nothing). An exact kill spares the very next
     // turn's flip (see GameState.skipNextBeastDeckFlip).
     beastDeckMechanic: true,
     // The current enemy draws bonus strength AND class-immunity from whatever cards currently sit on top of the
