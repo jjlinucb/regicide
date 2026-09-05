@@ -294,9 +294,11 @@ export interface EnemyState {
    * Legacy-only (Mission 10), set only for enemies built by GameState.corruptedPartyEnemies: the original,
    * pristine party card this enemy was twisted from (see deck.ts's buildCorruptedPartyEnemies). Unrelated to
    * `corrupted` above — a Mission 10 enemy is immune to its own class exactly like any other enemy (per the
-   * transcript), it doesn't ignore immunity the way a Mission 4 corrupted-return enemy does. Tracked so an
-   * exact-damage kill can restore the underlying hero, cleansed, to the campaign party at mission end (see
-   * GameState.restoredPartyCards).
+   * transcript), it doesn't ignore immunity the way a Mission 4 corrupted-return enemy does. Tracked so that
+   * defeating this enemy — by an exact hit or an overkill alike, John's ruling from live play 2026-09-04 — can
+   * drop a CLEANSED COPY of the hero into the discard pile, back in play for the rest of the mission (see
+   * engine.ts's dealDamageAndCheckDefeat). The copy is why this stays pristine: the persisted campaign card it
+   * points at is never mutated, and never left the roster to begin with.
    */
   sourceCard?: Card;
 }
@@ -843,16 +845,6 @@ export interface GameState {
    * of the other missionZone modes above.
    */
   startOfTurnZoneFlip: boolean;
-  /**
-   * Legacy-only (Mission 10), best-effort from community research (the transcript documents no reward at all —
-   * see legacy/missions.ts's Mission 10 entry): every corrupted-hero enemy felled with an exact-damage hit during
-   * the mission (see dealDamageAndCheckDefeat) has its original, pristine party card pushed here — "cleansed" of
-   * the corruption just by virtue of being the untouched original, never mutated. Applied to the campaign's
-   * permanent party roster at mission end (see party.ts's applyRestoredPartyCards), on top of the mission's own
-   * static `reward`. An enemy defeated by overkill (not exact) contributes nothing here — per the transcript,
-   * its own card still goes to the discard pile like any other Legacy enemy, just with no restoration bonus.
-   */
-  restoredPartyCards: Card[];
   /**
    * Legacy-only (Mission 11, "Descent into Darkness"): when true, gates the mission's whole beast-deck mechanic —
    * the start-of-turn suit-keyed flip (see engine.ts's flipBeastDeckCard) and the exact-kill-skips-next-flip rule

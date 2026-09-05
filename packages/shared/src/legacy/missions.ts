@@ -1302,19 +1302,23 @@ export const MISSIONS: Mission[] = [
     //    fabricated card names or full quotes are recorded here, only that they exist thematically, since the
     //    source fragments ("The fight is tough...", "The high arcane...", "The Syndicate's...") are too partial
     //    to reconstruct honestly.
-    //  - The one reward with a real gameplay payoff — community research's "deck rehabilitation": any of the 8
-    //    corrupted heroes felled with an EXACT hit during this mission (saved to the discard pile per this
-    //    mission's own exact-kill rule, not banished) get restored to the permanent party roster, cleansed, once
-    //    the mission ends — is mechanical, not data-driven, so it isn't encoded as a MissionReward field at all.
-    //    It's implemented instead as GameState.restoredPartyCards, populated by engine.ts's
-    //    dealDamageAndCheckDefeat on every exact kill and folded into the campaign party by party.ts's
-    //    applyRestoredPartyCards at mission end (see RoomManager.completeLegacyMission). Marked uncertain the
-    //    same way the flavor beats above are — community research, not transcript-confirmed. NOTE: the same
-    //    research pass that produced the two sourced corrections above (enemy selection; the Bard choice) also
-    //    flagged this exact-kill gate itself as a possible mismatch — unconditional restoration, not gated on an
-    //    exact hit — but at a lower confidence than those two (this shipped implementation was already an
-    //    explicit community-research guess, not a transcript detail, before that research pass). Left unchanged
-    //    by this pass rather than folded in silently; a candidate for a future, separately-scoped correction.
+    //  - There is no "deck rehabilitation" REWARD any more. JOHN'S RULING (live play, 2026-09-04): the heroes
+    //    come back DURING the mission, not after it. Every Mission 10 boss you defeat — exact kill or overkill,
+    //    it makes no difference — drops the hero underneath it into your discard pile, cleansed, so all eight
+    //    return over the course of the fight and your deck grows back as the bosses get stronger. Implemented at
+    //    the kill site in engine.ts's dealDamageAndCheckDefeat; see that comment for why the discarded hero is a
+    //    cleansed COPY (the persisted roster card keeps its corruption for Mission 12) and why it isn't flagged
+    //    `restored`. The permanent roster needs no reward step at all: the 8 heroes are only carved out of this
+    //    mission's ephemeral reserve deck (deck.ts's buildCorruptedPartyEnemies' leftoverParty), never out of the
+    //    persisted party, so they're still there — exactly once — when the mission ends.
+    //
+    //    WHAT THIS REPLACED, for the record: community research's version, in which only an EXACT kill cleansed a
+    //    hero, and did so onto a post-mission list (GameState.restoredPartyCards, folded into the roster by
+    //    party.ts's applyRestoredPartyCards at RoomManager.completeLegacyMission) rather than back into play. That
+    //    was always flagged uncertain here — this mission has no transcribed reward at all — and a later research
+    //    pass had already flagged the exact-kill gate itself as a likely mismatch. Live play settled it; the flag,
+    //    the helper and their tests are gone. Exactness now buys exactly one thing on this mission: the mission
+    //    zone falls to the discard pile instead of being banished.
     standingJesters: true,
     sidelineHighArcana: true,
     reward: {

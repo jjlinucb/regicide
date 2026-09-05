@@ -796,27 +796,3 @@ export function applyReward(party: Card[], reward: MissionReward, rng: () => num
   if (reward.suitByName) next = applySuitByName(next, reward.suitByName);
   return next;
 }
-
-/**
- * Mission 10's "deck rehabilitation" mechanic (community research, best-effort — see legacy/missions.ts's Mission
- * 10 entry): folds GameState.restoredPartyCards — the original cards of every corrupted hero exact-killed during
- * the mission — back into the campaign's permanent party roster at mission end, cleansed of `corrupted`. Unlike
- * applyReward's recruits (freshly minted via buildRecruitCard), these are the SAME cards the party already had —
- * conceptually pulled out of circulation for the fight (see deck.ts's buildCorruptedPartyEnemies) — but
- * RoomManager never actually removes the chosen cards from the persisted party when a Mission 10 fight starts
- * (deck.ts only carves them out of the ephemeral in-mission reserve deck), so `enemy.sourceCard` is literally the
- * same still-`corrupted` object this function's `party` argument already contains. A card whose id is already
- * present is therefore REPLACED in place with its cleansed form rather than skipped — skipping it (the previous
- * behavior) silently threw away every genuine restoration, since the "already present" case was actually the
- * normal path, not the rare one. Appending is kept as a fallback for an id genuinely missing from `party` (e.g.
- * if that removal is ever wired up later).
- */
-export function applyRestoredPartyCards(party: Card[], restored: Card[]): Card[] {
-  if (restored.length === 0) return party;
-  const cleanse = (c: Card): Card => (c.kind === 'suited' && c.corrupted ? { ...c, corrupted: false } : c);
-  const restoredById = new Map(restored.map((c) => [c.id, cleanse(c)]));
-  const next = party.map((c) => restoredById.get(c.id) ?? c);
-  const partyIds = new Set(party.map((c) => c.id));
-  const additions = restored.filter((c) => !partyIds.has(c.id)).map(cleanse);
-  return additions.length > 0 ? [...next, ...additions] : next;
-}

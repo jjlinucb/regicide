@@ -7,7 +7,6 @@ import {
   applyGuardianStickerChoice,
   applyMageStickerRankChoice,
   applyReaverStickerChoice,
-  applyRestoredPartyCards,
   applyReward,
   buildInitialParty,
   buildMercenaryLoadout,
@@ -428,9 +427,14 @@ export class RoomManager {
   /**
    * Grants a single mission's reward (recruits, Dual-class Stickers, relics, Mission 11's sidelined-card upgrade)
    * and marks it completed. Shared by a normal win and by jumping ahead into a later mission (see
-   * startLegacyMission). `restoredPartyCards` is Mission 10's "deck rehabilitation" only (see
-   * GameState.restoredPartyCards) — omitted (or empty) for every other mission, and for a jumped-ahead grant where
-   * no mission was actually played.
+   * startLegacyMission).
+   *
+   * Mission 10 used to hand this an extra `restoredPartyCards` list — community research's "deck rehabilitation",
+   * which rewrote the roster at mission end to cleanse every hero exact-killed during the fight. John's live-play
+   * ruling (2026-09-04) replaced it: a defeated Mission 10 hero comes back in the mission itself, as a cleansed
+   * card in the discard pile (see engine.ts's dealDamageAndCheckDefeat), and the roster needs no fixing up at all
+   * because startLegacyMission never removed those heroes from it — only from the mission's ephemeral reserve
+   * deck. The parameter, GameState.restoredPartyCards and party.ts's applyRestoredPartyCards all went with it.
    *
    * Beast-flagged recruits (see RecruitSpec.beast) are pulled out before applyReward ever sees them — sourced
    * correction (a full solo playthrough, see tutorial_vids/summaries/mission-4.md): Mission 4's "reward" isn't 4
@@ -443,12 +447,10 @@ export class RoomManager {
   private grantMissionReward(
     legacy: LegacyRoomData,
     mission: NonNullable<ReturnType<typeof getMission>>,
-    restoredPartyCards: Card[] = [],
   ): void {
     const beastRecruits = mission.reward.recruits.filter((r) => r.beast);
     const nonBeastReward = beastRecruits.length > 0 ? { ...mission.reward, recruits: mission.reward.recruits.filter((r) => !r.beast) } : mission.reward;
     legacy.party = applyReward(legacy.party, nonBeastReward);
-    legacy.party = applyRestoredPartyCards(legacy.party, restoredPartyCards);
     if (beastRecruits.length > 0) {
       legacy.beastCompanionPool = [...legacy.beastCompanionPool, ...beastRecruits.map((r) => buildRecruitCard(r))];
     }
@@ -646,7 +648,7 @@ export class RoomManager {
     if (outcome === 'won') {
       const mission = getMission(missionId);
       if (mission) {
-        this.grantMissionReward(legacy, mission, room.gameState.restoredPartyCards);
+        this.grantMissionReward(legacy, mission);
         legacy.currentMission = missionId + 1;
       }
       // Easy-mode call (see createLegacyCampaign): the new mission gets a fresh 0-loss tracker, not null, so its

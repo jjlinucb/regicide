@@ -276,11 +276,12 @@ describe('legacy campaign integration', () => {
   });
 
   it(
-    "a Mission 10 exact-kill deck-rehabilitation restoration survives into the persisted party, cleansed — " +
-      'regression test for a silent no-op: RoomManager never removes a Mission 10 enemy\'s source card from ' +
-      'the persisted party when the fight starts, so the "restored" card handed back on an exact kill is the ' +
-      'exact same still-corrupted object already sitting in room.legacy.party; the old id-dedup in ' +
-      'applyRestoredPartyCards treated that as "already there, skip it" and threw the restoration away',
+    'a Mission 10 hero felled in the fight comes back cleansed in the DISCARD PILE, and is still on the persisted ' +
+      'campaign roster exactly once afterwards — John, 2026-09-04. The roster needs no reward step to make that ' +
+      "true: startLegacyMission never removes the eight heroes from room.legacy.party, only from the mission's " +
+      'ephemeral reserve deck, so there is nothing to add back and nothing that could add them back twice. Their ' +
+      '`corrupted` flag survives on the roster on purpose — the discarded card is a cleansed COPY, and Mission 12 ' +
+      "is the campaign's own redemption mission (see GameState.restoredCardMechanic).",
     async () => {
       const client = ioClient(`http://localhost:${port}`);
       await waitFor(client, 'connect');
@@ -295,35 +296,37 @@ describe('legacy campaign integration', () => {
       expect(room.gameState.corruptedPartyEnemies).toBe(true);
 
       // White-box: buildCorruptedPartyEnemies never clones the party card it pulls in — `sourceCard` IS the same
-      // object reference still sitting in room.legacy.party. Flip it corrupted here to prove the restoration
-      // below actually cleanses it, not merely re-adds an already-clean card.
+      // object reference still sitting in room.legacy.party. Flip it corrupted here to prove the discarded card
+      // below is a genuinely cleansed copy rather than the roster object mutated in place.
       const heroSourceCard = room.gameState.currentEnemy!.sourceCard!;
       expect(heroSourceCard.kind).toBe('suited');
       if (heroSourceCard.kind === 'suited') heroSourceCard.corrupted = true;
       expect(room.legacy!.party.some((c) => c.id === heroSourceCard.id && c.kind === 'suited' && c.corrupted)).toBe(true);
 
       // White-box rig: collapse the rest of the 8-enemy queue and hand the current player a single Diamonds
-      // (Bard — no damage-affecting power) card worth exactly the enemy's remaining health, and pin the enemy's
-      // own suit away from Spades (Paladin would otherwise reduce the damage it takes), so this one play both
-      // wins the whole mission AND lands as an exact kill.
+      // (Bard — no damage-affecting power) card worth MORE than the enemy's remaining health, and pin the enemy's
+      // own suit away from Spades (Paladin would otherwise reduce the damage it takes). An OVERKILL on purpose:
+      // the replaced community-research rule restored nothing at all on a non-exact kill.
       room.gameState.castleDeck = [];
       room.gameState.currentEnemy!.suit = 'H';
-      room.gameState.currentEnemy!.maxHealth = 5;
+      room.gameState.currentEnemy!.maxHealth = 3;
       room.gameState.currentEnemy!.damageTaken = 0;
-      const attackCard: Card = { id: 'test-exact-kill-card', kind: 'suited', suit: 'D', rank: '5', name: 'Test Attacker' };
+      const attackCard: Card = { id: 'test-overkill-card', kind: 'suited', suit: 'D', rank: '5', name: 'Test Attacker' };
       const playerId = room.gameState.players[room.gameState.currentPlayerIndex].id;
       room.gameState.players[room.gameState.currentPlayerIndex].hand = [attackCard];
 
       const result = await rooms.applyGameAction(created.code, { type: 'PLAY_CARDS', playerId, cardIds: [attackCard.id] });
       if ('error' in result) throw new Error(result.error);
       expect(result.room.gameState.phase).toBe('WON');
-      expect(result.room.gameState.restoredPartyCards.map((c) => c.id)).toEqual([heroSourceCard.id]);
 
-      // The restored hero is a real, uncorrupted, single, kept entry in the persisted campaign party — not
-      // silently deduped away because it (the very same corrupted object) was still sitting there all along.
+      const discarded = result.room.gameState.discardPile.find((c) => c.id === heroSourceCard.id);
+      expect(discarded).toBeDefined();
+      expect(discarded!.kind === 'suited' && discarded!.corrupted).toBeFalsy();
+
+      // On the persisted roster: present, exactly once, and untouched by the fight.
       const matches = result.room.legacy!.party.filter((c) => c.id === heroSourceCard.id);
       expect(matches.length).toBe(1);
-      expect(matches[0].kind === 'suited' && matches[0].corrupted).toBeFalsy();
+      expect(matches[0].kind === 'suited' && matches[0].corrupted).toBe(true);
 
       client.close();
     },
