@@ -5949,10 +5949,37 @@ describe('legacy: mission 11 with Ash in the beast deck (a beast that is also a 
     expect(inCirculation.some((c) => c.kind === 'suited' && c.name === 'Ash')).toBe(false);
   });
 
-  it("Ash's flip fires his PRINTED suit's effect (Spades — the reserve deck's top card is discarded); `arcane` neither diverts nor suppresses it", () => {
+  it("Ash flips as a blank — a Mage beast fires NO basic-suit effect, so his printed Spades no longer discards the reserve top", () => {
     let state = startMission11(1);
     state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
     state.beastDeck = [ashCard()];
+    state.beastDeckDiscard = [];
+    const reserveTop = suited('D', '3');
+    state.tavernDeck = [reserveTop, ...state.tavernDeck];
+    const handBefore = state.players[0].hand.map((c) => c.id);
+    state.discardPile = [suited('C', '9')];
+    const discardBefore = state.discardPile.map((c) => c.id);
+    const banishBefore = state.banishPile.length;
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    // The Spades (Paladin) effect this used to fire: the reserve deck's top card falls to the discard pile.
+    expect(res.state.tavernDeck[0]?.id).toBe(reserveTop.id);
+    expect(res.state.discardPile.map((c) => c.id)).toEqual(discardBefore);
+    // ...and no OTHER suit's effect stood in for it either — hand and banish pile are untouched.
+    expect(res.state.players[0].hand.map((c) => c.id)).toEqual(handBefore);
+    expect(res.state.banishPile.length).toBe(banishBefore);
+    // The flip itself still happened: the card moved to the used pile, and the log says it was a blank.
+    expect(res.state.beastDeck.length).toBe(0);
+    expect(res.state.beastDeckDiscard.map((c) => c.name)).toEqual(['Ash']);
+    expect(res.state.log.some((e) => e.message.includes('no suit effect fires'))).toBe(true);
+  });
+
+  it("CONTROL: an ordinary beast in the same slot DOES fire its printed suit — it's the Mage class doing the work, not the flip being inert", () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    // Mission 4's Paladin beast: same printed Spades as Ash, no Mage class.
+    state.beastDeck = [mission4BeastCards().find((c) => c.suit === 'S')!];
     state.beastDeckDiscard = [];
     const reserveTop = suited('D', '3');
     state.tavernDeck = [reserveTop, ...state.tavernDeck];
@@ -5961,6 +5988,35 @@ describe('legacy: mission 11 with Ash in the beast deck (a beast that is also a 
 
     expect(res.state.tavernDeck.some((c) => c.id === reserveTop.id)).toBe(false);
     expect(res.state.discardPile.some((c) => c.id === reserveTop.id)).toBe(true);
+  });
+
+  it('a full 5-card cycle fires each of the four suits exactly once, with Ash as the pass', () => {
+    const beasts = [...mission4BeastCards(), ashCard()];
+    let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.beastDeck = [...state.beastDeck, ...state.beastDeckDiscard];
+    state.beastDeckDiscard = [];
+    expect(state.beastDeck.length).toBe(5);
+
+    const fired: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const before = state.log.length;
+      // Keep both piles and the hand stocked so no effect no-ops for want of a target.
+      state.players[0].hand = [suited('H', '4'), suited('D', '5')];
+      state.discardPile = [suited('C', '9')];
+      state.tavernDeck = [suited('D', '3'), ...state.tavernDeck];
+      state = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id })).state;
+      for (const entry of state.log.slice(before)) {
+        const m = /flips \((Warrior|Paladin|Cleric|Bard|Mage)\)/.exec(entry.message);
+        if (m) fired.push(m[1]);
+      }
+    }
+
+    expect(fired.length).toBe(5);
+    expect(fired.filter((c) => c === 'Mage').length).toBe(1); // Ash, the pass
+    for (const cls of ['Warrior', 'Paladin', 'Cleric', 'Bard']) {
+      expect(fired.filter((c) => c === cls).length).toBe(1); // each real suit exactly once, none doubled
+    }
   });
 
   it('an odd-sized 5-beast pool still cycles: once the deck runs dry it reshuffles from the used pile and carries on', () => {
