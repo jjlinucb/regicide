@@ -9,7 +9,15 @@ export function RewardRevealPage({ missionId, onContinue }: { missionId: number;
       <h1>Mission Complete!</h1>
       <p style={{ color: 'var(--ink-dim)' }}>{mission.title}</p>
       <div className="panel legacy-panel">
-        <p>New recruits join the Golden Blade Syndicate:</p>
+        {/* Mission 10's reward is a DEPARTURE, not a recruit (see shared party.ts's MissionReward.removeCardByName):
+            Goran leaves the party for good. Said out loud here — the panel used to promise "new recruits" and then
+            show an empty list for any mission that grants none, which reads as a reward that didn't happen. */}
+        {mission.reward.removeCardByName && (
+          <p>
+            <strong>{mission.reward.removeCardByName}</strong> leaves the Golden Blade Syndicate — permanently.
+          </p>
+        )}
+        {mission.reward.recruits.length > 0 && <p>New recruits join the Golden Blade Syndicate:</p>}
         <div className="legacy-recruit-list">
           {mission.reward.recruits.map((r) => {
             const cls = CLASS_THEME[r.class];

@@ -248,6 +248,23 @@ export interface MissionReward {
    * input).
    */
   chanterStickerChoice?: boolean;
+  /**
+   * Mission 10's whole reward, John's ruling (live play 2026-09-04): the party member with this NAME leaves the
+   * roster PERMANENTLY (see applyRemoveCardByName). Used for Goran, and deliberately not modeled as a sideline:
+   * `upgradeSidelinedCard` and missions.ts's `sidelineIdentity` describe a card that sits out one mission's
+   * active fight and comes back on its own — this card does not come back.
+   *
+   * Matched by name for the same reason every other Goran-targeted reward on this type is (see
+   * `upgradeEvergreenCard`'s doc): his suit+rank is already claimed by a pre-existing starting party member, so
+   * an identity lookup would silently hit the wrong card.
+   *
+   * A party can legitimately reach the granting mission WITHOUT this card — John routinely jumps straight into
+   * later missions, and a replay or back-grant runs the same reward twice. Removing nothing is therefore a real,
+   * expected outcome, but never a SILENT one: RoomManager's grantMissionReward warns when there was nothing to
+   * remove, the same alarm `mageStickerRankChoice` gets, because this codebase has already been bitten by a
+   * by-name Goran reward that matched nothing and said so to no one.
+   */
+  removeCardByName?: string;
 }
 
 /** The "Lucky 4" ranks Dual-class Stickers target — one sticker per rank, matching the physical game's 4-sticker sheets. */
@@ -696,6 +713,19 @@ export function applyEvergreenUpgradeByName(party: Card[], name?: string): Card[
 }
 
 /**
+ * Mission 10's reward (see MissionReward.removeCardByName's doc): drops the party member matching this NAME from
+ * the roster for good. Removes every match rather than just the first — a name is supposed to be unique among
+ * recruits, and leaving a duplicate behind on a roster that somehow grew one would defeat the whole point of the
+ * reward. A no-op (same reference) if `name` is unset or no card carries it; callers that need to react to that
+ * case should check membership themselves BEFORE calling (see RoomManager's grantMissionReward).
+ */
+export function applyRemoveCardByName(party: Card[], name?: string): Card[] {
+  if (!name) return party;
+  const next = party.filter((c) => !(c.kind === 'suited' && c.name === name));
+  return next.length === party.length ? party : next;
+}
+
+/**
  * Mission 5's Goran bonus (see MissionReward.secondSuitByName's doc): finds the existing party member matching
  * `target.name` and permanently gives it `target.suit` as SuitedCard.secondSuit — the same field Dual-class
  * Stickers set randomly, just targeted at a specific card and suit instead. A no-op (same reference) if
@@ -773,9 +803,10 @@ export function applyReaverStickerChoice(party: Card[], cardId: string): Card[] 
 }
 
 /**
- * Adds a mission's reward — recruits, any Dual-class Stickers, any corrupt-another-card effect, any
- * sidelined-card or existing-card evergreen upgrade, and any targeted second suit — to the campaign's
- * permanent party roster. Relics are tracked separately (see RoomManager's permanentRules). Every player-driven
+ * Applies a mission's reward — recruits, any Dual-class Stickers, any corrupt-another-card effect, any
+ * sidelined-card or existing-card evergreen upgrade, any targeted second suit, and any permanent removal (see
+ * `removeCardByName`, Mission 10's whole reward) — to the campaign's permanent party roster. A reward is
+ * therefore not always additive. Relics are tracked separately (see RoomManager's permanentRules). Every player-driven
  * sticker reward (`reaverStickerChoice`/`guardianStickerChoice`/`druidStickerChoice`/`chanterStickerChoice`/
  * `mageStickerRankChoice` — the Mage one only since John's 2026-09-04 rank ruling) is deliberately NOT applied
  * here: see their own doc comments.
@@ -794,5 +825,7 @@ export function applyReward(party: Card[], reward: MissionReward, rng: () => num
   if (reward.secondSuitByName) next = applySecondSuitByName(next, reward.secondSuitByName);
   if (reward.extraSuitByName) next = applyExtraSuitByName(next, reward.extraSuitByName);
   if (reward.suitByName) next = applySuitByName(next, reward.suitByName);
+  // Last, so a removal always wins over anything this same reward did to the card it names.
+  if (reward.removeCardByName) next = applyRemoveCardByName(next, reward.removeCardByName);
   return next;
 }
