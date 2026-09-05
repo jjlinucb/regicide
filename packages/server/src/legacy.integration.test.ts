@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Server } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import type { Card, ClientGameState, ClientToServerEvents, LegacyStatePayload, Rank, ServerToClientEvents } from '@regicide/shared';
@@ -331,6 +331,67 @@ describe('legacy campaign integration', () => {
       client.close();
     },
   );
+
+  /**
+   * Mission 10's whole reward, John's ruling (live play 2026-09-04): Goran leaves the party permanently. Wins the
+   * mission the same white-box way the hero-return test above does — collapse the queue, overkill the one enemy —
+   * and then reads the PERSISTED roster, since the removal happens in completeLegacyMission, not in the fight.
+   */
+  async function winMission10(name: string, stripGoran: boolean) {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name });
+
+    const startResult = rooms.startLegacyMission(created.code, created.playerId, 10);
+    if ('error' in startResult) throw new Error(startResult.error);
+    const room = startResult.room;
+    if (stripGoran) {
+      // Stands in for a party that reaches Mission 10 without ever meeting him — a campaign loaded from a save
+      // written before he was added, or any future path that seeds a roster directly. John jumps into later
+      // missions routinely, so "the card isn't there" is normal play, not an edge case.
+      room.legacy!.party = room.legacy!.party.filter((c) => !(c.kind === 'suited' && c.name === 'Goran'));
+    }
+    const partyBefore = room.legacy!.party.map((c) => c.id);
+
+    room.gameState.castleDeck = [];
+    room.gameState.currentEnemy!.suit = 'H'; // not Spades — no Paladin damage reduction
+    room.gameState.currentEnemy!.maxHealth = 3;
+    room.gameState.currentEnemy!.damageTaken = 0;
+    const attackCard: Card = { id: 'test-kill-card', kind: 'suited', suit: 'D', rank: '5', name: 'Test Attacker' };
+    const playerId = room.gameState.players[room.gameState.currentPlayerIndex].id;
+    room.gameState.players[room.gameState.currentPlayerIndex].hand = [attackCard];
+
+    const result = await rooms.applyGameAction(created.code, { type: 'PLAY_CARDS', playerId, cardIds: [attackCard.id] });
+    if ('error' in result) throw new Error(result.error);
+    expect(result.room.gameState.phase).toBe('WON');
+    client.close();
+    return { partyBefore, legacy: result.room.legacy! };
+  }
+
+  it("winning Mission 10 removes Goran from the persisted party for good — the mission's whole reward (John, 2026-09-04)", async () => {
+    const { partyBefore, legacy } = await winMission10('Goran-goes', false);
+
+    expect(partyBefore.length).toBeGreaterThan(0);
+    expect(legacy.party.some((c) => c.kind === 'suited' && c.name === 'Goran')).toBe(false);
+    expect(legacy.party.length).toBe(partyBefore.length - 1);
+    // He was the campaign's only Evergreen, and nothing replaces him.
+    expect(legacy.party.some((c) => c.kind === 'suited' && c.evergreen)).toBe(false);
+    // Nothing else left with him — the reward grants no recruits, so every other id survives.
+    expect(legacy.party.every((c) => partyBefore.includes(c.id))).toBe(true);
+  });
+
+  it('JUMP PATH: with no Goran in the party there is nothing to remove — the roster is untouched, and the server says so out loud rather than no-oping silently', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { partyBefore, legacy } = await winMission10('No-Goran', true);
+
+      expect(legacy.party.map((c) => c.id)).toEqual(partyBefore);
+      const said = warn.mock.calls.map((c) => String(c[0]));
+      expect(said.some((m) => m.includes('no Goran to remove'))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   it('rejects jumping to a mission that isn\'t built yet', async () => {
     const client = ioClient(`http://localhost:${port}`);

@@ -1193,22 +1193,6 @@ function enemyLabel(enemy: { name?: string; rank: 'J' | 'Q' | 'K'; suit: string 
 const RANK_NAME: Record<'J' | 'Q' | 'K', string> = { J: 'Jack', Q: 'Queen', K: 'King' };
 
 /**
- * UNSOURCED BALANCE JUDGMENT CALL — not from the transcript or any community research (see the
- * legacy-mission-playtest-findings memory doc's Mission 10 section, and this mission's own regression tests for
- * the reasoning). Neither of this pass's two sourced corrections (drawing enemies from already-corrupted party
- * cards; the Bard's forced move becoming a player choice) touches the actual collapse mechanism playtesting
- * found: `missionZone`'s combined value has no decay and no ceiling, so it grows by a fresh card every single
- * turn a boss fight drags on — feeding straight onto that enemy's live attack, then doubled again on top of that
- * for a Warrior-suited enemy — and simulated play still collapsed to a 0% win rate across 8 fresh seeded games
- * (1p/2p/4p) even with both sourced fixes applied. Capping the zone's contribution keeps the mission's own
- * escalating-corruption flavor (the zone still visibly grows every turn) while stopping a boss fight that runs
- * long from becoming mathematically unsurvivable. The cap's specific value (10 — one average card's worth of
- * "extra" strength past whatever a fight opens with) is a judgment call with no source backing it at all; treat
- * it as a starting point for real playtesting, not a confirmed number.
- */
-const MISSION_10_ZONE_BONUS_CAP = 10;
-
-/**
  * The current enemy's attack, live — folds in Mission 4's discard-pile buff (see GameState.discardTopBuffsAttack)
  * and/or Mission 8's ascending-zone buff (see GameState.ascendingZone) when active.
  */
@@ -1220,10 +1204,17 @@ export function resolvedEnemyAttack(state: GameState): number {
     // Mission 10: "double total strength (base + mission-zone bonus) BEFORE any Paladin [Spades] reduction is
     // subtracted" — a different formula shape from every other mission's buff (which all fold their buff into
     // baseAttack before spadesShield is subtracted, with no multiplier step in between), so this doesn't reuse
-    // currentEnemyAttackWithDiscardBuff. The raw zone sum is capped at MISSION_10_ZONE_BONUS_CAP — see that
-    // constant's own comment for why this line exists at all; it has no source, unlike the formula shape above.
-    const rawZoneBonus = state.startOfTurnZoneFlip ? state.missionZone.reduce((sum, c) => sum + cardValue(c), 0) : 0;
-    const zoneBonus = Math.min(rawZoneBonus, MISSION_10_ZONE_BONUS_CAP);
+    // currentEnemyAttackWithDiscardBuff.
+    //
+    // The zone's contribution has NO CEILING — the enemy gains the full combined value sitting there. A flat cap
+    // of 10 used to be applied here; John removed it (live play, 2026-09-04), confirming the punishing
+    // interaction is intentional and Mission 10 is meant to be a hard mission. The cap was the file's one
+    // unsourced balance invention, and the simulation that motivated it measured a mission that no longer
+    // exists: at the time the 8 enemies were mostly a RANDOM sample of the party rather than the one-per-rank
+    // 2-9 ladder they are now, and a defeated hero was lost on anything but an exact kill rather than always
+    // returning to the discard pile. The escalation is also bounded per fight — the zone clears on every boss
+    // defeat — so it is a single fight running long that hurts, not the mission compounding end to end.
+    const zoneBonus = state.startOfTurnZoneFlip ? state.missionZone.reduce((sum, c) => sum + cardValue(c), 0) : 0;
     const totalStrength = enemy.baseAttack + zoneBonus;
     const isWarrior = classForSuit(enemy.suit).id === 'WARRIOR';
     const multiplied = isWarrior ? totalStrength * 2 : totalStrength;

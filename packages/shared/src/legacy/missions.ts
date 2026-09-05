@@ -1279,50 +1279,43 @@ export const MISSIONS: Mission[] = [
     // explicit about the start-of-turn timing; a community-research claim that this flip happens at the END of
     // the turn instead contradicts the transcript and was NOT used.
     //
-    // UNSOURCED BALANCE JUDGMENT CALL, added after real simulated play (see the legacy-mission-playtest-findings
-    // memory doc's Mission 10 section): as shipped, this zone's combined value had no decay and no ceiling, so a
-    // boss fight that ran long fed an ever-growing buff onto that enemy's live attack — doubled again on top of
-    // that for a Warrior-suited enemy — and collapsed every one of 13 simulated games across 1p/2p/4p. Neither
-    // sourced correction on this mission (the enemy-selection fix above; the Bard-choice fix on
-    // resolveCorruptedEnemyEndOfTurnEffect in engine.ts) touches this mechanism, and re-simulating after both
-    // still produced 0 wins across 24 fresh seeded games. See engine.ts's MISSION_10_ZONE_BONUS_CAP for the
-    // resulting fix (a flat ceiling on the zone's contribution) — it has no source backing it at all, unlike
-    // everything else in this file's comments, and simulated play confirms it measurably improves how far a run
-    // gets (deeper into the 8-enemy queue on average) without on its own making the mission reliably winnable
-    // against a simple heuristic bot; this mission's own sourced baseline (8 sequential 5x-health fights, with
-    // Warrior-doubling) is independently very hard, likely by intentional design this late in the campaign.
+    // The zone's contribution to the enemy's strength has NO CEILING — the full combined value counts, doubled
+    // again on top of that for a Warrior-suited enemy. JOHN'S RULING (live play, 2026-09-04): the punishing
+    // interaction is intentional; Mission 10 is meant to be a hard mission. This used to carry a flat cap of 10,
+    // the only unsourced balance invention in this file, justified by simulated play collapsing to 0 wins. That
+    // simulation measured a mission that no longer exists — the 8 enemies were then mostly a random sample of
+    // the party rather than today's one-per-rank 2-9 ladder, and defeated heroes were lost on anything but an
+    // exact kill rather than always returning to the discard. The cap and its constant are gone from engine.ts;
+    // see resolvedEnemyAttack there for the live formula. Note the escalation is bounded per fight anyway: the
+    // zone clears on every boss defeat.
     startOfTurnZoneFlip: true,
-    // Reward: no reward was transcribed for this mission (no reward video/segment exists in the source
-    // transcript) — everything below is best-effort from community research alone, flagged uncertain per this
-    // file's usual convention for less-certain items.
-    //  - Community research describes 3 late-campaign narrative/story cards unlocking campaign progression, and
-    //    the next region ("Rootmarsh") being unlocked as Mission 11's setting. Both are pure flavor/story beats
-    //    with no gameplay effect of their own (mirroring how Missions 6/9's narrative reward text — Myla's arc,
-    //    the temple's fate — lives only in this comment and the `story` field, not as MissionReward data) — no
-    //    fabricated card names or full quotes are recorded here, only that they exist thematically, since the
-    //    source fragments ("The fight is tough...", "The high arcane...", "The Syndicate's...") are too partial
-    //    to reconstruct honestly.
-    //  - There is no "deck rehabilitation" REWARD any more. JOHN'S RULING (live play, 2026-09-04): the heroes
-    //    come back DURING the mission, not after it. Every Mission 10 boss you defeat — exact kill or overkill,
-    //    it makes no difference — drops the hero underneath it into your discard pile, cleansed, so all eight
-    //    return over the course of the fight and your deck grows back as the bosses get stronger. Implemented at
-    //    the kill site in engine.ts's dealDamageAndCheckDefeat; see that comment for why the discarded hero is a
-    //    cleansed COPY (the persisted roster card keeps its corruption for Mission 12) and why it isn't flagged
-    //    `restored`. The permanent roster needs no reward step at all: the 8 heroes are only carved out of this
-    //    mission's ephemeral reserve deck (deck.ts's buildCorruptedPartyEnemies' leftoverParty), never out of the
-    //    persisted party, so they're still there — exactly once — when the mission ends.
+    // REWARD — JOHN'S RULING (live play, 2026-09-04): Goran leaves the party, permanently. That is the whole
+    // reward. Nothing else.
     //
-    //    WHAT THIS REPLACED, for the record: community research's version, in which only an EXACT kill cleansed a
-    //    hero, and did so onto a post-mission list (GameState.restoredPartyCards, folded into the roster by
-    //    party.ts's applyRestoredPartyCards at RoomManager.completeLegacyMission) rather than back into play. That
-    //    was always flagged uncertain here — this mission has no transcribed reward at all — and a later research
-    //    pass had already flagged the exact-kill gate itself as a likely mismatch. Live play settled it; the flag,
-    //    the helper and their tests are gone. Exactness now buys exactly one thing on this mission: the mission
-    //    zone falls to the discard pile instead of being banished.
+    // The transcript documents NO reward for this mission (no reward video/segment exists in the source), and
+    // this entry deliberately records nothing beyond John's ruling. It previously carried a block of community
+    // guesswork — three unlocking narrative/story cards, a "Rootmarsh" region unlock for Mission 11, and a
+    // post-mission "deck rehabilitation" restoration — all of it invented, all of it wiped on John's call
+    // ("this is true, wipe it all"). Left as-is it would have kept sitting next to a real reward, which is how
+    // invented rules end up believed later. Do not re-derive it: the absence of a transcribed reward is the
+    // finding, not a gap to fill.
+    //
+    // The one adjacent real rule, so nobody re-adds a reward step for it: defeated Mission 10 heroes return
+    // DURING the fight, dropping into the discard pile cleansed on every boss kill (exact or overkill alike).
+    // That lives at the kill site in engine.ts's dealDamageAndCheckDefeat, not here — the persisted roster never
+    // loses them in the first place (they're carved only out of this mission's ephemeral reserve deck, see
+    // deck.ts's buildCorruptedPartyEnemies' leftoverParty), so there is nothing for a reward to restore.
     standingJesters: true,
     sidelineHighArcana: true,
     reward: {
       recruits: [],
+      // Permanent removal, NOT sidelining: Goran does not come back. Deliberately not modeled with
+      // `sidelineIdentity`/`upgradeSidelinedCard` (Mission 11's mechanic), which is for a card that sits out one
+      // mission and returns automatically. Matched by NAME, following every other Goran-targeted reward in this
+      // file (`suitByName`, `secondSuitByName`, `extraSuitByName`, `upgradeEvergreenCard`) — his suit+rank (S8)
+      // is already claimed by a starting party member, so an identity lookup would remove the wrong card. See
+      // party.ts's MissionReward.removeCardByName.
+      removeCardByName: 'Goran',
     },
   },
   {

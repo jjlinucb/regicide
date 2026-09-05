@@ -53,6 +53,17 @@ paths actually point at your worktree, not the main checkout or a sibling one.
 never happened. Check which tree is being served before you go looking for the
 cause in your own code.
 
+## The `-t` name-filter trap
+
+Running a suite through vitest's `-t` test-name filter produces **false failures**. Several of
+the Myla tests depend on earlier tests in the same file having already run, so filtering down to
+one of them by name skips the setup it needs and it fails for reasons that have nothing to do
+with your change.
+
+Run the whole file, or the whole suite via `npm test`, whenever you are deciding whether
+something is actually broken. `-t` is for iterating on a test you already know is failing, not
+for diagnosing one.
+
 ## No lint tooling
 
 There is no eslint or prettier config in this repo. Strict TypeScript and the

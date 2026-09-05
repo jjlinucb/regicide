@@ -24,6 +24,7 @@ import {
   mageStickerRankOptions,
   MAGE_STICKER_RANKS,
   applyReaverStickerChoice,
+  applyRemoveCardByName,
   applyReward,
   applySecondSuitByName,
   buildInitialParty,
@@ -5524,20 +5525,31 @@ describe('legacy: mission 10 class powers (corrupted-hero enemies)', () => {
   });
 
   it(
-    'caps the mission zone\'s contribution to the enemy\'s attack — UNSOURCED balance judgment call (see ' +
-      'MISSION_10_ZONE_BONUS_CAP\'s own comment in engine.ts and legacy-mission-playtest-findings for why)',
+    "the mission zone's contribution to the enemy's attack has NO ceiling — the full combined value counts " +
+      "(John's ruling, live play 2026-09-04; the old unsourced cap of 10 is gone from engine.ts)",
     () => {
       let state = startMission10();
-      state = rig(state, [], { suit: 'S', baseAttack: 5, spadesShield: 0 }); // Paladin suit, not Warrior — keeps the math to base + capped zone
-      // Raw zone sum is 4+5+6+8 = 23, far past the cap — only MISSION_10_ZONE_BONUS_CAP (10) of it should count.
+      state = rig(state, [], { suit: 'S', baseAttack: 5, spadesShield: 0 }); // Paladin suit, not Warrior — keeps the math to base + zone
+      // Zone sum is 4+5+6+8 = 23, well past the old cap of 10. All 23 must count.
       state.missionZone = [suited('D', '4'), suited('H', '5'), suited('C', '6'), suited('S', '8')];
 
       const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
 
-      // 5 base + 10 (capped zone, not the raw 23) = 15.
-      expect(res.state.pendingDamage).toBe(15);
+      // 5 base + 23 zone = 28, not the 15 the cap used to produce.
+      expect(res.state.pendingDamage).toBe(28);
     },
   );
+
+  it('a Warrior-suited enemy doubles that uncapped total too — the punishing interaction is intentional', () => {
+    let state = startMission10();
+    state = rig(state, [], { suit: 'C', baseAttack: 5, spadesShield: 4 }); // Warrior suit
+    state.missionZone = [suited('D', '4'), suited('H', '5'), suited('C', '6'), suited('S', '8')]; // 23
+
+    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
+
+    // Ordering is load-bearing: (5 base + 23 zone) * 2 = 56, and only THEN minus the 4 Spades shield = 52.
+    expect(res.state.pendingDamage).toBe(52);
+  });
 
   it('an enemy Paladin reduces damage it takes by its own base strength', () => {
     let state = startMission10();
@@ -5772,7 +5784,7 @@ describe('legacy: mission 10 defeat handling — the mission zone, and the hero 
       expect(res.state.missionZone.map((c) => c.id)).toContain(heroSourceCard.id);
       expect(res.state.discardPile.some((c) => c.id === heroSourceCard.id)).toBe(false);
       // Mission 10's zone feeds bonus STRENGTH onto the current enemy's live attack (see resolvedEnemyAttack).
-      expect(resolvedEnemyAttack(res.state)).toBe(Math.min(heroValue, 10)); // 10 = MISSION_10_ZONE_BONUS_CAP
+      expect(resolvedEnemyAttack(res.state)).toBe(heroValue); // uncapped: the hero's full value feeds the enemy
     },
   );
 
@@ -5864,6 +5876,91 @@ function startMission11(n: number, opts: { party?: Card[] } = {}): GameState {
   if (!res.ok) throw new Error(res.error);
   return res.state;
 }
+
+describe('legacy: mission 10 reward (Goran leaves the party — permanently, and that is the whole reward)', () => {
+  /** The party as it actually arrives at Mission 10 on the campaign path: Goran recruited at 4, suited at 5/6/7/8, Evergreen at 9. */
+  function partyThroughMission9(): Card[] {
+    let party = buildInitialParty();
+    for (const id of [4, 5, 6, 7, 8, 9]) party = applyReward(party, getMission(id)!.reward);
+    return party;
+  }
+
+  it("grants nothing at all besides the removal — no recruits, no relics, no stickers, and none of the wiped community guesswork", () => {
+    const reward = getMission(10)!.reward;
+    expect(reward.removeCardByName).toBe('Goran');
+    expect(reward.recruits).toEqual([]);
+    expect(reward.relics).toBeUndefined();
+    expect(reward.dualClassStickers).toBeUndefined();
+    expect(reward.corruptAnotherCard).toBeUndefined();
+    // Explicitly NOT a sideline: `upgradeSidelinedCard`/missions.ts's `sidelineIdentity` describe a card that
+    // sits out one fight and returns. Goran does not come back.
+    expect(reward.upgradeSidelinedCard).toBeUndefined();
+    expect(getMission(10)!.sidelineIdentity).toBeUndefined();
+  });
+
+  it('drops Goran from a party that walked the campaign path, touching nothing else', () => {
+    const party = partyThroughMission9();
+    const goran = party.find((c) => c.kind === 'suited' && c.name === 'Goran') as SuitedCard;
+    expect(goran).toBeDefined();
+    expect(goran.evergreen).toBe(true); // sanity: he is the campaign's one Evergreen when he leaves
+
+    const next = applyReward(party, getMission(10)!.reward);
+
+    expect(next.some((c) => c.kind === 'suited' && c.name === 'Goran')).toBe(false);
+    expect(next.length).toBe(party.length - 1);
+    // Everything else survives, ids intact — in particular the pre-existing S8 starting member who shares
+    // Goran's suit+rank and would be the casualty of an identity-based lookup.
+    expect(next.map((c) => c.id)).toEqual(party.filter((c) => c.id !== goran.id).map((c) => c.id));
+    const survivingS8 = next.find((c) => c.kind === 'suited' && c.suit === 'S' && c.rank === '8');
+    expect(survivingS8).toBeDefined();
+    expect(survivingS8!.id).not.toBe(goran.id);
+  });
+
+  it('leaves no Evergreen behind: Missions 11 and 12 run on a party with no Goran in it', () => {
+    const next = applyReward(partyThroughMission9(), getMission(10)!.reward);
+    expect(next.filter((c) => c.kind === 'suited' && c.evergreen).length).toBe(0);
+
+    // Mission 11's own reward still lands: it targets Esme by suit+rank, never Goran.
+    const after11 = applyReward(next, getMission(11)!.reward);
+    const esme = after11.find((c) => c.kind === 'suited' && c.suit === 'C' && c.rank === '6') as SuitedCard;
+    expect(esme.evergreen).toBe(true);
+    expect(esme.name).toBe('Esme');
+  });
+
+  it("JUMP PATH: a party that never met Goran survives the reward unchanged — the removal is a no-op, not a crash", () => {
+    // Straight into Mission 10 from a bare starting party: no Mission 4 recruit, so no Goran to remove.
+    const party = buildInitialParty();
+    expect(party.some((c) => c.kind === 'suited' && c.name === 'Goran')).toBe(false);
+
+    const next = applyReward(party, getMission(10)!.reward);
+
+    expect(next.length).toBe(party.length);
+    expect(next.map((c) => c.id)).toEqual(party.map((c) => c.id));
+  });
+
+  it('granting the same reward twice (a replay, or a back-granted jump) removes him once and then does nothing', () => {
+    const once = applyReward(partyThroughMission9(), getMission(10)!.reward);
+    const twice = applyReward(once, getMission(10)!.reward);
+    expect(twice.map((c) => c.id)).toEqual(once.map((c) => c.id));
+  });
+
+  it('applyRemoveCardByName is a no-op (same reference) with no name given, or when nothing matches', () => {
+    const party = buildInitialParty();
+    expect(applyRemoveCardByName(party, undefined)).toBe(party);
+    expect(applyRemoveCardByName(party, 'Goran')).toBe(party);
+  });
+
+  it('applyRemoveCardByName removes EVERY match, not just the first', () => {
+    const party = partyThroughMission9();
+    const goran = party.find((c) => c.kind === 'suited' && c.name === 'Goran') as SuitedCard;
+    const doubled = [...party, { ...goran, id: `${goran.id}-dup` }];
+
+    const next = applyRemoveCardByName(doubled, 'Goran');
+
+    expect(next.some((c) => c.kind === 'suited' && c.name === 'Goran')).toBe(false);
+    expect(next.length).toBe(doubled.length - 2);
+  });
+});
 
 describe('legacy: mission 11 setup (Descent into Darkness)', () => {
   it('the mission entry has 5 enemies (4 weak mooks, one per base class, plus the final boss Evil Goran), the beast-deck and pile-top-bonus flags, sidelines Esme by identity, and rewards her upgrade instead of a recruit', () => {

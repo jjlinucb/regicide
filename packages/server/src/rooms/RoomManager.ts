@@ -448,6 +448,15 @@ export class RoomManager {
     legacy: LegacyRoomData,
     mission: NonNullable<ReturnType<typeof getMission>>,
   ): void {
+    // Checked BEFORE applyReward, while the card is still there to find. Mission 10's reward removes Goran
+    // permanently (see shared party.ts's MissionReward.removeCardByName), and a party can legitimately arrive
+    // here without him: John routinely jumps straight into a later mission, and a replay or back-grant runs the
+    // same reward a second time on a roster he already left. Removing nothing is fine — removing nothing
+    // QUIETLY is not, which is exactly how a by-name Goran reward has burned this codebase before.
+    const removalTarget = mission.reward.removeCardByName;
+    const removalPresent =
+      removalTarget !== undefined && legacy.party.some((c) => c.kind === 'suited' && c.name === removalTarget);
+
     const beastRecruits = mission.reward.recruits.filter((r) => r.beast);
     const nonBeastReward = beastRecruits.length > 0 ? { ...mission.reward, recruits: mission.reward.recruits.filter((r) => !r.beast) } : mission.reward;
     legacy.party = applyReward(legacy.party, nonBeastReward);
@@ -458,6 +467,11 @@ export class RoomManager {
       // Deduped: a mission's reward can be granted more than once for the same campaign (a replay of an
       // already-won mission, or a jump-ahead that back-grants it), and a relic held twice is meaningless.
       legacy.permanentRules = Array.from(new Set([...legacy.permanentRules, ...mission.reward.relics]));
+    }
+    if (removalTarget !== undefined && !removalPresent) {
+      console.warn(
+        `Regicide Legacy: mission ${mission.id}'s reward had no ${removalTarget} to remove — the party reached this mission without that card (a jump ahead, a replay, or the reward granted twice). Nothing was removed.`,
+      );
     }
     if (!legacy.missionsCompleted.includes(mission.id)) {
       legacy.missionsCompleted = [...legacy.missionsCompleted, mission.id];
