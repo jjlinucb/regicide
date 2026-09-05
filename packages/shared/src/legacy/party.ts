@@ -147,8 +147,13 @@ export interface MissionReward {
    * just granted — see applyCorruptAnotherCard) with SuitedCard.corrupted. Not pure upside: the card's class
    * power(s) ignore enemy immunity from then on, but every play banishes the reserve deck's top card as a cost.
    * John's house rule (2026-09-04): only an ordinary rank 2-9 card from one of the 4 base classes is eligible —
-   * never a 10/Ace, and never one of Legacy's special faction classes (Mage included) — see
-   * applyCorruptAnotherCard's own doc for the full eligibility rule.
+   * never a 10/Ace, and never one of Legacy's special faction classes (Mage included) — and never a rank that
+   * already has a corrupted card, so no two corruptions ever share a rank. See applyCorruptAnotherCard's own doc
+   * for the full eligibility rule.
+   *
+   * EIGHT missions carry this step, one per rank: 1, 2, 3, 4, 5, 6, 7 and 8. That count is not decoration — it
+   * is what feeds Mission 10's eight corrupted-party-member enemies, one per rank 2 through 9 (see corruptedRanks
+   * and missions.ts's Mission 10). Adding or dropping a mission here breaks that ladder.
    */
   corruptAnotherCard?: boolean;
   /**
@@ -300,9 +305,17 @@ export const MAGE_STICKER_RANKS: Rank[] = ['4', '8'];
  * The class/state half of this predicate is the filter applyMageSticker already used before John's 2026-09-04
  * rank ruling, carried over unchanged: suited, not `corrupted` (canGainSpecialClass — see its doc for the bug
  * that put it here), not already a Mage/Reaver/Guardian/Druid/Evergreen of its own, and not already stickered
- * with this same bonus. `chanter` is the one addition — every sibling predicate
- * (guardianStickerEligible/druidStickerEligible/chanterStickerEligible) already excluded the Chanter class and
- * this one simply predated it, which matters now that Mission 8 (one mission earlier) recruits one.
+ * with this same bonus.
+ *
+ * THE `chanter` LINE IS DEFENSIVE, NOT A RULE — it is unreachable today, and the justification it shipped with
+ * (PR #94: "matters now that Mission 8 recruits one") was simply WRONG. Mission 8's four Chanter recruits are
+ * ranks 3, 5, 7 and 9, and chanterStickerEligible only ever stickers a rank 2 — so no Chanter exists at rank 4
+ * or rank 8, the only two ranks MAGE_STICKER_RANKS offers, and this clause has never once had anything to
+ * exclude. Kept rather than deleted for the same reason engine.ts keeps its corrupted-Mage branch: every sibling
+ * predicate (guardianStickerEligible/druidStickerEligible/chanterStickerEligible/reaverStickerEligible) carries
+ * the identical special-class list, and a predicate silently missing one entry is the kind of asymmetry that
+ * reads as a bug later. These rules are still moving — a Chanter recruited at another rank, or MAGE_STICKER_RANKS
+ * widening, makes it load-bearing the same day, with no second edit needed.
  *
  * NOT excluded by name, unlike guardianStickerEligible's Goran clause: Goran is rank 8, but Mission 9's own
  * reward upgrades him to `evergreen` in the same grantMissionReward call that grants this sticker, so the
@@ -421,6 +434,24 @@ export function canBeCorrupted(card: Card): card is Extract<Card, { kind: 'suite
 }
 
 /**
+ * Every rank that already carries a corrupted card somewhere in `party` — the party-level half of the corruption
+ * rules, and the reason applyCorruptAnotherCard can never corrupt two cards of the same rank.
+ *
+ * JOHN'S RULE (live play 2026-09-04): "you would never have 2 sevens corrupted or 2 fours corrupted." The point
+ * is Mission 10, whose eight enemies are the campaign's own corrupted party members, one per rank 2 through 9
+ * (see missions.ts's Mission 10 / deck.ts's buildCorruptedPartyEnemies). Eight missions corrupt a card
+ * (Missions 1-8, one each), CORRUPTIBLE_RANKS spans exactly eight ranks, and no rank repeats — so a campaign
+ * played straight through arrives at Mission 10 holding exactly one corrupted card per rank, in whatever order
+ * the picks happened to land.
+ *
+ * Deliberately NOT filtered through canBeCorrupted: a card that is corrupted TODAY claims its rank whatever put
+ * it there, including a mission-authored preset or an older save written before the eligibility rules tightened.
+ */
+export function corruptedRanks(party: Card[]): Set<Rank> {
+  return new Set(party.filter((c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && !!c.corrupted).map((c) => c.rank));
+}
+
+/**
  * canBeCorrupted's mirror, enforcing the same invariant from the other direction: an ALREADY-corrupted card can
  * never gain a special faction class. Every "give one card a bonus Mage/Reaver/Guardian/Druid/Chanter sticker"
  * reward filters on this, alongside its own rank/class rules.
@@ -449,14 +480,20 @@ export function canGainSpecialClass(card: Extract<Card, { kind: 'suited' }>): bo
  * applyDualClassStickers's doc for why/when to pass a seeded one.
  *
  * Eligibility is canBeCorrupted's, shared with every other path that can mark a card corrupted — see its doc for
- * John's rule itself and why it is enforced in one place.
+ * John's rule itself and why it is enforced in one place. On TOP of that per-card rule, this reward step also
+ * enforces the party-level ONE-PER-RANK rule (see corruptedRanks): a rank that already carries a corrupted card
+ * anywhere in the party is off the table, so a seven of hearts and a seven of spades can never both be corrupted.
+ * That rule lives here rather than in canBeCorrupted because it is a property of the PARTY, not of a card —
+ * canBeCorrupted answers "could this card ever be corrupted", which mission data's own corruptedHero presets
+ * (missions.ts) also ask, and those presets are enemy tokens with no party to be one-per-rank against.
  */
 export function applyCorruptAnotherCard(
   party: Card[],
   excludeIds: Set<string> = new Set(),
   rng: () => number = Math.random,
 ): Card[] {
-  const eligible = party.filter((c) => canBeCorrupted(c) && !excludeIds.has(c.id));
+  const taken = corruptedRanks(party);
+  const eligible = party.filter((c) => canBeCorrupted(c) && !excludeIds.has(c.id) && !taken.has(c.rank));
   if (eligible.length === 0) return party;
   const pick = eligible[Math.floor(rng() * eligible.length)];
   return party.map((c) => (c.id === pick.id ? { ...c, corrupted: true } : c));

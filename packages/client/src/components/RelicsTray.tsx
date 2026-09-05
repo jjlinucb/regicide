@@ -5,8 +5,10 @@ import type { ClientGameState } from '@regicide/shared';
 // Druid's alone.
 //
 // The two Evergreen Mothers are SEPARATE RELICS, not one relic in two states: the Corrupted Evergreen Mother is
-// the weaker tier Mission 9 starts with, the Evergreen Mother is the healed one it rewards (see
-// legacy/missions.ts's Mission 9). Nothing here is ever "switched off" — a relic is either in play or it isn't.
+// the weaker tier Mission 9 hands over and keeps for the rest of the campaign. The healed Evergreen Mother is
+// listed here but NO MISSION GRANTS IT — John hasn't said where the relic heals (see legacy/missions.ts's
+// Mission 9), so its chip stays permanently "not in play" for now. Kept visible on purpose: the tray shows every
+// relic the campaign can hold, held or not. Nothing here is ever "switched off" — a relic is in play or it isn't.
 const RELIC_INFO: Record<string, { glyph: string; name: string }> = {
   KINFOLK_FLUTE: { glyph: '🪈', name: 'Kinfolk Flute' },
   SCARLET_WHISTLE: { glyph: '🎗️', name: 'Scarlet Whistle' },

@@ -732,9 +732,13 @@ function pushToDiscardPile(state: GameState, cards: Card[]): void {
  *
  * TWO RELICS, ONE POWER — for now (John, 2026-09-04). "Corrupted" in a relic's NAME is a weaker TIER of relic,
  * not a condition applied to one; nothing in this engine ever switches a relic off. They are:
- *   'CORRUPTED_EVERGREEN_MOTHER' — handed over at Mission 9's SETUP, working for the whole mission. The power
- *      above is exactly what John described for it, verbatim.
- *   'EVERGREEN_MOTHER'          — the healed relic, Mission 9's REWARD, carried into Missions 10-12.
+ *   'CORRUPTED_EVERGREEN_MOTHER' — handed over at Mission 9's SETUP and banked permanently as its reward, so it
+ *      is live for Mission 9 and every mission after it. The power above is what John described, verbatim.
+ *   'EVERGREEN_MOTHER'          — the healed relic. GRANTED BY NO MISSION. John, 2026-09-04: the relic stays
+ *      corrupted through Mission 10 and possibly Mission 11, and he has not yet said where it heals. This branch
+ *      is therefore unreachable in normal play today, and kept on purpose: it costs one `||`, it protects saves
+ *      written while Mission 9's reward still granted the healed tier, and the open question is a data change on
+ *      Mission 10 or 11's reward, not a code change here (see missions.ts's Mission 9 entry).
  *
  * PLACEHOLDER, AWAITING JOHN'S SPEC: the healed Evergreen Mother currently does the same thing as the corrupted
  * one, because he has not yet said what healing it changes. That equality is a stand-in, NOT a decided rule —

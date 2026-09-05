@@ -52,9 +52,11 @@ export interface Mission {
    * `reward.relics`, which banks a relic permanently at mission END: these are in play for this mission only and
    * are never persisted to the campaign by themselves.
    *
-   * Mission 9 only today: it starts holding 'CORRUPTED_EVERGREEN_MOTHER' and, on a win, banks the healed
-   * 'EVERGREEN_MOTHER' as its reward. Those are two separate relics, a weaker tier and its healed form — nothing
-   * here marks a relic "corrupted" as a state.
+   * Mission 9 only today: it starts holding 'CORRUPTED_EVERGREEN_MOTHER', which is why it needs this field at
+   * all — the relic has to be on the table from that mission's SETUP, and its own reward can't grant it until
+   * the mission is over. Mission 9's reward then banks the SAME relic permanently, so it also carries into
+   * Missions 10-12 (John, 2026-09-04 — see that mission's entry). Nothing here marks a relic "corrupted" as a
+   * state; 'CORRUPTED_EVERGREEN_MOTHER' is a relic's whole name.
    */
   startingRelics?: string[];
   /** See GameState.discardTopBuffsAttack. */
@@ -444,7 +446,13 @@ export const MISSIONS: Mission[] = [
     sidelineHighArcana: true,
     // Reward: Dual-class Stickers — 4 random existing party members each gain a second class icon, so that
     // single card triggers both class powers whenever it's played.
-    reward: { recruits: [], dualClassStickers: 4 },
+    //
+    // JOHN, 2026-09-04 (live play): this mission ALSO corrupts a card. Mission 10's eight enemies are the
+    // campaign's own corrupted party members, one per rank 2 through 9 — so exactly eight missions have to carry
+    // this step, and Missions 2 and 3 were the two that were missing it (see party.ts's
+    // MissionReward.corruptAnotherCard, which lists all eight). A dual-class sticker doesn't protect a card from
+    // it either: a second SUIT isn't a special class, so a card can hold both (party.ts's hasSpecialClass).
+    reward: { recruits: [], dualClassStickers: 4, corruptAnotherCard: true },
   },
   {
     id: 3,
@@ -511,7 +519,14 @@ export const MISSIONS: Mission[] = [
     // Reward: the Mage class itself — per the transcript, a full 10 new party members (one per non-royal rank,
     // 2 through Ace), not the "Lucky 4" ranks (3/5/7/9) the shipped version originally granted here — that
     // smaller 4-recruit pattern belongs to the later faction rewards instead (e.g. Mission 6's Guardians).
+    //
+    // JOHN, 2026-09-04 (live play): this mission also corrupts a card — the second of the two that were missing
+    // the step (see Mission 2's own reward comment, and party.ts's MissionReward.corruptAnotherCard for the full
+    // eight-mission ladder). None of the ten Mages granted here can be the victim, on two counts: a Mage can
+    // never be corrupted at all (party.ts's canBeCorrupted), and applyCorruptAnotherCard excludes this same
+    // reward's own new recruits regardless.
     reward: {
+      corruptAnotherCard: true,
       recruits: [
         recruit('Ilyra Sparkwrit', 'MAGE', '2', 'H'),
         recruit('Corvath the Kindled', 'MAGE', '3', 'D'),
@@ -1161,14 +1176,29 @@ export const MISSIONS: Mission[] = [
     //     another player must banish a card from their own hand; solo, the rule doesn't change, so you banish
     //     from your own. That is exactly what engine.ts's applyCorruptedCost already did, so no engine mechanic
     //     was invented for it.
-    //   • Evergreen Mother — the healed relic, this mission's REWARD, carried into Missions 10-12.
+    //   • Evergreen Mother — the healed relic. NOT this mission's reward, and NOT granted anywhere: see below.
     //
     // The earlier reading treated "corrupted" as a state that switched the relic OFF for the mission. It didn't;
     // that whole GameState.corruptedRelics / relicActive apparatus is gone.
     //
-    // AWAITING HIS SPEC: what the HEALED relic does differently. He hasn't said, so EVERGREEN_MOTHER keeps the
-    // behavior it already had — identical to the corrupted tier's. That is a PLACEHOLDER, flagged as such at
-    // applyCorruptedCost, not a ruling that the two tiers are the same.
+    // JOHN, 2026-09-04, correcting PR #92 in turn: THE RELIC IS NOT HEALED HERE. It stays corrupted through
+    // Mission 10, and possibly Mission 11 — he does not yet know where it heals. So this mission's reward banks
+    // the CORRUPTED tier permanently (reward.relics below), and the healed EVERGREEN_MOTHER is granted by NO
+    // MISSION AT ALL. The corrupted relic being both a startingRelic and a reward relic is deliberate, not a
+    // duplicate: startingRelics puts it on the table for THIS mission (rewards are only granted at mission end),
+    // reward.relics is what makes it permanent from here on (RoomManager's grantMissionReward → permanentRules).
+    // Both grants dedupe, so replaying a won Mission 9 still holds it exactly once.
+    //
+    // >>> OPEN QUESTION FOR JOHN, the only thing blocking EVERGREEN_MOTHER from being reachable: WHICH MISSION
+    // >>> HEALS IT — after Mission 10, or after Mission 11? Until he says, 'EVERGREEN_MOTHER' is defined
+    // >>> (engine.ts's applyCorruptedCost, RelicsTray's glyph) and dead: grep the repo and no mission's
+    // >>> startingRelics or reward.relics names it. Deliberately NOT deleted — the moment he answers, this is a
+    // >>> one-line data change on Mission 10 or 11's reward.
+    //
+    // AWAITING HIS SPEC, separately: what the HEALED relic does differently. He hasn't said, so EVERGREEN_MOTHER
+    // keeps the behavior it already had — identical to the corrupted tier's. That is a PLACEHOLDER, flagged as
+    // such at applyCorruptedCost, not a ruling that the two tiers are the same. Two unanswered questions, then:
+    // where it heals, and what healing changes.
     //
     // BEWARE THE WORD: "corrupted" now names two unrelated things in this codebase. Corrupted CARDS
     // (SuitedCard.corrupted) are a real mechanic with real rules — immunity-ignoring, a banish cost, and a strict
@@ -1197,7 +1227,8 @@ export const MISSIONS: Mission[] = [
       // the whole pool at once). Nothing about Mission 3 changes: its ten Mage recruits, one per non-royal rank,
       // are correct and untouched.
       recruits: [beastRecruit('Ash', 'MAGE', 'B', 'S')],
-      relics: ['EVERGREEN_MOTHER'],
+      // The CORRUPTED tier, banked permanently — not the healed one. See this mission's own comment above.
+      relics: ['CORRUPTED_EVERGREEN_MOTHER'],
       mageStickerRankChoice: true,
       upgradeEvergreenCard: 'Goran',
     },
@@ -1222,11 +1253,24 @@ export const MISSIONS: Mission[] = [
     // digital reimplementation — see the legacy-missions-transcript-mismatches memory doc's Mission 10 section):
     // these 8 should be drawn from party members ALREADY marked corrupted earlier in the campaign, not sampled
     // fresh at random — this shipped ignoring SuitedCard.corrupted entirely at first. deck.ts's
-    // buildCorruptedPartyEnemies now prioritizes already-corrupted members and only falls back to a random
-    // sample to fill any remaining slots — see that function's own comment for why the fallback path is, in
-    // today's actual campaign, still doing essentially all of the work (no earlier mission's reward path sets
-    // that flag on a party card yet). Which members get pulled beyond "prefer corrupted" isn't specified by the
-    // transcript beyond "eight" — the random tie-break remains a judgment call, not a transcript detail.
+    // buildCorruptedPartyEnemies takes already-corrupted members first and random-samples only to fill slots
+    // they don't cover.
+    //
+    // COMMENT CORRECTED 2026-09-04. It used to say no earlier mission's reward path set the corrupted flag, so
+    // the random fallback did essentially all the work here. That was stale well before this pass — Missions 1
+    // and 4-8 have corrupted a card for several passes now — and it is flatly wrong as of John's ruling that
+    // Missions 2 and 3 corrupt one too. The campaign now runs a real EIGHT-mission corruption ladder (Missions
+    // 1-8, one card each) under a one-per-rank rule (party.ts's corruptedRanks), which is exactly
+    // CORRUPTED_PARTY_ENEMY_COUNT cards spanning exactly ranks 2 through 9. A party that played the campaign
+    // straight through therefore fills all 8 slots from genuinely corrupted members and the fallback never runs.
+    //
+    // The fallback is still load-bearing, for the JUMP PATH: John routinely jumps ahead to a mission, and while
+    // RoomManager back-grants every skipped mission's reward first (so a jump to 10 does still walk the ladder),
+    // a party can reach here without a full corruption history — a campaign loaded from a save written before
+    // this rule, or any future path that seeds a party directly. Eight enemies must appear either way.
+    //
+    // Which members get pulled beyond "prefer corrupted" isn't specified by the transcript beyond "eight" — the
+    // random tie-break remains a judgment call, not a transcript detail.
     enemies: [],
     corruptedPartyEnemies: true,
     // Start-of-turn (not end-of-turn) mission-zone flip, feeding bonus STRENGTH onto the current enemy's own

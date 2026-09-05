@@ -32,6 +32,27 @@ something. They had not.
 worktree, run `npm run bootstrap` before anything else so resolution stays
 inside the worktree.
 
+## The wrong-worktree dev server trap
+
+`preview_start` with `.claude/launch.json` has twice started the dev server from a
+**different worktree** than the agent was working in. The browser then served code
+the agent had not written, its change appeared to do nothing, and both agents spent
+time chasing a bug that wasn't there.
+
+What worked: start the servers yourself with Bash from your own worktree —
+
+```bash
+npm run dev:server
+npm run dev:client
+```
+
+— and before you trust a screenshot or a DOM reading, confirm the served module
+paths actually point at your worktree, not the main checkout or a sibling one.
+
+**Same tell as the stale `dist` trap above:** the app behaving as if your edit
+never happened. Check which tree is being served before you go looking for the
+cause in your own code.
+
 ## No lint tooling
 
 There is no eslint or prettier config in this repo. Strict TypeScript and the
