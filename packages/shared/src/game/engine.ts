@@ -2281,9 +2281,41 @@ function enemyBlocksClass(state: GameState, cls: SuitlessImmuneClass): boolean {
   return pileTopImmuneClasses(state.discardPile, state.banishPile).includes(cls);
 }
 
+/**
+ * Step 1 of the Player Helper's turn order ("FORM AN ATTACK"): the costs a Corruption or Restoration card pays
+ * the instant it is played, before a single spell is cast.
+ *
+ * ORDER MATTERS (John's Player Helper photo, 2026-09-06). Both of these touch the reserve deck that step 2's
+ * Mage reveal then looks at: Corruption banishes its top card, Restoration heals a card back under it. These
+ * used to run after the Mage and Reaver reveals, which put a step-1 cost after two step-2/3 abilities and let a
+ * Mage look at a reserve deck a corrupted card in the same play had not yet burned.
+ *
+ * A corrupted MAGE is not handled here: its cost fires during its own reveal instead (see revealForMage), since
+ * the reveal is the thing the cost is paying for. `resolvesOwnSuitPower` already excludes arcane cards, so the
+ * two paths cannot double-charge one card.
+ */
+function applyStepOneCosts(state: GameState, player: PlayerState, cards: Card[]): void {
+  if (state.ruleset !== 'legacy') return;
+  // The same predicate continueResolveCommittedPlay uses for `nonArcaneCards`, so exactly the cards that were
+  // charged before still are — no corrupted Druid or Guardian starts paying a cost it never paid.
+  const played = cards.filter(
+    (c): c is Extract<Card, { kind: 'suited' }> =>
+      c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.chanter && !c.evergreen && !c.noSuitPower,
+  );
+  for (const c of played.filter((x) => x.corrupted)) {
+    applyCorruptedCost(state, player, c.name ?? 'A corrupted card');
+  }
+  for (const c of played.filter((x) => x.restored)) {
+    applyRestoredHeal(state, c.name ?? 'A restored card');
+  }
+}
+
 function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null, forcedPlay = false): EngineResult {
   const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
+
+  // STEP 1 — see applyStepOneCosts. Runs before the Mage reveal below, which is step 2.
+  applyStepOneCosts(state, player, cards);
 
   // Mage (Mission 3+, sourced from a full solo playthrough — see tutorial_vids/summaries/mission-3.md): each Mage
   // card (or secondClassArcane bonus-sticker card) in the play triggers its own independent reveal off the top of
@@ -2358,20 +2390,17 @@ function continueResolveCommittedPlay(
   // reserve deck the instant they're played (see SuitedCard.corrupted) — unless the Evergreen Mother relic is
   // in play, in which case the cost becomes another player banishing a card from their own hand instead (see
   // applyCorruptedCost).
+  // Their COST is paid back in step 1, before any spell is cast (see applyStepOneCosts) — the Player Helper
+  // puts Corruption and Restoration in "STEP 1: FORM AN ATTACK", above "STEP 2: CAST SPELLS". Only the suits
+  // they contribute to the immunity checks below are derived here.
   const corruptedCards = nonArcaneCards.filter((c) => c.corrupted);
   const corruptedSuits = Array.from(new Set(corruptedCards.flatMap(cardSuits)));
-  for (const c of corruptedCards) {
-    applyCorruptedCost(state, player, c.name ?? 'A corrupted card');
-  }
 
   // Restored cards (Mission 12, "Decay to Growth"): the campaign-finale upgrade of a corrupted card — same
   // immunity-ignoring class power, but instead of banishing the reserve deck's top card as the cost, it heals the
   // banish pile's top card back into the game, returned to the bottom of the reserve deck (see applyRestoredHeal).
   const restoredCards = nonArcaneCards.filter((c) => c.restored);
   const restoredSuits = Array.from(new Set(restoredCards.flatMap(cardSuits)));
-  for (const c of restoredCards) {
-    applyRestoredHeal(state, c.name ?? 'A restored card');
-  }
 
   // Reavers (Mission 5), John's ruling ("Reveal and Add"): playing one already revealed cards off the reserve
   // deck and folded the player's chosen card's raw strength into `reaverBonus` (see startReaverPhase/
@@ -2406,31 +2435,16 @@ function continueResolveCommittedPlay(
     state.ruleset === 'legacy' && reaverCards.length > 0 && !classBlocked('REAVER', reaverCards[0]?.name ?? 'A Reaver');
   const reaverMultiplier = reaverActive ? 2 : 1;
 
-  // Guardians (Mission 6): playing one raises an absolute shield that blocks the enemy's very next attack
-  // entirely, regardless of the card's own value — spent the instant it's used, not a stacking reduction.
-  // Aegis instead holds the shield permanently, zeroing the enemy's attack for the rest of the fight (same
-  // final effect as Bulwark, but from a Guardian's suit-less card).
-  // Mission 6 reward, sourced fix: a secondClassGuardian card (the Guardian sticker granted to an existing
-  // rank-8 party card, see party.ts's applyGuardianSticker) fires this same shield ability on top of its own
-  // suit power, exactly like a secondClassArcane card's bonus arcane bolt fires on top of its own suit power.
+  // Guardians (Mission 6). Its shield resolves LATER, after the Paladin's — see below. The official Player
+  // Helper card puts both in "STEP 4a: SUFFER DAMAGE", in that order: "PALADIN — reduce enemy strength", then
+  // "GUARDIAN — players suffer no damage this turn". Only the card list and the immunity check happen here, so
+  // classBlocked still logs in play order.
   const guardianCards = resolvingCards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian || c.secondClassGuardian),
   );
+  const guardianActive =
+    state.ruleset === 'legacy' && guardianCards.length > 0 && !classBlocked('GUARDIAN', guardianCards[0].name ?? 'A Guardian');
   let guardianBlocksNextAttack = false;
-  if (
-    state.ruleset === 'legacy' &&
-    guardianCards.length > 0 &&
-    !classBlocked('GUARDIAN', guardianCards[0].name ?? 'A Guardian')
-  ) {
-    const enemy = state.currentEnemy!;
-    if (hasSpecial(guardianCards, 'AEGIS')) {
-      enemy.spadesShield = enemy.baseAttack;
-      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises Aegis — the shield holds permanently, the enemy's attack reduced to 0.`);
-    } else {
-      guardianBlocksNextAttack = true;
-      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises an absolute shield, blocking the enemy's next attack entirely.`);
-    }
-  }
 
   // Druids (Mission 7): playing one activates Regrowth — the whole discard pile is dealt out across the table
   // and every player assigns up to 4 of their own dealt cards (hand / banish / top of deck / bottom of deck),
@@ -2524,6 +2538,26 @@ function continueResolveCommittedPlay(
   // only, outside the multiplier — a real behavior change, not just a richer way of computing the same number.
   const effectiveTotalValue = totalValue + arcaneBonus;
   const clubsMultiplier = resolveSuitPowers(state, cards, effectiveSuits, effectiveTotalValue, ignoreImmunityForPlay, immunityIgnoringSuits);
+
+  // The Guardian's absolute shield, immediately after the Paladin's own Spades shield that resolveSuitPowers
+  // just applied — the Player Helper's step 4a order (John's photo of the physical card, 2026-09-06). It used
+  // to run BEFORE every base-class power, which mattered: Aegis SETS spadesShield to the enemy's base attack
+  // while Spades ADDS to it, so the old order let the Spades value land on top and left the enemy attacking for
+  // more than a power described as "reduce the attack to 0" should allow.
+  //
+  // Aegis holds the shield permanently (same final effect as Bulwark, from a Guardian's suit-less card); an
+  // ordinary Guardian instead blocks the enemy's very next attack entirely, spent the instant it's used. A
+  // secondClassGuardian card (Mission 6's sticker) fires this on top of its own suit power.
+  if (guardianActive) {
+    const guardedEnemy = state.currentEnemy!;
+    if (hasSpecial(guardianCards, 'AEGIS')) {
+      guardedEnemy.spadesShield = guardedEnemy.baseAttack;
+      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises Aegis — the shield holds permanently, the enemy's attack reduced to 0.`);
+    } else {
+      guardianBlocksNextAttack = true;
+      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises an absolute shield, blocking the enemy's next attack entirely.`);
+    }
+  }
   const rawDamage = (effectiveTotalValue + reaverBonus) * reaverMultiplier * clubsMultiplier;
   // Mission 10: an enemy Paladin's extra power reduces the damage it takes by its own base strength (see
   // applyEnemyPaladinDamageReduction) — a no-op for every other mission/enemy.

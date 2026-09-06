@@ -3283,6 +3283,77 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
   });
 });
 
+describe("legacy: class powers follow the Player Helper's step order (2026-09-06)", () => {
+  it("a corrupted card's cost burns the reserve deck BEFORE a Mage in the same play looks at it", () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'H', health: 200, attack: 0 };
+    let state = startMission(1, [boss]);
+    // Step 1 (Corruption: banish the top card of reserve) precedes step 2 (Mage: look at cards from reserve).
+    const burned = suited('D', '3');
+    const seen = suited('C', '4');
+    state.tavernDeck = [burned, seen, ...state.tavernDeck];
+    const mage: SuitedCard = { ...suited('S', '5'), arcane: true, id: 'mage-x' };
+    const cursed: SuitedCard = { ...suited('H', '5'), corrupted: true, id: 'cursed-x' };
+    state = rig(state, [mage, cursed]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage.id, cursed.id] }),
+    );
+
+    // The corrupted card's cost took the reserve's top card, so the Mage's reveal never saw it.
+    expect(res.state.banishPile.some((c) => c.id === burned.id)).toBe(true);
+    const revealed = res.state.mageReveal?.candidates ?? [];
+    expect(revealed.some((c) => c.id === burned.id)).toBe(false);
+  });
+
+  it('a restored card heals before the spells too — same step 1', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'H', health: 200, attack: 0 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    const inBanish = suited('C', '7');
+    state.banishPile = [inBanish];
+    const healer: SuitedCard = { ...suited('H', '5'), restored: true, id: 'restored-x' };
+    state = rig(state, [healer]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [healer.id] }),
+    );
+
+    expect(res.state.banishPile.some((c) => c.id === inBanish.id)).toBe(false);
+    expect(res.state.tavernDeck[res.state.tavernDeck.length - 1]?.id).toBe(inBanish.id);
+  });
+
+  it("a Guardian's Aegis resolves AFTER the Paladin's shield, so it takes precedence rather than stacking", () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'H', health: 200, attack: 20 };
+    let state = startMission(1, [boss]);
+    // Step 4a on the physical helper is "PALADIN — reduce enemy strength", then "GUARDIAN". Aegis SETS the
+    // shield to the enemy's base attack; Spades ADDS to it. Under the old order (Guardian first) the Spades
+    // value landed on top, leaving the enemy still attacking despite a power that reduces its attack to 0.
+    const aegis: SuitedCard = { ...suited('D', '5'), guardian: true, special: 'AEGIS' };
+    state = rig(state, [aegis, suited('S', '5')]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }),
+    );
+
+    expect(res.state.currentEnemy?.spadesShield).toBe(20); // exactly the base attack, not 20 + the Spades 10
+    expect(resolvedEnemyAttack(res.state)).toBe(0);
+  });
+
+  it('CONTROL: an ordinary Guardian alongside a Paladin still leaves the Spades shield intact', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'H', health: 200, attack: 20 };
+    let state = startMission(1, [boss]);
+    const guard: SuitedCard = { ...suited('D', '5'), guardian: true };
+    state = rig(state, [guard, suited('S', '5')]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }),
+    );
+
+    // No Aegis to overwrite it, so the Paladin's own reduction stands on its own.
+    expect(res.state.currentEnemy?.spadesShield).toBe(10);
+  });
+});
+
 describe('legacy: Guardian class power (absolute shield, one attack at a time)', () => {
   function guardianCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
     return { ...suited(suit, rank), guardian: true, ...(special ? { special: 'AEGIS' } : {}) };
