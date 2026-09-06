@@ -6724,6 +6724,74 @@ describe('legacy: cleanup ordering is permanent from Mission 4 on (John, 2026-09
   });
 });
 
+describe('legacy: mission 11 a Mage attack that lands the killing blow (John, 2026-09-05)', () => {
+  it("settles the Mage's own cards ON TOP of the corpse, sorted lowest-on-top", () => {
+    const enemyA: LegacyEnemySpec = { name: 'Warden A', suit: 'D', health: 8, attack: 10 };
+    const enemyB: LegacyEnemySpec = { name: 'Warden B', suit: 'H', health: 30, attack: 10 };
+    const res0 = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'mage-kill-banish-order',
+      party: buildInitialParty(),
+      enemies: [enemyA, enemyB],
+      jesterCount: 0,
+      pileTopEnemyBonus: true,
+      discardCleanupLowToHigh: true,
+    });
+    if (!res0.ok) throw new Error(res0.error);
+
+    // A same-rank Mage combo lands the kill: 4 + 4 = 8 on 8 health, an exact kill.
+    const mageA: SuitedCard = { ...suited('H', '4'), arcane: true, id: 'mage-a' };
+    const mageB: SuitedCard = { ...suited('D', '4'), arcane: true, id: 'mage-b' };
+    let state = rig(res0.state, [mageA, mageB], { tableCards: [suited('C', '8')], damageTaken: 0 });
+    state.banishPile = [];
+    state.discardPile = [];
+    state.tavernDeck = []; // no reveal candidates, so the Mage's reveal window doesn't pause the play
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mageA.id, mageB.id] }),
+    ).state;
+
+    expect(state.currentEnemy?.name).toBe('Warden B');
+    // Bottom to top: the dead enemy's table card, then the corpse, then the Mage's own cards last of all.
+    const order = state.banishPile.map((c) => (c.kind === 'suited' ? (c.name ?? c.rank) : 'jester'));
+    expect(order.slice(0, 2)).toEqual(['8', 'Warden A']);
+    expect(new Set(order.slice(2))).toEqual(new Set(['4', '4']));
+    // ...so the next enemy reads a Mage card, NOT the corpse's 10.
+    expect(cardValue(state.banishPile[state.banishPile.length - 1])).toBe(4);
+    expect(resolvedEnemyAttack(state)).toBe(14); // 10 base + 0 (discard empty) + 4 (banish top)
+  });
+
+  it('a single-card Mage kill still lands its one card above the corpse', () => {
+    const enemyA: LegacyEnemySpec = { name: 'Warden A', suit: 'D', health: 5, attack: 10 };
+    const enemyB: LegacyEnemySpec = { name: 'Warden B', suit: 'H', health: 30, attack: 10 };
+    const res0 = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'mage-kill-banish-order-single',
+      party: buildInitialParty(),
+      enemies: [enemyA, enemyB],
+      jesterCount: 0,
+      pileTopEnemyBonus: true,
+      discardCleanupLowToHigh: true,
+    });
+    if (!res0.ok) throw new Error(res0.error);
+    const mage: SuitedCard = { ...suited('H', '5'), arcane: true, id: 'mage-solo' };
+    let state = rig(res0.state, [mage], { tableCards: [], damageTaken: 0 });
+    state.banishPile = [];
+    state.discardPile = [];
+    state.tavernDeck = [];
+
+    state = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage.id] })).state;
+
+    const top = state.banishPile[state.banishPile.length - 1];
+    expect(top.id).toBe('mage-solo');
+    expect(state.banishPile[state.banishPile.length - 2]?.kind === 'suited' && state.banishPile[state.banishPile.length - 2].name).toBe('Warden A');
+  });
+});
+
 describe('legacy: mission 11 reward (Esme returns permanently upgraded)', () => {
   it("completes the mission immediately (WON) when the last enemy falls — no beast-card choice window", () => {
     const beasts = mission4BeastCards();
