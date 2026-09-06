@@ -134,7 +134,9 @@ describe('legacy: mission setup', () => {
     expect(mission1.exactKillToReserveDeck).toBe(true);
     expect(mission1.reward.relics).toEqual(['KINFOLK_FLUTE']);
     expect(mission1.reward.corruptAnotherCard).toBe(true);
-    expect(mission1.reward.recruits).toEqual([{ name: 'High Arcana', class: 'BARD', rank: '25' }]);
+    // noSuitPower (John, 2026-09-06: "there is no suit right now, he doesn't have one") — the 'BARD' is the
+    // storage suit the card shape requires, not a class he actually carries.
+    expect(mission1.reward.recruits).toEqual([{ name: 'High Arcana', class: 'BARD', rank: '25', noSuitPower: true }]);
     const ids = ['p0'];
     const res = applyAction(createLobbyState(), {
       type: 'START_LEGACY_MISSION',
@@ -7209,6 +7211,31 @@ describe('legacy: mission 12 restored sleeves and the boss who is not a card (Jo
       (m) => m.id >= 2 && !m.sidelineHighArcana && !(m.sidelineIdentity?.suit === 'D' && m.sidelineIdentity.rank === '25'),
     );
     expect(playable.map((m) => m.id)).toEqual([]);
+  });
+});
+
+describe("legacy: High Arcana has no suit of his own (John, 2026-09-06)", () => {
+  it('is built inert — noSuitPower, so no class power resolves and he lends no immunity', () => {
+    const spec = getMission(1)!.reward.recruits.find((r) => r.name === 'High Arcana')!;
+    const card = buildRecruitCard(spec) as SuitedCard;
+
+    expect(card.noSuitPower).toBe(true);
+    expect(card.rank).toBe('25');
+    expect(cardValue(card)).toBe(25); // his value is the whole of what he brings
+  });
+
+  it('contributes no immunity from a pile top, the way an inert card never does', () => {
+    const card = buildRecruitCard(getMission(1)!.reward.recruits.find((r) => r.name === 'High Arcana')!) as SuitedCard;
+    const enemy = makeLegacyEnemy({ name: 'Warden', suit: 'S', noClass: true, health: 30, attack: 10 });
+
+    expect(pileTopImmuneSuits([card], [], enemy)).toEqual([]);
+    expect(pileTopImmuneClasses([card], [])).toEqual([]);
+  });
+
+  it('is still findable by the sideline filter, which reads his stored suit and rank', () => {
+    const card = buildRecruitCard(getMission(1)!.reward.recruits.find((r) => r.name === 'High Arcana')!) as SuitedCard;
+    expect(card.suit).toBe('D');
+    expect(card.rank).toBe('25');
   });
 });
 
