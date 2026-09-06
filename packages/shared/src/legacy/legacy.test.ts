@@ -6833,6 +6833,56 @@ describe('legacy: mission 11 reward (Esme returns permanently upgraded)', () => 
     expect(applyEvergreenUpgrade(party, { suit: 'C', rank: '6' })).toBe(party);
   });
 
+  it('grants Esme and NOTHING else — no recruits, relics, stickers or corruption step', () => {
+    const reward = getMission(11)!.reward;
+
+    expect(reward.upgradeSidelinedCard).toEqual({ suit: 'C', rank: '6' });
+    expect(reward.recruits).toEqual([]);
+    expect(reward.relics).toBeUndefined();
+    expect(reward.dualClassStickers).toBeUndefined();
+    expect(reward.corruptAnotherCard).toBeUndefined();
+    expect(reward.mageStickerRankChoice).toBeUndefined();
+    expect(reward.reaverStickerChoice).toBeUndefined();
+    expect(reward.guardianStickerChoice).toBeUndefined();
+    expect(reward.druidStickerChoice).toBeUndefined();
+    expect(reward.chanterStickerChoice).toBeUndefined();
+  });
+
+  it('corrupts nobody — a party run through the reward comes back with the same corrupted cards it went in with', () => {
+    // A length check alone can't catch a corruption step being added later: corrupting a card doesn't change
+    // the party's size. This asserts the actual card states instead.
+    const party = [...buildInitialParty(), ...mission4BeastCards()];
+    const corruptedBefore = party.filter((c) => c.kind === 'suited' && c.corrupted).map((c) => c.id);
+
+    const next = applyReward(party, getMission(11)!.reward);
+
+    expect(next.filter((c) => c.kind === 'suited' && c.corrupted).map((c) => c.id)).toEqual(corruptedBefore);
+    // ...and exactly one card came back changed at all: Esme.
+    const changed = next.filter((c, i) => c !== party[i]);
+    expect(changed.length).toBe(1);
+    expect(changed[0].kind === 'suited' && changed[0].name).toBe('Esme');
+  });
+
+  it('an evergreen Esme resolves all four class powers at once, ignoring immunity', () => {
+    const esme: SuitedCard = { ...suited('C', '6'), name: 'Esme', evergreen: true };
+    let state = startMission11(1);
+    // An enemy immune to Esme's own printed Clubs — evergreen should ignore that outright.
+    state = rig(state, [esme], { suit: 'C', noClass: false, baseAttack: 10, maxHealth: 99, damageTaken: 0, spadesShield: 0 });
+    const handBefore = state.players[0].hand.length;
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [esme.id] }),
+    ).state;
+
+    const log = state.log.map((e) => e.message).join('\n');
+    expect(log).toContain('Esme surges — all four powers resolve at once, ignoring immunity');
+    // Clubs doubled the damage (6 -> 12) despite the enemy's own Clubs immunity...
+    expect(state.currentEnemy?.damageTaken).toBe(12);
+    // ...Spades reduced the enemy's attack, and Diamonds drew cards.
+    expect(state.currentEnemy!.spadesShield).toBeGreaterThan(0);
+    expect(state.players[0].hand.length).toBeGreaterThan(handBefore - 1);
+  });
+
   it("applyReward wires the mission's own reward.upgradeSidelinedCard through to Esme, and Beast Companions return unpruned", () => {
     const mission11 = getMission(11)!;
     const beasts = mission4BeastCards();
