@@ -1536,6 +1536,22 @@ export const MISSIONS: Mission[] = [
     // sidelineHighArcana here: this is the mission where High Arcana himself is unmasked as The Hierarch, not a
     // playable party card to exclude.
     standingJesters: true,
+    // JOHN, 2026-09-05 — THIS ANSWERS THE LONG-OPEN QUESTION parked in Mission 9's entry ("which mission heals
+    // the relic?"). It heals HERE, at this mission's setup, which is what this mission's own story text has
+    // always described: the ally freed in the depths "hands the party a gift before they press on: a way to
+    // upgrade one of their own relics, turning its corruption-craft inside out."
+    //
+    // The purified tier's rule, in his words: a restored card can never enter the banish pile — if it would, it
+    // goes to the bottom of the reserve deck instead. That protection is the RELIC's, not something a restored
+    // card carries on its own (it was previously hardcoded to this mission's mechanic; see engine.ts's
+    // banishCards, now gated on holding this relic). What a restored card carries by itself is the immunity
+    // bypass and the heal-instead-of-banish cost.
+    //
+    // STILL OPEN, deliberately not invented: whether the purified tier ALSO keeps the corrupted tier's own power
+    // (a corrupted card's cost becoming another player banishing from hand — see engine.ts's applyCorruptedCost,
+    // which today answers yes on the reasoning that an upgrade shouldn't lose a power). Mostly moot here if every
+    // corrupted 2-9 card arrives restored, but it is a judgment call, not his ruling.
+    startingRelics: ['EVERGREEN_MOTHER'],
     // No reward: the campaign's final mission — completing it ends the story, nothing further to grant. Some
     // pasted community research describes an un-banishable restored-card "immunity shield" and a Paladin power
     // that bypasses enemy immunity outright; neither appears anywhere in the transcript, so neither was used —

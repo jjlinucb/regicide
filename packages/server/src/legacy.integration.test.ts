@@ -888,7 +888,7 @@ describe('legacy campaign integration', () => {
     client.close();
   });
 
-  it('Missions 11 and 12 carry the corrupted relic too — it never heals along the way', async () => {
+  it('Mission 11 still carries the corrupted relic; Mission 12 is where it purifies (John, 2026-09-05)', async () => {
     for (const missionId of [11, 12]) {
       const client = ioClient(`http://localhost:${port}`);
       await waitFor(client, 'connect');
@@ -897,8 +897,15 @@ describe('legacy campaign integration', () => {
       });
       const result = rooms.startLegacyMission(created.code, created.playerId, missionId);
       if ('error' in result) throw new Error(result.error);
-      expect(result.room.gameState.relics).toContain('CORRUPTED_EVERGREEN_MOTHER');
-      expect(result.room.gameState.relics).not.toContain('EVERGREEN_MOTHER');
+      // Mission 11 still fights with the corrupted tier. Mission 12 hands over the purified one at setup, which
+      // SWAPS OUT the corrupted tier it was made from (see engine.ts's startLegacyMission) rather than stacking.
+      if (missionId === 12) {
+        expect(result.room.gameState.relics).toContain('EVERGREEN_MOTHER');
+        expect(result.room.gameState.relics).not.toContain('CORRUPTED_EVERGREEN_MOTHER');
+      } else {
+        expect(result.room.gameState.relics).toContain('CORRUPTED_EVERGREEN_MOTHER');
+        expect(result.room.gameState.relics).not.toContain('EVERGREEN_MOTHER');
+      }
       expect(result.room.gameState.phase).toBe('IN_PROGRESS');
       client.close();
     }
