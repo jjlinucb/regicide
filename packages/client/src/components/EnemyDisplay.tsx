@@ -51,6 +51,7 @@ export function EnemyDisplay({
   zoneImmuneSuits,
   pileImmuneSuits,
   pileImmuneClasses,
+  zoneImmuneClasses,
 }: {
   enemy: EnemyState;
   /** See ClientGameState.liveEnemyAttack — the engine's own resolved total, every mission's buff formula already folded in (Mission 10's multiply-before-shield included, which no flat ledger term could otherwise represent). */
@@ -64,6 +65,8 @@ export function EnemyDisplay({
    */
   pileImmuneSuits?: Suit[];
   pileImmuneClasses?: SuitlessImmuneClass[];
+  /** Mission 12: suit-less classes the mission zone has stacked up (see GameState.zoneImmuneClasses). */
+  zoneImmuneClasses?: SuitlessImmuneClass[];
 }) {
   const healthRemaining = Math.max(0, enemy.maxHealth - enemy.damageTaken);
   const healthPct = Math.round((healthRemaining / enemy.maxHealth) * 100);
@@ -81,7 +84,9 @@ export function EnemyDisplay({
   const immuneSuits: Suit[] = enemy.immunityBroken
     ? []
     : Array.from(new Set([...ownSuits, ...(zoneImmuneSuits ?? []), ...(pileImmuneSuits ?? [])]));
-  const immuneClasses: SuitlessImmuneClass[] = enemy.immunityBroken ? [] : (pileImmuneClasses ?? []);
+  const immuneClasses: SuitlessImmuneClass[] = enemy.immunityBroken
+    ? []
+    : Array.from(new Set([...(pileImmuneClasses ?? []), ...(zoneImmuneClasses ?? [])]));
 
   return (
     <div className="enemy-card">

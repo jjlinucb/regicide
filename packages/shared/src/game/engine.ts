@@ -32,6 +32,7 @@ import {
   matchesAscendingZoneSlot,
   missionZoneValueSum,
   pileTopImmuneClasses,
+  suitlessClassOf,
   pileTopImmuneSuits,
   validatePlayShape,
 } from './rules.js';
@@ -565,8 +566,16 @@ function flipBanishPileZoneCard(state: GameState): void {
   // A Mercenary "19" (see SuitedCard.noSuitPower) carries an inert placeholder suit and must never grant zone
   // immunity, same as every other suit-immunity-bookkeeping site it's excluded from.
   if (card.kind === 'suited' && !card.noSuitPower) {
-    for (const s of cardSuits(card)) {
-      if (!state.zoneImmuneSuits.includes(s)) state.zoneImmuneSuits.push(s);
+    // John, 2026-09-06: read the card's REAL class, the same way Mission 11's pile tops do. A Druid, Mage,
+    // Reaver, Guardian or Chanter in the zone grants THAT class — the basic suit it carries is bookkeeping, not
+    // a class it can lend an enemy (see rules.ts's suitlessClassOf / pileTopImmuneClasses).
+    const suitless = suitlessClassOf(card);
+    if (suitless) {
+      if (!state.zoneImmuneClasses.includes(suitless)) state.zoneImmuneClasses.push(suitless);
+    } else {
+      for (const s of cardSuits(card)) {
+        if (!state.zoneImmuneSuits.includes(s)) state.zoneImmuneSuits.push(s);
+      }
     }
   }
   const label = card.kind === 'suited' ? card.name ?? `the ${card.rank}` : 'a Jester';
@@ -672,7 +681,7 @@ function hasSpecial(cards: Card[], ability: SpecialAbilityId): boolean {
  * fix closed, just one pile over. Applied to whatever actually reaches the pile, after the restored cards have
  * been pulled out of the batch — the two rules compose rather than excluding each other.
  */
-function banishCards(state: GameState, cards: Card[]): void {
+function banishCards(state: GameState, cards: Card[], opts: { preserveOrder?: boolean } = {}): void {
   if (cards.length === 0) return;
   const protectsRestored = state.relics.includes('EVERGREEN_MOTHER');
   const reachingPile: Card[] = [];
@@ -681,8 +690,8 @@ function banishCards(state: GameState, cards: Card[]): void {
     else reachingPile.push(c);
   }
   if (reachingPile.length === 0) return;
-  const ordered = state.discardCleanupLowToHigh && reachingPile.length > 1 ? lowToHighForCleanup(reachingPile) : reachingPile;
-  state.banishPile.push(...ordered);
+  const sort = state.discardCleanupLowToHigh && !opts.preserveOrder && reachingPile.length > 1;
+  state.banishPile.push(...(sort ? lowToHighForCleanup(reachingPile) : reachingPile));
 }
 
 /**
@@ -1342,6 +1351,8 @@ function dealDamageAndCheckDefeat(
       banishCards(state, state.missionZone);
       state.missionZone = [];
       state.zoneImmuneSuits = [];
+  state.zoneImmuneClasses = [];
+  state.pendingDiscardAfterSweep = [];
       log(state, 'The mission zone is banished as the fight resets.');
     }
     state.turnPhase = 'AWAIT_PLAY';
@@ -1403,6 +1414,7 @@ function dealDamageAndCheckDefeat(
       }
       state.missionZone = [];
       state.zoneImmuneSuits = [];
+    state.zoneImmuneClasses = [];
     }
     if (state.rollingZoneBonus && state.rollingZoneCards.length > 0) {
       // Mission 5: a kill resets the "since the last kill" accumulation window — every card recycled into the
@@ -1521,9 +1533,10 @@ function dealDamageAndCheckDefeat(
       // right after that) — order preserved throughout, feeding fresh material to next turn's banish-pile-top
       // flip (see flipBanishPileZoneCard).
       if (state.missionZone.length > 0) {
-        banishCards(state, state.missionZone);
+        banishCards(state, state.missionZone, { preserveOrder: true });
         state.missionZone = [];
         state.zoneImmuneSuits = [];
+    state.zoneImmuneClasses = [];
         log(state, 'The mission zone is banished.');
       }
       if (remaining === 0) {
@@ -1594,7 +1607,7 @@ function rankForValue(value: number): Rank {
 }
 
 /**
- * Mission 11 only (John's ruling, live play 2026-09-05): a defeated enemy's own card goes onto the BANISH pile
+ * Missions 11 and 12 (John, 2026-09-05 and 2026-09-06): a defeated enemy's own card goes onto the BANISH pile
  * too, on top of its played table cards — so the corpse itself keeps feeding the pile-top mechanic that defines
  * this mission (see GameState.pileTopEnemyBonus).
  *
@@ -1633,10 +1646,28 @@ function finishEnemyDefeatTail(
   if (state.ruleset === 'legacy' && (state.pileTopEnemyBonus || state.restoredCardMechanic)) {
     // Mission 11: "defeating the enemy always banishes it" — its played cards go to the banish pile instead of
     // the discard pile, directly feeding the very pile-top bonus/immunity mechanic this flag names (see
-    // resolvedEnemyAttack / resolveSuitPowers's blocked check). Mission 12 reuses the same rule as step two of its
-    // own three-step cleanup (see the restoredCardMechanic block above for step one, and just below for step three).
-    banishCards(state, enemy.tableCards);
-    if (state.pileTopEnemyBonus) banishDefeatedEnemyCard(state, enemy);
+    // resolvedEnemyAttack / resolveSuitPowers's blocked check).
+    //
+    // MISSION 12 IS THE OPPOSITE (John, 2026-09-06): "the cards we just played to defeat it in the play zone do
+    // go into the discard pile, so those do not get banished." Only three things are banished there — the
+    // mission zone, the enemy itself, and the whole discard pile — and the play area is deliberately not one of
+    // them. The cards are held here and pushed to the discard pile AFTER that sweep (see the restoredCardMechanic
+    // block below), so they survive into a fresh, empty discard pile rather than being swept away with it. Cards
+    // spent on an earlier Mage attack still burn, since a Mage attack banishing its own cards is its own rule.
+    if (state.restoredCardMechanic) {
+      const marked = new Set(enemy.mageAttackCardIds);
+      state.pendingDiscardAfterSweep = enemy.tableCards.filter((c) => !marked.has(c.id));
+      const mageSpent = enemy.tableCards.filter((c) => marked.has(c.id));
+      if (mageSpent.length > 0) banishCards(state, mageSpent);
+    } else {
+      banishCards(state, enemy.tableCards);
+    }
+    // Mission 11's felled-enemy card, and Mission 12's own cleanup step two — John, 2026-09-06: "banish the
+    // enemy" means the enemy's card itself, not just the cards played against it. On Mission 12 this matters
+    // more than it does on 11: the corpse lands on the banish pile that next turn's zone flip draws from, so a
+    // Queen (15), King (20) or the Hierarch (30) can be pulled straight into the zone as a single huge jump in
+    // the next enemy's strength.
+    if (state.pileTopEnemyBonus || state.restoredCardMechanic) banishDefeatedEnemyCard(state, enemy);
   } else if (state.ruleset === 'legacy' && state.ascendingZone && !state.zoneClosed) {
     // Mission 8, sourced fix (see GameAction's PLACE_IN_ZONE / GameState.zoneCommittedPlay): the ascending zone's
     // placement no longer costs a fresh hand card — it instead reuses a card already committed to THIS kill's
@@ -1663,10 +1694,23 @@ function finishEnemyDefeatTail(
     }
   }
   if (state.ruleset === 'legacy' && state.restoredCardMechanic) {
-    // Mission 12's cleanup, step three: banish the ENTIRE discard pile too — order preserved, right after the
-    // mission zone and the enemy's own table cards above.
-    banishCards(state, state.discardPile);
+    // Mission 12's cleanup, step three: banish the ENTIRE discard pile too, right after the mission zone and the
+    // enemy's own table cards above.
+    //
+    // ORDER PRESERVED (John, 2026-09-06): "all the cards in the discard pile are not reshuffled when they get
+    // added to the banish zone after an enemy is defeated." The low-to-high cleanup rule governs a single play's
+    // worth of cards being put down together, NOT a bulk transfer of a whole pile — that pile is already ordered
+    // by everything that built it, and re-sorting it would both discard that history and hand the next zone flip
+    // a card the players never chose to leave on top. Same for the mission zone in step one.
+    banishCards(state, state.discardPile, { preserveOrder: true });
     state.discardPile = [];
+    // ...and only NOW does the killing play's own play area land, on a discard pile that has just been emptied —
+    // which is exactly why it isn't banished along with it (John, 2026-09-06). Sorted low-to-high like any other
+    // single play's cleanup, so the lowest card ends up on top.
+    if (state.pendingDiscardAfterSweep.length > 0) {
+      pushToDiscardPile(state, state.pendingDiscardAfterSweep);
+      state.pendingDiscardAfterSweep = [];
+    }
   }
 
   if (state.castleDeck.length === 0) {
@@ -1839,6 +1883,7 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
   state.endOfTurnZoneFlip = false;
   state.missionZone = [];
   state.zoneImmuneSuits = [];
+    state.zoneImmuneClasses = [];
   state.banishPile = [];
   state.standingJesters = [];
   state.discardTopBuffsAttack = false;
@@ -2220,14 +2265,19 @@ function resumeEndlessSave(state: GameState, action: Extract<GameAction, { type:
  * passes it (defaults to false) since a Jester claim isn't a response to a rejected yield.
  */
 /**
- * Mission 11 (John, 2026-09-05): whether the current enemy blocks one of the suit-less classes right now,
- * because a card of that class sits on top of the discard or banish pile (see rules.ts's pileTopImmuneClasses).
+ * Missions 11 and 12: whether the current enemy blocks one of the suit-less classes right now — because a card
+ * of that class sits on top of the discard or banish pile (Mission 11, see rules.ts's pileTopImmuneClasses), or
+ * because one has been flipped into the mission zone (Mission 12, see GameState.zoneImmuneClasses).
  * Recomputed on every call, like every other part of this mission's pile-top mechanic — both piles keep moving.
  * A claimed Jester breaks the enemy's immunity and clears this along with everything else.
  */
 function enemyBlocksClass(state: GameState, cls: SuitlessImmuneClass): boolean {
-  if (state.ruleset !== 'legacy' || !state.pileTopEnemyBonus) return false;
+  if (state.ruleset !== 'legacy') return false;
   if (!state.currentEnemy || state.currentEnemy.immunityBroken) return false;
+  // Mission 12 stacks the same block from its own mission zone (John, 2026-09-06 — see
+  // GameState.zoneImmuneClasses), which unlike the pile tops is accumulated rather than recomputed.
+  if (state.zoneImmuneClasses.includes(cls)) return true;
+  if (!state.pileTopEnemyBonus) return false;
   return pileTopImmuneClasses(state.discardPile, state.banishPile).includes(cls);
 }
 
@@ -2246,7 +2296,8 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   const mageImmune = enemyBlocksClass(state, 'MAGE');
   const mageQueue = state.ruleset === 'legacy' && !mageImmune ? cards.filter(isMageCard) : [];
   if (mageImmune && cards.some(isMageCard)) {
-    log(state, "The Mage's reveal is blocked — the enemy is immune to that class via the discard/banish piles.");
+    const via = state.zoneImmuneClasses.includes('MAGE') ? 'the mission zone' : 'the discard/banish piles';
+    log(state, `The Mage's reveal is blocked — the enemy is immune to that class via ${via}.`);
   }
   if (mageQueue.length > 0) {
     const [trigger] = mageQueue;
@@ -2336,14 +2387,17 @@ function continueResolveCommittedPlay(
   // its damage, exactly as an immune Cleric still hits without healing. An Evergreen card ignores immunity as it
   // always has (see evergreenActive below), and nothing here touches Myla's unpierceable ward.
   // A claimed Jester breaks the enemy's immunity outright, this alongside everything else.
-  const immuneClasses = new Set(
-    state.pileTopEnemyBonus && state.currentEnemy && !state.currentEnemy.immunityBroken
-      ? pileTopImmuneClasses(state.discardPile, state.banishPile)
-      : [],
-  );
+  // Mission 12 stacks the same kind of block from its own mission zone (John, 2026-09-06 — see
+  // GameState.zoneImmuneClasses / flipBanishPileZoneCard), so the two sources merge here.
+  const immunityLive = Boolean(state.currentEnemy) && !state.currentEnemy?.immunityBroken;
+  const pileClasses =
+    state.pileTopEnemyBonus && immunityLive ? pileTopImmuneClasses(state.discardPile, state.banishPile) : [];
+  const zoneClasses = immunityLive ? state.zoneImmuneClasses : [];
+  const immuneClasses = new Set<SuitlessImmuneClass>([...pileClasses, ...zoneClasses]);
   const classBlocked = (cls: SuitlessImmuneClass, label: string): boolean => {
     if (!immuneClasses.has(cls)) return false;
-    log(state, `${label} is blocked — the enemy is immune to that class via the discard/banish piles.`);
+    const via = zoneClasses.includes(cls) && !pileClasses.includes(cls) ? 'the mission zone' : 'the discard/banish piles';
+    log(state, `${label} is blocked — the enemy is immune to that class via ${via}.`);
     return true;
   };
 
@@ -3219,6 +3273,7 @@ function placeInZone(state: GameState, action: Extract<GameAction, { type: 'PLAC
     state.discardPile.push(...state.missionZone);
     state.missionZone = [];
     state.zoneImmuneSuits = [];
+    state.zoneImmuneClasses = [];
     return beginZonePurge(state, player);
   }
 
@@ -3691,6 +3746,8 @@ export function createLobbyState(): GameState {
     endOfTurnZoneFlip: false,
     missionZone: [],
     zoneImmuneSuits: [],
+    zoneImmuneClasses: [],
+    pendingDiscardAfterSweep: [],
     banishPile: [],
     standingJesters: [],
     discardTopBuffsAttack: false,

@@ -609,6 +609,21 @@ export interface GameState {
   missionZone: Card[];
   /** Legacy-only: extra classes the current enemy is immune to, stacked up from missionZone flips. Cleared with the zone. */
   zoneImmuneSuits: Suit[];
+  /**
+   * Legacy-only (Mission 12), John 2026-09-06: the SUIT-LESS classes the mission zone has stacked up — the
+   * counterpart to zoneImmuneSuits, exactly as pileTopImmuneClasses is to pileTopImmuneSuits on Mission 11. A
+   * zone card grants EITHER a base suit (there) or one of these (here), never both, since a card has one real
+   * class: a Druid sitting in the zone makes the enemy immune to DRUID, not to the base suit it borrows.
+   * Populated only by flipBanishPileZoneCard; Mission 3's own zone flip is unchanged. Cleared with the zone.
+   */
+  zoneImmuneClasses: SuitlessImmuneClass[];
+  /**
+   * Legacy-only (Mission 12), John 2026-09-06: the defeated enemy's play area, held between step two and the end
+   * of the three-step cleanup. Mission 12 banishes the mission zone, the enemy, and the whole discard pile — but
+   * NOT the cards played to land the kill, which go to the discard pile once that sweep has already emptied it.
+   * Always empty outside that window.
+   */
+  pendingDiscardAfterSweep: Card[];
   /** Legacy-only: cards permanently removed from the game (mission-zone cleanup, etc.) — never reshuffled back in. */
   banishPile: Card[];
   /**
@@ -1333,6 +1348,8 @@ export interface ClientGameState {
   capturedPiles: ClientCapturedPile[];
   /** See GameState.zoneImmuneSuits. Public information — it's on the table. */
   zoneImmuneSuits: Suit[];
+  /** See GameState.zoneImmuneClasses. Public information — it's on the table. */
+  zoneImmuneClasses: SuitlessImmuneClass[];
   /** See GameState.banishPile. Public information — it's a visible discard-style pile, just permanent. */
   banishPile: Card[];
   /** See GameState.beastDeckMechanic. */
