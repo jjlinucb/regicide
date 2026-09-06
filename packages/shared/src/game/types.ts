@@ -251,6 +251,15 @@ export interface EnemyState {
   suit: Suit;
   /** Legacy-only: a second class this enemy is also immune to (e.g. a two-headed hydra). Absent for single-class enemies. */
   secondSuit?: Suit;
+  /**
+   * Legacy-only (Mission 11's Wardens), John's ruling from live play 2026-09-05: this enemy has NO class of its
+   * own. `suit` above is required by the shape and still drives the card face, but it grants no immunity — every
+   * class this enemy blocks comes from somewhere else, which in practice means the discard/banish pile tops (see
+   * GameState.pileTopEnemyBonus / rules.ts's pileTopImmuneSuits, which skips seeding the enemy's own suit for a
+   * noClass enemy, so the two pile tops can each contribute one and the enemy sits at 0-2 blocked classes rather
+   * than 1-3). Read by rules.ts's isSuitBlockedByImmunity, which returns false outright for a noClass enemy.
+   */
+  noClass?: boolean;
   rank: 'J' | 'Q' | 'K';
   /**
    * Legacy-only: the letter printed on this enemy's card face, overriding `rank` for display only. Legacy
@@ -310,11 +319,20 @@ export interface LegacyEnemySpec {
   suit: Suit;
   /** A second class this enemy is also immune to (e.g. a two-headed hydra). Absent for single-class enemies. */
   secondSuit?: Suit;
+  /** See EnemyState.noClass — this enemy has no class of its own, and `suit` is a card face only. */
+  noClass?: boolean;
   health: number;
   attack: number;
   /** See EnemyState.rankLabel. */
   rankLabel?: string;
 }
+
+/**
+ * The classes with no suit of their own (see legacy/classes.ts) that a Mission 11 pile top can make an enemy
+ * immune to — see rules.ts's pileTopImmuneClasses. Declared here rather than beside that function so
+ * ClientGameState can name it without types.ts importing rules.ts.
+ */
+export type SuitlessImmuneClass = 'MAGE' | 'REAVER' | 'GUARDIAN' | 'DRUID' | 'CHANTER';
 
 export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
 
@@ -854,7 +872,8 @@ export interface GameState {
   beastDeckMechanic: boolean;
   /**
    * Legacy-only (Mission 11): the face-down deck built from every Beast Companion card in the campaign party
-   * (Mission 4's four plus Mission 9's Ash, see SuitedCard.beast / deck.ts's buildBeastDeck) — pulled out of
+   * (Mission 4's four suited beasts; Mission 9's Mage beast Ash is excluded and stays playable — see
+   * SuitedCard.beast / deck.ts's buildBeastDeck) — pulled out of
    * circulation and seeded here at mission start instead of joining the reserve deck, so no Beast card is available to draw or
    * play this mission. Its top card flips for a one-shot effect at the start of every turn (see
    * flipBeastDeckCard), moving to `beastDeckDiscard`; once empty, it reshuffles from there and the cycle
@@ -1197,6 +1216,15 @@ export interface ClientGameState {
   currentEnemy: EnemyState | null;
   /** See engine.ts's resolvedEnemyAttack — the enemy's true current attack after every mission-specific buff/shield is folded in. Null when there's no current enemy. */
   liveEnemyAttack: number | null;
+  /**
+   * Mission 11 only: the classes the current enemy blocks right now because of what sits on top of the discard
+   * and banish piles — the four base classes as suits (see rules.ts's pileTopImmuneSuits) plus the suit-less ones
+   * by name (pileTopImmuneClasses). Computed server-side so the client never reimplements the rule, and shipped
+   * because for a noClass Warden this is the ONLY immunity there is: without it the player sees an empty Immune
+   * row and no way to know what a play will fail to resolve. Both are empty on every other mission.
+   */
+  pileImmuneSuits: Suit[];
+  pileImmuneClasses: SuitlessImmuneClass[];
   castleDeckCount: number;
   tavernDeckCount: number;
   discardPile: Card[];

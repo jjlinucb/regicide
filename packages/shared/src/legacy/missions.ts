@@ -9,6 +9,12 @@ export interface MissionEnemySpec {
   class: ClassId;
   /** A second class this enemy is also immune to at once (e.g. a two-headed hydra). */
   secondClass?: ClassId;
+  /**
+   * See EnemyState.noClass — this enemy has no class of its own and is immune to nothing on its own account.
+   * `class` above still has to be set (the shape requires it) and still picks the card face's suit, but it
+   * grants no immunity.
+   */
+  noClass?: boolean;
   health: number;
   attack: number;
   /** See EnemyState.rankLabel — the letter shown on this enemy's card face. Set via rankLabel() below. */
@@ -115,6 +121,11 @@ export interface Mission {
 
 function enemy(name: string, cls: ClassId, health: number, attack: number, secondCls?: ClassId): MissionEnemySpec {
   return { name, class: cls, secondClass: secondCls, health, attack };
+}
+
+/** Marks every enemy in the list as carrying no class of its own — see MissionEnemySpec.noClass. */
+function classless(enemies: MissionEnemySpec[]): MissionEnemySpec[] {
+  return enemies.map((e) => ({ ...e, noClass: true }));
 }
 
 /**
@@ -346,6 +357,7 @@ export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemyS
     name: e.name,
     suit: CLASS_THEME[e.class].suit!,
     secondSuit: e.secondClass ? CLASS_THEME[e.secondClass].suit : undefined,
+    noClass: e.noClass,
     health: e.health,
     attack: e.attack,
     rankLabel: e.rankLabel,
@@ -743,6 +755,12 @@ export const MISSIONS: Mission[] = [
     standingJesters: true,
     sidelineHighArcana: true,
     randomizeEnemyTierOrder: true,
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [recruit('Haror', 'REAVER', '5', 'S')],
       dualClassStickers: 4,
@@ -818,6 +836,12 @@ export const MISSIONS: Mission[] = [
     // applyCorruptAnotherCard), same as Missions 1/5/8.
     standingJesters: true,
     sidelineHighArcana: true,
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [recruit('Ferro', 'GUARDIAN', '3', 'S')],
       relics: ['AZURE_EMBLEM'],
@@ -897,6 +921,12 @@ export const MISSIONS: Mission[] = [
     // would complete the set — still unimplemented, see that mission's reward comment.
     standingJesters: true,
     sidelineHighArcana: true,
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [recruit('Alanta', 'DRUID', '7', 'C')],
       druidStickerChoice: true,
@@ -1063,6 +1093,12 @@ export const MISSIONS: Mission[] = [
     //    player-choice shape Missions 5/6/7's Reaver/Guardian/Druid stickers already use.
     standingJesters: true,
     sidelineHighArcana: true,
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [specialRecruit('Bram the Refrainkeeper', 'CHANTER', '9', 'S')],
       corruptAnotherCard: true,
@@ -1204,6 +1240,12 @@ export const MISSIONS: Mission[] = [
     // (SuitedCard.corrupted) are a real mechanic with real rules — immunity-ignoring, a banish cost, and a strict
     // rank-2-9-base-class eligibility rule (party.ts's canBeCorrupted). Corrupted RELICS are just a tier name.
     startingRelics: ['CORRUPTED_EVERGREEN_MOTHER'],
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       // JOHN, 2026-09-04 (live play): this mission also hands over "Ash", the Mage Beast — "a beast like Goran's
       // beasts", but carrying the Mage class instead of one of the four base ones. So: rank 'B' like every other
@@ -1307,6 +1349,12 @@ export const MISSIONS: Mission[] = [
     // deck.ts's buildCorruptedPartyEnemies' leftoverParty), so there is nothing for a reward to restore.
     standingJesters: true,
     sidelineHighArcana: true,
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [],
       // Permanent removal, NOT sidelining: Goran does not come back. Deliberately not modeled with
@@ -1333,18 +1381,27 @@ export const MISSIONS: Mission[] = [
     // real roster is 5 enemies: 4 weak mooks plus one much bigger final boss, "Evil Goran" — the 10/30 (mooks) and
     // 20/90 (boss) stats below are exactly the sourced figures. Which base class each mook carries, and which
     // single class the boss carries, is NOT specified by the source (only the two stat tiers and the boss's name
-    // are) — one mook per base class (matching every other mission's own convention) and a single, non-dual-immune
-    // class on the boss are both unsourced judgment calls, deliberately kept simple so the roster fix isn't
-    // quietly undone by an invented immunity stack.
+    // are) — a single, non-dual-immune class on the boss is an unsourced judgment call, kept simple so the roster
+    // fix isn't quietly undone by an invented immunity stack.
+    //
+    // JOHN'S RULING (live play, 2026-09-05): the four Wardens have NO CLASS OF THEIR OWN (see
+    // MissionEnemySpec.noClass). Each still names a class here — the shape requires one, and it picks the suit
+    // shown on the card face — but it grants zero immunity. Every class a Warden blocks comes from the
+    // discard/banish pile tops instead (see pileTopEnemyBonus below), which puts each one at 0-2 blocked classes
+    // that shift as the piles do, rather than a fixed printed class with up to 2 more stacked on top. Evil Goran
+    // keeps his own class: the ruling was about the mooks, and his is the fight an immunity stack should matter in.
     // Card faces: W for the Wardens, and G for Evil Goran — the same letter his own party card shows (see
     // PlayingCard's tieredRankLabel), which reads as the point of the fight.
     enemies: [
-      ...rankLabel('W', [
-        enemy('Warden of the Depths: Ashclad', 'WARRIOR', 30, 10),
-        enemy('Warden of the Depths: Bellsong', 'BARD', 30, 10),
-        enemy('Warden of the Depths: Hollowmourn', 'CLERIC', 30, 10),
-        enemy('Warden of the Depths: Ironvow', 'PALADIN', 30, 10),
-      ]),
+      ...rankLabel(
+        'W',
+        classless([
+          enemy('Warden of the Depths: Ashclad', 'WARRIOR', 30, 10),
+          enemy('Warden of the Depths: Bellsong', 'BARD', 30, 10),
+          enemy('Warden of the Depths: Hollowmourn', 'CLERIC', 30, 10),
+          enemy('Warden of the Depths: Ironvow', 'PALADIN', 30, 10),
+        ]),
+      ),
       ...rankLabel('G', [enemy('Evil Goran', 'PALADIN', 90, 20)]),
     ],
     // Sourced correction: the source names a specific card pulled from the party for this mission entirely — Esme,
@@ -1355,16 +1412,17 @@ export const MISSIONS: Mission[] = [
     // roster itself is never touched) — she simply isn't available to draw, hold, or play this mission. See
     // `reward.upgradeSidelinedCard` below, which targets this same identity once the mission is won.
     sidelineIdentity: { suit: 'C', rank: '6' },
-    // Every Beast Companion card the campaign has collected (Mission 4's four, plus Mission 9's Ash) is pulled
-    // out and shuffled into a face-down deck that sits in the mission zone for this fight only — no Beast card is
-    // available to draw or play this mission, Ash included, while an ordinary Mage party member (not beast-
-    // flagged) is still usable as normal, since this only ever filters on `beast` (see deck.ts's buildBeastDeck).
+    // The four suited Beast Companion cards (Mission 4's reward) are pulled out and shuffled into a face-down
+    // deck that sits in the mission zone for this fight only — none of the four is available to draw or play
+    // this mission. Mission 9's Ash is a MAGE beast and is deliberately NOT part of this deck (John's ruling,
+    // 2026-09-05); he stays in the party and plays as an ordinary Mage card, as does any other Mage party
+    // member (see deck.ts's buildBeastDeck, which filters on `beast && !isMageCard`).
     // At the start of every turn its top card flips for a one-shot effect keyed to its SUIT (sourced correction —
     // the previously-shipped version keyed this off the card's derived CLASS instead; see engine.ts's
     // flipBeastDeckCard). Once it runs out it reshuffles from its own used-card pile and the cycle continues —
-    // one full cycle flips every beast in the pool exactly once before clearing and restarting (the four suits,
-    // one each, plus Ash — a Mage beast, who flips as a blank and fires nothing). An exact kill spares the very next
-    // turn's flip (see GameState.skipNextBeastDeckFlip).
+    // one full cycle flips every beast in the pool exactly once before clearing and restarting — the four suits,
+    // one each, with no dead flip in the cycle. An exact kill spares the very next turn's flip (see
+    // GameState.skipNextBeastDeckFlip).
     beastDeckMechanic: true,
     // The current enemy draws bonus strength AND class-immunity from whatever cards currently sit on top of the
     // discard pile and the banish pile — both recomputed live, so a Cleric heal reshuffling the discard pile (or
@@ -1482,6 +1540,12 @@ export const MISSIONS: Mission[] = [
     // pasted community research describes an un-banishable restored-card "immunity shield" and a Paladin power
     // that bypasses enemy immunity outright; neither appears anywhere in the transcript, so neither was used —
     // same standard this file has held to reward-by-reward since Mission 1.
+    // The M4+ cleanup ordering rule (see Mission 4's own discardCleanupLowToHigh comment for the sourced quote)
+    // is PERMANENT from Mission 4 on, not a Mission 4 quirk — John restated it as a general rule on 2026-09-05:
+    // cards put into the discard or banish pile together are ordered lowest-on-top, low-to-high through the
+    // whole batch. It was only ever set on Missions 4 and 11, which are the two that read a pile top directly;
+    // every mission in between was silently leaving a cleanup batch in arbitrary order.
+    discardCleanupLowToHigh: true,
     reward: {
       recruits: [],
     },

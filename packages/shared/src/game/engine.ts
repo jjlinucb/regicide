@@ -1,4 +1,4 @@
-import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, GameAction, GameState, PlayerState, SpecialAbilityId, Suit, SuitedCard, TurnPhase } from './types.js';
+import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, GameAction, GameState, PlayerState, Rank, SpecialAbilityId, Suit, SuitedCard, SuitlessImmuneClass, TurnPhase } from './types.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,
@@ -31,6 +31,7 @@ import {
   MAX_SOLO_JESTERS,
   matchesAscendingZoneSlot,
   missionZoneValueSum,
+  pileTopImmuneClasses,
   pileTopImmuneSuits,
   validatePlayShape,
 } from './rules.js';
@@ -449,8 +450,8 @@ function applyEnemyPaladinDamageReduction(state: GameState, damage: number): num
  * (see resolveCorruptedEnemyEndOfTurnEffect) — so this always picks their lowest-value card. Once the deck runs
  * dry it reshuffles from its own used-card pile (GameState.beastDeckDiscard) and the cycle continues — one full
  * cycle flips every beast in the pool exactly once before clearing and restarting — the 4 base suits exactly
- * once, since Mission 9's Ash (the pool's 5th card, and its only MAGE beast) fires no suit effect at all and
- * passes instead (see the isMageCard check below). Skipped entirely for the turn right after an exact kill (see
+ * once, with no dead flip in the cycle, since Mission 9's Ash (a MAGE beast) is excluded from the deck at build
+ * time and stays playable instead. Skipped entirely for the turn right after an exact kill (see
  * GameState.skipNextBeastDeckFlip, consumed here). Called both once at mission start (the first player's first
  * turn) and from advanceToNextPlayer, same as every other start-of-turn flip in this file.
  */
@@ -473,16 +474,12 @@ function flipBeastDeckCard(state: GameState): void {
   const label = card.name ?? `the ${card.rank}`;
   const suit = card.suit;
 
-  // PROVISIONAL (John's ruling, 2026-09-04) — a holding position, NOT a settled model. Ash (Mission 9's reward,
-  // and the only Mage beast that exists) is a MAGE beast, not a Spades beast, so he fires no basic-suit effect
-  // here: the flip still happens and the card still moves to beastDeckDiscard like any other, it just resolves
-  // nothing. His 'S' is storage, not a card face — `Suit` is 'H' | 'D' | 'C' | 'S' and SuitedCard.suit is
-  // required, so a Mage card has to borrow some basic suit to exist at all. Reading that borrowed suit here was
-  // making a 5-card pool fire Spades twice per cycle; passing on him restores the four real beasts covering the
-  // four suits exactly once each. John is weighing the structural fix instead — giving the Mage its own symbol in
-  // the `Suit` union rather than borrowing a basic one, which would also touch Mission 3's ten Mage recruits —
-  // and deferred it deliberately, partly because he may not keep Ash in Mission 11's pool at all. Revisit both
-  // together; until then this is a cheap stand-in, not the intended model.
+  // Mage beasts never enter this deck (John's ruling, 2026-09-05, superseding the earlier provisional
+  // "flips as a blank" stand-in) — Ash is excluded at build time and stays playable as an ordinary Mage party
+  // card instead, so the deck is exactly the four base suits, one each (see deck.ts's buildBeastDeck). This
+  // guard only exists so a future Mage beast slipping into the pool can't resolve some borrowed basic suit's
+  // effect; `Suit` is 'H' | 'D' | 'C' | 'S' and SuitedCard.suit is required, so a Mage card has to carry some
+  // basic suit to exist at all, and that suit is storage, not a card face.
   if (isMageCard(card)) {
     log(state, `${label} flips (Mage) — no suit effect fires; a Mage answers to no basic suit.`);
     return;
@@ -878,7 +875,11 @@ function startReaverPhase(
   arcaneCards: SuitedCard[],
   arcaneImmuneSuits: Suit[],
 ): EngineResult {
-  const reaverTrigger = state.ruleset === 'legacy' ? cards.find(isReaverCard) : undefined;
+  // A REAVER-immune enemy blocks the whole "Reveal and Add" package, the reveal included — it is one class
+  // power, the same way a blocked Mage reveals nothing (see enemyBlocksClass). The doubling is blocked
+  // separately in continueResolveCommittedPlay, which is what a play that got this far still has to pass.
+  const reaverBlocked = enemyBlocksClass(state, 'REAVER');
+  const reaverTrigger = state.ruleset === 'legacy' && !reaverBlocked ? cards.find(isReaverCard) : undefined;
   if (reaverTrigger) {
     if (state.tavernDeck.length === 0) {
       return revealForReaver(state, player.id, cards, claimedJester, forcedPlay, totalValue, arcaneBonus, arcaneCards, arcaneImmuneSuits, totalValue, reaverTrigger);
@@ -1565,6 +1566,54 @@ function dealDamageAndCheckDefeat(
  * and resume here afterward, the same way CHOOSE_EXACT_KILL_RESCUE resumes its own
  * mission's flow from a dedicated resolve function. `attackIncludesGuardian` — see dealDamageAndCheckDefeat.
  */
+/**
+ * The rank whose cardValue is (as close as the Rank union allows to) `value` — chosen for its VALUE, not its
+ * face. Used to mint a felled enemy's banish-pile card at exactly the strength it attacked with: Mission 11's
+ * two tiers land on '10' for a Warden and 'K' (20) for Evil Goran. Descending so each branch is an exact match
+ * wherever the union has one, and rounds DOWN otherwise rather than inflating a corpse past the enemy it came
+ * from.
+ */
+function rankForValue(value: number): Rank {
+  if (value >= 25) return '25';
+  if (value >= 20) return 'K';
+  if (value >= 19) return '19';
+  if (value >= 15) return 'Q';
+  if (value >= 12) return '12';
+  if (value >= 2) return String(Math.min(value, 10)) as Rank;
+  return 'A';
+}
+
+/**
+ * Mission 11 only (John's ruling, live play 2026-09-05): a defeated enemy's own card goes onto the BANISH pile
+ * too, on top of its played table cards — so the corpse itself keeps feeding the pile-top mechanic that defines
+ * this mission (see GameState.pileTopEnemyBonus).
+ *
+ * It contributes STRENGTH but no CLASS: the card is built with `noSuitPower`, which rules.ts's pileTopImmuneSuits
+ * already skips outright (the same treatment a Mercenary "19" gets), while banishPileTopValue reads its rank
+ * normally. The rank IS the enemy's own attack — 10 for a Warden, 20 for Evil Goran — so killing a Warden hands
+ * the next enemy a flat +10 until something else covers it.
+ *
+ * Pushed as its own single-card batch deliberately: banishCards leaves a lone card unsorted, so this lands on
+ * TOP rather than being sorted in among the table cards by discardCleanupLowToHigh (where a 10 would usually sink
+ * beneath them and contribute nothing). The +10 is the point — a kill should make the next fight harder, and the
+ * player's low-card-on-top play is a lever against the cards they choose to spend, not against the corpse.
+ */
+function banishDefeatedEnemyCard(state: GameState, enemy: EnemyState): void {
+  const corpse: Card = {
+    id: `felled-${enemy.suit}${enemy.rank}-${Date.now()}-${Math.floor(nextRandom(state) * 1e6)}`,
+    kind: 'suited',
+    suit: enemy.suit,
+    rank: rankForValue(enemy.baseAttack),
+    name: enemy.name,
+    noSuitPower: true,
+  };
+  state.banishPile.push(corpse);
+  log(
+    state,
+    `${enemyLabel(enemy)} is banished where it fell — strength ${enemy.baseAttack} on top of the banish pile, but no class with it.`,
+  );
+}
+
 function finishEnemyDefeatTail(
   state: GameState,
   enemy: EnemyState,
@@ -1577,6 +1626,7 @@ function finishEnemyDefeatTail(
     // resolvedEnemyAttack / resolveSuitPowers's blocked check). Mission 12 reuses the same rule as step two of its
     // own three-step cleanup (see the restoredCardMechanic block above for step one, and just below for step three).
     banishCards(state, enemy.tableCards);
+    if (state.pileTopEnemyBonus) banishDefeatedEnemyCard(state, enemy);
   } else if (state.ruleset === 'legacy' && state.ascendingZone && !state.zoneClosed) {
     // Mission 8, sourced fix (see GameAction's PLACE_IN_ZONE / GameState.zoneCommittedPlay): the ascending zone's
     // placement no longer costs a fresh hand card — it instead reuses a card already committed to THIS kill's
@@ -2151,6 +2201,18 @@ function resumeEndlessSave(state: GameState, action: Extract<GameAction, { type:
  * since neither path has done anything by that point that would change what that check reports; claimJester never
  * passes it (defaults to false) since a Jester claim isn't a response to a rejected yield.
  */
+/**
+ * Mission 11 (John, 2026-09-05): whether the current enemy blocks one of the suit-less classes right now,
+ * because a card of that class sits on top of the discard or banish pile (see rules.ts's pileTopImmuneClasses).
+ * Recomputed on every call, like every other part of this mission's pile-top mechanic — both piles keep moving.
+ * A claimed Jester breaks the enemy's immunity and clears this along with everything else.
+ */
+function enemyBlocksClass(state: GameState, cls: SuitlessImmuneClass): boolean {
+  if (state.ruleset !== 'legacy' || !state.pileTopEnemyBonus) return false;
+  if (!state.currentEnemy || state.currentEnemy.immunityBroken) return false;
+  return pileTopImmuneClasses(state.discardPile, state.banishPile).includes(cls);
+}
+
 function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null, forcedPlay = false): EngineResult {
   const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
@@ -2159,7 +2221,15 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   // card (or secondClassArcane bonus-sticker card) in the play triggers its own independent reveal off the top of
   // the reserve deck, always before every other class power resolves (see continueResolveCommittedPlay) —
   // resolved first here since the chosen bonus feeds into the play's own effective total value.
-  const mageQueue = state.ruleset === 'legacy' ? cards.filter(isMageCard) : [];
+  // Mission 11 (John, 2026-09-05): a MAGE-immune enemy blocks the reveal-and-chain outright, since that IS the
+  // Mage's class power — the cards are still played and still deal their damage, they just draw nothing off the
+  // reserve deck. Checked here rather than in continueResolveCommittedPlay's classBlocked, because the reveal
+  // runs before that function is ever reached (see rules.ts's pileTopImmuneClasses).
+  const mageImmune = enemyBlocksClass(state, 'MAGE');
+  const mageQueue = state.ruleset === 'legacy' && !mageImmune ? cards.filter(isMageCard) : [];
+  if (mageImmune && cards.some(isMageCard)) {
+    log(state, "The Mage's reveal is blocked — the enemy is immune to that class via the discard/banish piles.");
+  }
   if (mageQueue.length > 0) {
     const [trigger] = mageQueue;
     const rest = mageQueue.slice(1);
@@ -2242,8 +2312,27 @@ function continueResolveCommittedPlay(
   // Warrior (Clubs) card compounds into quadruple damage. Reuses isReaverCard (not a raw `.reaver` check) so a
   // secondClassReaver sticker card (Mission 5's reaverStickerChoice reward) gets the same doubling, not just the
   // reveal — the whole "Reveal and Add" package, exactly like a pure Reaver card.
+  // Mission 11 (John's ruling, live play 2026-09-05): the pile tops can block a SUIT-LESS class too — Mage,
+  // Reaver, Guardian, Druid or Chanter — not just one of the four base classes (see rules.ts's
+  // pileTopImmuneClasses). Blocking one stops that class's POWER only: the card is still played and still deals
+  // its damage, exactly as an immune Cleric still hits without healing. An Evergreen card ignores immunity as it
+  // always has (see evergreenActive below), and nothing here touches Myla's unpierceable ward.
+  // A claimed Jester breaks the enemy's immunity outright, this alongside everything else.
+  const immuneClasses = new Set(
+    state.pileTopEnemyBonus && state.currentEnemy && !state.currentEnemy.immunityBroken
+      ? pileTopImmuneClasses(state.discardPile, state.banishPile)
+      : [],
+  );
+  const classBlocked = (cls: SuitlessImmuneClass, label: string): boolean => {
+    if (!immuneClasses.has(cls)) return false;
+    log(state, `${label} is blocked — the enemy is immune to that class via the discard/banish piles.`);
+    return true;
+  };
+
   const reaverCards = resolvingCards.filter(isReaverCard);
-  const reaverMultiplier = state.ruleset === 'legacy' && reaverCards.length > 0 ? 2 : 1;
+  const reaverActive =
+    state.ruleset === 'legacy' && reaverCards.length > 0 && !classBlocked('REAVER', reaverCards[0]?.name ?? 'A Reaver');
+  const reaverMultiplier = reaverActive ? 2 : 1;
 
   // Guardians (Mission 6): playing one raises an absolute shield that blocks the enemy's very next attack
   // entirely, regardless of the card's own value — spent the instant it's used, not a stacking reduction.
@@ -2256,7 +2345,11 @@ function continueResolveCommittedPlay(
     (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian || c.secondClassGuardian),
   );
   let guardianBlocksNextAttack = false;
-  if (state.ruleset === 'legacy' && guardianCards.length > 0) {
+  if (
+    state.ruleset === 'legacy' &&
+    guardianCards.length > 0 &&
+    !classBlocked('GUARDIAN', guardianCards[0].name ?? 'A Guardian')
+  ) {
     const enemy = state.currentEnemy!;
     if (hasSpecial(guardianCards, 'AEGIS')) {
       enemy.spadesShield = enemy.baseAttack;
@@ -2276,7 +2369,8 @@ function continueResolveCommittedPlay(
   const druidCards = resolvingCards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.druid || c.secondClassDruid),
   );
-  const regrowthActive = state.ruleset === 'legacy' && druidCards.length > 0;
+  const regrowthActive =
+    state.ruleset === 'legacy' && druidCards.length > 0 && !classBlocked('DRUID', druidCards[0]?.name ?? 'A Druid');
   if (regrowthActive) {
     log(state, `${druidCards[0].name ?? 'A Druid'} channels Regrowth — the discard pile is dealt out across the table.`);
   }
@@ -2294,7 +2388,8 @@ function continueResolveCommittedPlay(
   const chanterCards = resolvingCards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.chanter || c.secondClassChanter),
   );
-  const chantTriggered = state.ruleset === 'legacy' && chanterCards.length > 0;
+  const chantTriggered =
+    state.ruleset === 'legacy' && chanterCards.length > 0 && !classBlocked('CHANTER', chanterCards[0]?.name ?? 'A Chanter');
 
   // Gøran's Evergreen (Mission 9): playing his card resolves all four base class powers at once — heal, draw,
   // double damage, reduce enemy strength — and ignores enemy immunity, regardless of which suits are actually in

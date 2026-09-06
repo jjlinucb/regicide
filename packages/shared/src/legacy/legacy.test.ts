@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { applyAction, createLobbyState, resolvedEnemyAttack } from '../game/engine.js';
 import { redactStateFor } from '../game/redact.js';
-import { buildCorruptedPartyEnemies, CORRUPTED_PARTY_ENEMY_COUNT, makeRng } from '../game/deck.js';
-import { cardSuits, cardValue, isBeastCompanion, isMageCard, missionZoneValueSum } from '../game/rules.js';
+import { buildCorruptedPartyEnemies, CORRUPTED_PARTY_ENEMY_COUNT, makeLegacyEnemy, makeRng } from '../game/deck.js';
+import {
+  cardSuits,
+  cardValue,
+  isBeastCompanion,
+  isMageCard,
+  isSuitBlockedByImmunity,
+  missionZoneValueSum,
+  pileTopImmuneClasses,
+  pileTopImmuneSuits,
+} from '../game/rules.js';
 import type { Card, EngineResult, GameAction, GameState, LegacyEnemySpec, Rank, SuitedCard } from '../game/types.js';
 import { CLASS_THEME, classForCard } from './classes.js';
 import { buildMercenaryCard, buildMercenaryLoadout, MERCENARY_CATALOG, mercenaryCoinsForLosses } from './mercenaries.js';
@@ -6108,6 +6117,18 @@ describe('legacy: mission 11 beast-deck start-of-turn flip', () => {
     expect(res.state.log.some((e) => e.message.includes('reshuffles'))).toBe(true);
   });
 
+  it("flips a beast at mission start — the first turn's effect is already live before anyone plays", () => {
+    const state = startMission11(1);
+
+    // One card is already spent before the first player acts: the deck flipped at the mission's very first turn.
+    expect(state.beastDeckDiscard.length).toBe(1);
+    expect(state.beastDeck.length).toBe(3);
+    const flip = state.log.find((e) => /flips \((Warrior|Paladin|Cleric|Bard)\)/.test(e.message));
+    expect(flip).toBeDefined();
+    // ...and it resolved for real, rather than just being announced.
+    expect(flip!.message).not.toContain('nothing to');
+  });
+
   it('an exact kill skips the beast-deck flip on the very next turn', () => {
     let state = startMission11(1);
     // Exact-kill the current (first) enemy: Diamonds doesn't multiply, 5 damage on 5 health.
@@ -6132,73 +6153,43 @@ describe('legacy: mission 11 beast-deck start-of-turn flip', () => {
   });
 });
 
-describe('legacy: mission 11 with Ash in the beast deck (a beast that is also a Mage)', () => {
+describe('legacy: mission 11 beast deck excludes Ash (John, 2026-09-05, live play)', () => {
   function ashCard(): SuitedCard {
     return buildRecruitCard(getMission(9)!.reward.recruits.find((r) => r.name === 'Ash')!) as SuitedCard;
   }
 
-  it("takes all 5 beasts — Mission 4's four plus Ash — into the deck, none of them drawable this mission", () => {
+  it("takes only Mission 4's four suited beasts into the deck — Ash, a Mage beast, is not part of it", () => {
     const beasts = [...mission4BeastCards(), ashCard()];
     const state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
 
     const pool = [...state.beastDeck, ...state.beastDeckDiscard];
-    expect(pool.length).toBe(5);
-    expect(new Set(pool.map((c) => c.id))).toEqual(new Set(beasts.map((c) => c.id)));
+    expect(pool.length).toBe(4);
+    expect(pool.some((c) => c.kind === 'suited' && c.name === 'Ash')).toBe(false);
+    expect(new Set(pool.map((c) => (c.kind === 'suited' ? c.suit : '?')))).toEqual(new Set(['H', 'D', 'C', 'S']));
+  });
+
+  it('leaves Ash playable this mission — he stays in circulation as an ordinary Mage party card', () => {
+    const beasts = [...mission4BeastCards(), ashCard()];
+    const state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
+
     const inCirculation = [...state.players.flatMap((p) => p.hand), ...state.tavernDeck];
-    expect(inCirculation.some((c) => c.kind === 'suited' && c.name === 'Ash')).toBe(false);
+    expect(inCirculation.some((c) => c.kind === 'suited' && c.name === 'Ash')).toBe(true);
+    // ...while the four he came in with are all pulled out of circulation as before.
+    for (const beast of mission4BeastCards()) {
+      expect(inCirculation.some((c) => c.id === beast.id)).toBe(false);
+    }
   });
 
-  it("Ash flips as a blank — a Mage beast fires NO basic-suit effect, so his printed Spades no longer discards the reserve top", () => {
-    let state = startMission11(1);
-    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
-    state.beastDeck = [ashCard()];
-    state.beastDeckDiscard = [];
-    const reserveTop = suited('D', '3');
-    state.tavernDeck = [reserveTop, ...state.tavernDeck];
-    const handBefore = state.players[0].hand.map((c) => c.id);
-    state.discardPile = [suited('C', '9')];
-    const discardBefore = state.discardPile.map((c) => c.id);
-    const banishBefore = state.banishPile.length;
-
-    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
-
-    // The Spades (Paladin) effect this used to fire: the reserve deck's top card falls to the discard pile.
-    expect(res.state.tavernDeck[0]?.id).toBe(reserveTop.id);
-    expect(res.state.discardPile.map((c) => c.id)).toEqual(discardBefore);
-    // ...and no OTHER suit's effect stood in for it either — hand and banish pile are untouched.
-    expect(res.state.players[0].hand.map((c) => c.id)).toEqual(handBefore);
-    expect(res.state.banishPile.length).toBe(banishBefore);
-    // The flip itself still happened: the card moved to the used pile, and the log says it was a blank.
-    expect(res.state.beastDeck.length).toBe(0);
-    expect(res.state.beastDeckDiscard.map((c) => c.name)).toEqual(['Ash']);
-    expect(res.state.log.some((e) => e.message.includes('no suit effect fires'))).toBe(true);
-  });
-
-  it("CONTROL: an ordinary beast in the same slot DOES fire its printed suit — it's the Mage class doing the work, not the flip being inert", () => {
-    let state = startMission11(1);
-    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
-    // Mission 4's Paladin beast: same printed Spades as Ash, no Mage class.
-    state.beastDeck = [mission4BeastCards().find((c) => c.suit === 'S')!];
-    state.beastDeckDiscard = [];
-    const reserveTop = suited('D', '3');
-    state.tavernDeck = [reserveTop, ...state.tavernDeck];
-
-    const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
-
-    expect(res.state.tavernDeck.some((c) => c.id === reserveTop.id)).toBe(false);
-    expect(res.state.discardPile.some((c) => c.id === reserveTop.id)).toBe(true);
-  });
-
-  it('a full 5-card cycle fires each of the four suits exactly once, with Ash as the pass', () => {
+  it('a full cycle fires each of the four suits exactly once, with no dead flip in it', () => {
     const beasts = [...mission4BeastCards(), ashCard()];
     let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
     state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
     state.beastDeck = [...state.beastDeck, ...state.beastDeckDiscard];
     state.beastDeckDiscard = [];
-    expect(state.beastDeck.length).toBe(5);
+    expect(state.beastDeck.length).toBe(4);
 
     const fired: string[] = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       const before = state.log.length;
       // Keep both piles and the hand stocked so no effect no-ops for want of a target.
       state.players[0].hand = [suited('H', '4'), suited('D', '5')];
@@ -6211,27 +6202,88 @@ describe('legacy: mission 11 with Ash in the beast deck (a beast that is also a 
       }
     }
 
-    expect(fired.length).toBe(5);
-    expect(fired.filter((c) => c === 'Mage').length).toBe(1); // Ash, the pass
+    expect(fired.length).toBe(4);
+    expect(fired.filter((c) => c === 'Mage').length).toBe(0); // no pass in the cycle any more
     for (const cls of ['Warrior', 'Paladin', 'Cleric', 'Bard']) {
       expect(fired.filter((c) => c === cls).length).toBe(1); // each real suit exactly once, none doubled
     }
   });
 
-  it('an odd-sized 5-beast pool still cycles: once the deck runs dry it reshuffles from the used pile and carries on', () => {
+  it('once the deck runs dry it reshuffles from the used pile and carries on', () => {
     const beasts = [...mission4BeastCards(), ashCard()];
     let state = startMission11(1, { party: [...buildInitialParty(), ...beasts] });
     state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
-    // Jump the cycle to the moment it turns over, with all 5 beasts already spent.
+    // Jump the cycle to the moment it turns over, with all 4 beasts already spent.
     const all = [...state.beastDeck, ...state.beastDeckDiscard];
-    expect(all.length).toBe(5);
+    expect(all.length).toBe(4);
     state.beastDeck = [];
     state.beastDeckDiscard = all;
 
     const res = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
 
-    expect(res.state.beastDeck.length).toBe(4);
+    expect(res.state.beastDeck.length).toBe(3);
     expect(res.state.beastDeckDiscard.length).toBe(1);
+  });
+});
+
+describe("legacy: mission 11 Wardens carry no class of their own (John, 2026-09-05, live play)", () => {
+  it('marks all four Wardens noClass, and leaves Evil Goran with his own class', () => {
+    const specs = missionEnemiesToSpecs(getMission(11)!.enemies);
+    const wardens = specs.filter((e) => e.rankLabel === 'W');
+    const goran = specs.find((e) => e.name === 'Evil Goran')!;
+
+    expect(wardens.length).toBe(4);
+    expect(wardens.every((e) => e.noClass)).toBe(true);
+    expect(goran.noClass).toBeUndefined();
+  });
+
+  it('blocks nothing on its own account — with both piles empty, all four classes get through', () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [];
+    state.banishPile = [];
+    const enemy = state.currentEnemy!;
+
+    expect(enemy.noClass).toBe(true);
+    for (const suit of ['H', 'D', 'C', 'S'] as const) {
+      expect(isSuitBlockedByImmunity(suit, enemy)).toBe(false);
+    }
+    expect(pileTopImmuneSuits(state.discardPile, state.banishPile, enemy)).toEqual([]);
+  });
+
+  it('blocks 1 class when only one pile has a top card, and 2 when both do', () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    const enemy = state.currentEnemy!;
+
+    state.discardPile = [suited('H', '4')];
+    state.banishPile = [];
+    expect(pileTopImmuneSuits(state.discardPile, state.banishPile, enemy)).toEqual(['H']);
+
+    state.banishPile = [suited('C', '7')];
+    expect(new Set(pileTopImmuneSuits(state.discardPile, state.banishPile, enemy))).toEqual(new Set(['H', 'C']));
+  });
+
+  it('never exceeds 2 blocked classes, even with dual-suited cards on both pile tops', () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    const enemy = state.currentEnemy!;
+    state.discardPile = [{ ...suited('H', '4'), secondSuit: 'D' } as Card];
+    state.banishPile = [{ ...suited('C', '7'), secondSuit: 'S' } as Card];
+
+    // One new class per pile top, so a Dual-class Stickers card can't stack a Warden to an all-4 lockout.
+    expect(pileTopImmuneSuits(state.discardPile, state.banishPile, enemy).length).toBe(2);
+  });
+
+  it("CONTROL: Evil Goran still blocks his own class on top of whatever the piles add", () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    // Goran is the 5th and last enemy; swap him in directly rather than fighting through the four Wardens.
+    const goran = makeLegacyEnemy(missionEnemiesToSpecs(getMission(11)!.enemies).find((e) => e.name === 'Evil Goran')!);
+    state.currentEnemy = goran;
+
+    expect(goran.noClass).toBeUndefined();
+    expect(isSuitBlockedByImmunity('S', goran)).toBe(true); // his own Paladin class
   });
 });
 
@@ -6430,11 +6482,16 @@ describe('legacy: mission 11 banish-pile cleanup ordering fix (discardCleanupLow
 
     expect(state.currentEnemy?.name).toBe('Warden B'); // the 9 overkills Warden A's remaining 5 health
     expect(state.discardPile.length).toBe(0); // pileTopEnemyBonus routes a defeated enemy's table cards to BANISH, not here
-    expect(state.banishPile.length).toBe(3);
+    // 4, not 3: the felled enemy's own card is banished on top of its table cards (banishDefeatedEnemyCard).
+    expect(state.banishPile.length).toBe(4);
+    // The three TABLE cards beneath the corpse are still sorted low-to-high — the sort governs the batch it was
+    // always about, it just no longer decides the pile's top card.
+    expect(state.banishPile.slice(0, 3).map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['9', '3', '2']);
     const top = state.banishPile[state.banishPile.length - 1];
-    expect(top.kind === 'suited' && top.rank).toBe('2'); // lowest of the batch, regardless of table order
-    // Warden B's live attack reads only that lowest card: 10 base + 0 (discard pile empty) + 2 (banish pile top).
-    expect(resolvedEnemyAttack(state)).toBe(12);
+    expect(top.kind === 'suited' && top.name).toBe('Warden A');
+    expect(top.kind === 'suited' && top.noSuitPower).toBe(true); // strength but no class
+    // Warden B's live attack reads the corpse: 10 base + 0 (discard pile empty) + 1 (Warden A's own attack).
+    expect(resolvedEnemyAttack(state)).toBe(11);
   });
 
   it("without the flag, the kill (overkill) preserves table-card order on the banish pile too, so the finishing card can land on top and buff the next enemy at its worst", () => {
@@ -6449,9 +6506,9 @@ describe('legacy: mission 11 banish-pile cleanup ordering fix (discardCleanupLow
     state = res.state;
 
     // Whatever order the cards accumulated on the table lands in the banish pile unchanged — the finishing card
-    // (9) ends up on top, the pre-fix worst case.
-    expect(state.banishPile.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['2', '3', '9']);
-    expect(resolvedEnemyAttack(state)).toBe(19); // 10 base + 0 (discard) + 9 (unsorted banish-pile top)
+    // (9) still ends up above them, the pre-fix worst case — with the felled enemy's own card on top of the lot.
+    expect(state.banishPile.map((c) => (c.kind === 'suited' ? c.rank : 'jester'))).toEqual(['2', '3', '9', 'A']);
+    expect(resolvedEnemyAttack(state)).toBe(11); // 10 base + 0 (discard) + 1 (the corpse, whatever sits beneath it)
   });
 
   it('a single-card banish is left alone regardless of the flag — nothing to order (mirrors pushToDiscardPile\'s own single-card guard)', () => {
@@ -6464,9 +6521,206 @@ describe('legacy: mission 11 banish-pile cleanup ordering fix (discardCleanupLow
     );
     state = res.state;
 
-    expect(state.banishPile.length).toBe(1);
-    const [only] = state.banishPile;
-    expect(only.kind === 'suited' && only.rank).toBe('9');
+    // The finishing card, then the felled enemy's own card on top of it — no batch to order in either case.
+    expect(state.banishPile.length).toBe(2);
+    const [first, top] = state.banishPile;
+    expect(first.kind === 'suited' && first.rank).toBe('9');
+    expect(top.kind === 'suited' && top.name).toBe('Warden A');
+  });
+});
+
+describe('legacy: mission 11 a felled enemy is banished where it fell (John, 2026-09-05, live play)', () => {
+  it("a defeated Warden lands on the banish pile worth 10 — its own attack — and hands the next enemy +10", () => {
+    let state = startMission11(1);
+    // Kill the first Warden outright: 30 health, no table cards, so the corpse is the only thing on the pile.
+    state = rig(state, [suited('D', '9')], { maxHealth: 9, damageTaken: 0, baseAttack: 10, spadesShield: 0 });
+    state.banishPile = [];
+    state.discardPile = [];
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    ).state;
+
+    const top = state.banishPile[state.banishPile.length - 1];
+    expect(top.kind === 'suited' && top.rank).toBe('10');
+    expect(cardValue(top)).toBe(10);
+    // The next Warden: 10 base + 10 from the corpse on the banish pile.
+    expect(resolvedEnemyAttack(state)).toBe(20);
+  });
+
+  it('the corpse contributes strength but NO class — it can never block a suit', () => {
+    let state = startMission11(1);
+    state = rig(state, [suited('D', '9')], { maxHealth: 9, damageTaken: 0, baseAttack: 10, spadesShield: 0 });
+    state.banishPile = [];
+    state.discardPile = [];
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    ).state;
+
+    // The next Warden is noClass and the discard pile is empty, so the corpse is the ONLY immunity candidate —
+    // and it grants none, leaving all four classes playable.
+    expect(pileTopImmuneSuits(state.discardPile, state.banishPile, state.currentEnemy!)).toEqual([]);
+  });
+
+  it("Evil Goran's own corpse is worth 20, matching the strength he attacked with", () => {
+    const goran = missionEnemiesToSpecs(getMission(11)!.enemies).find((e) => e.name === 'Evil Goran')!;
+    let state = startMission11(1);
+    state = rig(state, [suited('D', '9')], { ...makeLegacyEnemy(goran), maxHealth: 9, damageTaken: 0, spadesShield: 0 });
+    state.banishPile = [];
+    state.castleDeck = [makeLegacyEnemy(goran)]; // something left to fight, so the mission doesn't end on the kill
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    ).state;
+
+    const top = state.banishPile[state.banishPile.length - 1];
+    expect(cardValue(top)).toBe(20);
+  });
+});
+
+describe('legacy: mission 11 pile tops can block the suit-less classes too (John, 2026-09-05)', () => {
+  it('a Reaver on a pile top grants REAVER immunity, not the basic suit it borrows', () => {
+    const reaver: Card = { ...suited('C', '6'), name: 'Vex', reaver: true };
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [reaver];
+    state.banishPile = [];
+
+    expect(pileTopImmuneClasses(state.discardPile, state.banishPile)).toEqual(['REAVER']);
+    // Its printed Clubs is bookkeeping, not a class it can lend the enemy.
+    expect(pileTopImmuneSuits(state.discardPile, state.banishPile, state.currentEnemy!)).toEqual([]);
+  });
+
+  it("blocks a played Reaver's doubling, but the card still deals its damage", () => {
+    const reaver: Card = { ...suited('C', '6'), name: 'Vex', reaver: true };
+    let state = startMission11(1);
+    state = rig(state, [reaver], { maxHealth: 200, damageTaken: 0, baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [{ ...suited('S', '4'), name: 'Другой', reaver: true } as Card];
+    state.banishPile = [];
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [reaver.id] }),
+    );
+
+    // 6 damage, not 12: the Reaver's own double is blocked, the hit itself is not.
+    expect(res.state.currentEnemy!.damageTaken).toBe(6);
+    expect(res.state.log.some((e) => e.message.includes('immune to that class'))).toBe(true);
+  });
+
+  it("CONTROL: with nothing Reaver-ish on either pile, the same play doubles as normal", () => {
+    const reaver: Card = { ...suited('C', '6'), name: 'Vex', reaver: true };
+    let state = startMission11(1);
+    state = rig(state, [reaver], { maxHealth: 200, damageTaken: 0, baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [];
+    state.banishPile = [];
+
+    let res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [reaver.id] }));
+    // The reveal-and-add package runs first when it ISN'T blocked — decline it (reveal 0) so the comparison with
+    // the blocked case above is purely about the doubling.
+    expect(res.state.turnPhase).toBe('AWAIT_REAVER_REVEAL_COUNT');
+    res = ensureOk(applyAction(res.state, { type: 'CHOOSE_REAVER_REVEAL_COUNT', playerId: state.players[0].id, count: 1 }));
+    // Pick the revealed card, adding its value on top — the doubling is what this test is really watching.
+    const picked = res.state.reaverReveal!.candidates[0];
+    res = ensureOk(
+      applyAction(res.state, { type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: state.players[0].id, cardId: picked.id }),
+    );
+
+    // (6 + the revealed card's value) doubled — strictly more than the blocked case's flat 6.
+    expect(res.state.currentEnemy!.damageTaken).toBe((6 + cardValue(picked)) * 2);
+    expect(res.state.currentEnemy!.damageTaken).toBeGreaterThan(6);
+  });
+
+  it("blocks a Mage's reveal-and-chain when a Mage sits on a pile top", () => {
+    const mage: Card = { ...suited('S', '7'), name: 'Wend', arcane: true };
+    let state = startMission11(1);
+    state = rig(state, [mage], { maxHealth: 200, damageTaken: 0, baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [{ ...suited('H', '3'), name: 'Other Mage', arcane: true } as Card];
+    state.banishPile = [];
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage.id] }),
+    );
+
+    // No reveal window opened, and the play resolved straight through for its plain value.
+    expect(res.state.turnPhase).not.toBe('AWAIT_MAGE_REVEAL');
+    expect(res.state.currentEnemy!.damageTaken).toBe(7);
+    expect(res.state.log.some((e) => e.message.includes("Mage's reveal is blocked"))).toBe(true);
+  });
+
+  it('each pile top grants at most its own one class, so the two piles can block two different ones', () => {
+    const state = startMission11(1);
+    const discard = [{ ...suited('C', '6'), reaver: true } as Card];
+    const banish = [{ ...suited('H', '4'), druid: true } as Card];
+
+    expect(new Set(pileTopImmuneClasses(discard, banish))).toEqual(new Set(['REAVER', 'DRUID']));
+    expect(pileTopImmuneSuits(discard, banish, state.currentEnemy!)).toEqual([]);
+  });
+});
+
+describe('legacy: mission 11 pile-top immunity reaches the client', () => {
+  it('ships both the suit and the suit-less class the pile tops currently block', () => {
+    let state = startMission11(1);
+    state = rig(state, [], { baseAttack: 0, spadesShield: 999 });
+    state.discardPile = [suited('H', '4')];
+    state.banishPile = [{ ...suited('C', '6'), druid: true } as Card];
+
+    const view = redactStateFor(state, state.players[0].id);
+
+    expect(view.pileImmuneSuits).toEqual(['H']);
+    expect(view.pileImmuneClasses).toEqual(['DRUID']);
+  });
+
+  it('ships empty arrays on a mission without the pile-top mechanic', () => {
+    const state = startMission(1, [{ name: 'Plain Enemy', suit: 'H', health: 20, attack: 5 }]);
+    const view = redactStateFor(state, state.players[0].id);
+
+    expect(view.pileImmuneSuits).toEqual([]);
+    expect(view.pileImmuneClasses).toEqual([]);
+  });
+});
+
+describe('legacy: cleanup ordering is permanent from Mission 4 on (John, 2026-09-05)', () => {
+  it('every mission from 4 to 12 carries discardCleanupLowToHigh', () => {
+    for (let id = 4; id <= 12; id++) {
+      expect(getMission(id)!.discardCleanupLowToHigh, `mission ${id}`).toBe(true);
+    }
+  });
+
+  it('and no mission before 4 does — the rule is introduced there, not retroactive', () => {
+    for (let id = 1; id <= 3; id++) {
+      expect(getMission(id)!.discardCleanupLowToHigh, `mission ${id}`).toBeUndefined();
+    }
+  });
+
+  it('orders a whole batch lowest-on-top, reading low-to-high down the pile', () => {
+    // Mission 11 routes a defeated enemy's table cards to the banish pile as one cleanup batch.
+    const enemyA: LegacyEnemySpec = { name: 'Warden A', suit: 'D', health: 30, attack: 1 };
+    const enemyB: LegacyEnemySpec = { name: 'Warden B', suit: 'H', health: 20, attack: 10 };
+    const res0 = applyAction(createLobbyState(), {
+      type: 'START_LEGACY_MISSION',
+      playerIds: ['p0'],
+      playerNames: ['Player 0'],
+      seed: 'cleanup-ordering-test',
+      party: buildInitialParty(),
+      enemies: [enemyA, enemyB],
+      jesterCount: 0,
+      pileTopEnemyBonus: true,
+      discardCleanupLowToHigh: true,
+    });
+    if (!res0.ok) throw new Error(res0.error);
+    let state = rig(res0.state, [suited('C', '9')], {
+      tableCards: [suited('H', '7'), suited('D', '2'), suited('S', '4')],
+      damageTaken: 25,
+    });
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    ).state;
+
+    // Reading from the top down, past the felled enemy's own card: 2, 4, 7, 9 — the whole batch in order.
+    const topDown = [...state.banishPile].reverse().slice(1).map((c) => cardValue(c));
+    expect(topDown).toEqual([2, 4, 7, 9]);
   });
 });
 

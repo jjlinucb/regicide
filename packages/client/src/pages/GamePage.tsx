@@ -417,6 +417,8 @@ export function GamePage({
                 enemy={state.currentEnemy}
                 liveAttack={state.liveEnemyAttack ?? 0}
                 zoneImmuneSuits={state.zoneImmuneSuits}
+                pileImmuneSuits={state.pileImmuneSuits}
+                pileImmuneClasses={state.pileImmuneClasses}
               />
             )}
           </div>
