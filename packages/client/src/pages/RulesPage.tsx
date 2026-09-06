@@ -186,7 +186,7 @@ function LegacyTab() {
             <ClassCard icon="🛡" name="Paladin" tag="Reduce Strength" color="#3f4f6b">
               Plays like Spades — knocks down the enemy's strength for the rest of the fight.
             </ClassCard>
-            <ClassCard icon="✦" name="Mage" tag="Arcane Bolt" color="#5b3f8c">
+            <ClassCard icon="🔮" name="Mage" tag="Arcane Bolt" color="#5b3f8c">
               Unlocked at Mission 3. No suit power of its own — instead it fires its own bolt, at its own card's
               strength, before the rest of the attack resolves. Never blocked by an enemy's suit immunity.
             </ClassCard>

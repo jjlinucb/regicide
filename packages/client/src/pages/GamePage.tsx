@@ -637,7 +637,7 @@ export function GamePage({
       {isMyMageRevealWindow && (
         <div className="jester-picker">
           <span>
-            ✦ {mageTriggerLabel}'s reveal turns up these cards — choose one to banish and add to the attack.
+            🔮 {mageTriggerLabel}'s reveal turns up these cards — choose one to banish and add to the attack.
             {mageTriggerIsCursed && ' The chosen card will ignore enemy immunity, courtesy of the corrupted Mage.'}
             {mageQueueRemaining > 0 && ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)`}
           </span>
