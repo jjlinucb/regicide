@@ -419,6 +419,7 @@ export function GamePage({
                 zoneImmuneSuits={state.zoneImmuneSuits}
                 pileImmuneSuits={state.pileImmuneSuits}
                 pileImmuneClasses={state.pileImmuneClasses}
+                zoneImmuneClasses={state.zoneImmuneClasses}
               />
             )}
           </div>

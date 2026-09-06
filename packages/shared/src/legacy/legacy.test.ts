@@ -7185,6 +7185,68 @@ describe('legacy: mission 12 restored sleeves and the boss who is not a card (Jo
   });
 });
 
+describe('legacy: mission 12 zone immunity reads the real class (John, 2026-09-06)', () => {
+  function zoneFlipWith(card: Card): GameState {
+    const boss: LegacyEnemySpec = { name: 'Queen of Ash', suit: 'C', health: 30, attack: 15 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER'];
+    state.banishPile = [card];
+    state.zoneImmuneSuits = [];
+    state.zoneImmuneClasses = [];
+    // A spare card in hand, or the YIELD trips the stuck-loss check and ends the mission.
+    state = rig(state, [suited('C', '2')], { baseAttack: 0, spadesShield: 999 });
+    return ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id })).state;
+  }
+
+  it('a Druid flipped into the zone grants DRUID, not the base suit it borrows', () => {
+    const druid: SuitedCard = { ...suited('H', '5'), druid: true, name: 'A Druid' };
+    const state = zoneFlipWith(druid);
+
+    expect(state.zoneImmuneClasses).toEqual(['DRUID']);
+    expect(state.zoneImmuneSuits).toEqual([]); // its printed Hearts grants nothing
+  });
+
+  it('an ordinary card still grants its printed suit', () => {
+    const state = zoneFlipWith(suited('H', '5'));
+
+    expect(state.zoneImmuneSuits).toEqual(['H']);
+    expect(state.zoneImmuneClasses).toEqual([]);
+  });
+
+  it('a Mage in the zone blocks a Mage play, and the block names the mission zone as the source', () => {
+    const mageInZone: SuitedCard = { ...suited('S', '5'), arcane: true, name: 'A Mage' };
+    let state = zoneFlipWith(mageInZone);
+    expect(state.zoneImmuneClasses).toEqual(['MAGE']);
+
+    const played: SuitedCard = { ...suited('D', '4'), arcane: true, id: 'played-mage' };
+    state = rig(state, [played], { baseAttack: 0, spadesShield: 999 });
+    state.tavernDeck = []; // no reveal candidates, so the play resolves outright
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [played.id] }),
+    );
+
+    const log = res.state.log.map((e) => e.message).join('\n');
+    expect(log).toContain('immune to that class via the mission zone');
+  });
+
+  it('clears with the zone when the enemy is defeated', () => {
+    const druid: SuitedCard = { ...suited('H', '5'), druid: true, name: 'A Druid' };
+    let state = zoneFlipWith(druid);
+    expect(state.zoneImmuneClasses).toEqual(['DRUID']);
+
+    const killCard = suited('D', '10');
+    state = rig(state, [killCard], { suit: 'D', baseAttack: 0, maxHealth: 10, damageTaken: 0, spadesShield: 0 });
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [killCard.id] }),
+    ).state;
+
+    expect(state.zoneImmuneClasses).toEqual([]);
+    expect(state.zoneImmuneSuits).toEqual([]);
+  });
+});
+
 describe('legacy: mission 12 start-of-turn banish-pile zone flip', () => {
   it('moves the top of the banish pile into the mission zone, buffing the current enemy\'s attack and granting immunity to its class', () => {
     let state = startMission12(1);
@@ -7328,13 +7390,91 @@ describe('legacy: mission 12 defeat cleanup (banish the mission zone, then the e
     );
 
     expect(res.state.missionZone).toEqual([]);
-    expect(res.state.discardPile).toEqual([]);
+    // The killing play is NOT banished (John, 2026-09-06) — it lands on the discard pile the sweep just emptied.
+    expect(res.state.discardPile.map((c) => c.id)).toEqual([killCard.id]);
     const orderedIds = res.state.banishPile.map((c) => c.id);
-    // zone cards first (own order preserved), then the enemy's own table card (the killing play), then the
-    // discard pile (own order preserved) — no other kill effects intervene since this mission has no other
-    // per-kill mechanic active.
-    expect(orderedIds).toEqual([zoneA.id, zoneB.id, killCard.id, discA.id, discB.id]);
+    // Zone cards first (own order preserved), then the enemy's own card, then the discard pile (order preserved).
+    expect(orderedIds.filter((id) => !id.startsWith('felled-'))).toEqual([zoneA.id, zoneB.id, discA.id, discB.id]);
+    const corpseIndex = orderedIds.findIndex((id) => id.startsWith('felled-'));
+    expect(corpseIndex).toBe(2); // after the zone, before the discard pile
+    expect(res.state.banishPile[corpseIndex]).toMatchObject({ name: 'The Hierarch', noSuitPower: true });
     expect(res.state.skipNextBanishZoneFlip).toBe(true); // exact kill
+  });
+
+  it("the killing play's cards land on the discard pile AFTER the sweep, so they survive it (John, 2026-09-06)", () => {
+    const boss: LegacyEnemySpec = { name: 'Queen of Ash', suit: 'D', health: 10, attack: 0 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    state.discardCleanupLowToHigh = true;
+    state.relics = ['EVERGREEN_MOTHER'];
+    state.missionZone = [suited('H', '2')];
+    state.discardPile = [suited('S', '4')];
+    // Two earlier cards already played against this enemy, plus the killing play — the whole play area.
+    const earlyA = suited('C', '7');
+    const earlyB = suited('H', '3');
+    const killCard = suited('D', '10');
+    state = rig(state, [killCard], {
+      suit: 'D',
+      tableCards: [earlyA, earlyB],
+      baseAttack: 0,
+      maxHealth: 10,
+      damageTaken: 0,
+      spadesShield: 0,
+    });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [killCard.id] }),
+    );
+
+    // None of the play area is banished...
+    for (const c of [earlyA, earlyB, killCard]) {
+      expect(res.state.banishPile.some((x) => x.id === c.id)).toBe(false);
+    }
+    // ...it is the whole of the fresh discard pile, sorted low-to-high like any single play's cleanup.
+    expect(res.state.discardPile.map((c) => cardValue(c))).toEqual([10, 7, 3]);
+    // The old discard pile went to the banish pile — the play area did not follow it there.
+    expect(res.state.banishPile.some((c) => c.kind === 'suited' && c.rank === '4')).toBe(true);
+  });
+
+  it('a Mage attack that lands the kill still burns its own cards rather than discarding them', () => {
+    const boss: LegacyEnemySpec = { name: 'Queen of Ash', suit: 'D', health: 10, attack: 0 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER'];
+    state.tavernDeck = []; // no reveal candidates
+    const mage: SuitedCard = { ...suited('D', '10'), arcane: true, id: 'mage-kill' };
+    state = rig(state, [mage], { suit: 'D', baseAttack: 0, maxHealth: 10, damageTaken: 0, spadesShield: 0 });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [mage.id] }),
+    );
+
+    // A Mage attack banishing its own cards is its own rule, and outlives the new play-area-to-discard rule.
+    expect(res.state.banishPile.some((c) => c.id === mage.id)).toBe(true);
+    expect(res.state.discardPile.some((c) => c.id === mage.id)).toBe(false);
+  });
+
+  it('does NOT reshuffle the bulk moves: the mission zone and the whole discard pile keep their own order', () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 10, attack: 0 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    state.discardCleanupLowToHigh = true; // the per-play rule is ON, and still must not touch a bulk transfer
+    state.relics = ['EVERGREEN_MOTHER'];
+    // Deliberately NOT in ascending order — a low-to-high sort would visibly rearrange both of these.
+    const zone = [suited('H', '9'), suited('C', '2'), suited('S', '7')];
+    const discard = [suited('D', '8'), suited('H', '3'), suited('C', '6')];
+    state.missionZone = [...zone];
+    state.discardPile = [...discard];
+    const killCard = suited('D', '10');
+    state = rig(state, [killCard], { suit: 'D', baseAttack: 0, maxHealth: 10, damageTaken: 0, spadesShield: 0 });
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+
+    const ids = res.state.banishPile.map((c) => c.id);
+    expect(ids.slice(0, 3)).toEqual(zone.map((c) => c.id)); // 9, 2, 7 — untouched
+    expect(ids.slice(-3)).toEqual(discard.map((c) => c.id)); // 8, 3, 6 — untouched
   });
 
   it('applies the same three-step cleanup on an overkill (no exact-kill exception, unlike Mission 3/10)', () => {
@@ -7352,8 +7492,10 @@ describe('legacy: mission 12 defeat cleanup (banish the mission zone, then the e
     );
 
     expect(res.state.missionZone).toEqual([]);
-    expect(res.state.discardPile).toEqual([]);
-    expect(res.state.banishPile.length).toBe(3); // zone card + kill card + discard card, all banished
+    expect(res.state.discardPile.map((c) => c.id)).toEqual([killCard.id]); // the killing play survives the sweep
+    // zone card + THE ENEMY'S OWN CARD + discard card — the kill card is not among them
+    expect(res.state.banishPile.length).toBe(3);
+    expect(res.state.banishPile.some((c) => c.kind === 'suited' && c.name === 'The Hierarch')).toBe(true);
     expect(res.state.skipNextBanishZoneFlip).toBe(false); // not an exact kill
   });
 
@@ -7374,7 +7516,9 @@ describe('legacy: mission 12 defeat cleanup (banish the mission zone, then the e
 
     expect(res.state.banishPile.some((c) => c.id === restoredInZone.id)).toBe(false);
     expect(res.state.tavernDeck.some((c) => c.id === restoredInZone.id)).toBe(true);
-    expect(res.state.banishPile.some((c) => c.id === killCard.id)).toBe(true); // the plain kill card banishes normally
+    // The plain kill card is not banished at all now — it goes to the discard pile with the rest of the play area.
+    expect(res.state.banishPile.some((c) => c.id === killCard.id)).toBe(false);
+    expect(res.state.discardPile.some((c) => c.id === killCard.id)).toBe(true);
   });
 });
 

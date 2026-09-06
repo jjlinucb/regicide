@@ -280,7 +280,7 @@ export function banishPileTopValue(banishPile: Card[]): number {
  */
 const SUITLESS_IMMUNE_CLASSES: readonly SuitlessImmuneClass[] = ['MAGE', 'REAVER', 'GUARDIAN', 'DRUID', 'CHANTER'];
 
-function suitlessClassOf(card: Card): SuitlessImmuneClass | null {
+export function suitlessClassOf(card: Card): SuitlessImmuneClass | null {
   if (card.kind !== 'suited' || card.noSuitPower) return null;
   const cls = classForCard(card).id;
   return (SUITLESS_IMMUNE_CLASSES as readonly string[]).includes(cls) ? (cls as SuitlessImmuneClass) : null;

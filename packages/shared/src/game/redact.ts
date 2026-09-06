@@ -71,6 +71,7 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     capturedPilesActive: state.capturedPilesActive,
     capturedPiles: state.capturedPiles.map((p) => ({ faceUp: p.faceUp, faceDownCount: p.faceDown.length })),
     zoneImmuneSuits: state.zoneImmuneSuits,
+    zoneImmuneClasses: state.zoneImmuneClasses,
     banishPile: state.banishPile,
     beastDeckMechanic: state.beastDeckMechanic,
     beastDeckCount: state.beastDeck.length,
