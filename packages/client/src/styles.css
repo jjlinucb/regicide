@@ -1148,7 +1148,9 @@ button {
   bottom: -2px;
 }
 
-.corrupted-badge {
+.corrupted-badge,
+/* Corruption's mirror (Mission 12) — same corner, same size, so the two read as one slot with two states. */
+.restored-badge {
   position: absolute;
   top: 4px;
   left: 5px;

@@ -100,11 +100,16 @@ export function cardAbilityText(card: Card): string {
     const flexSuffix = card.flexibleComboRank ? ` Combos as a ${card.flexibleComboRank} too.` : '';
     const wildSuffix = card.wildSuit ? ' Choose a suit for it when you play it.' : '';
     const corruptedSuffix = card.corrupted ? ' Cursed: ignores enemy immunity, but burns the top card of the reserve deck when played.' : '';
+    // Corruption's mirror (Mission 12). A restored card had NO tooltip clause and no badge, so it read as an
+    // ordinary card despite carrying the mission's whole mechanic.
+    const restoredSuffix = card.restored
+      ? ' Restored: ignores enemy immunity, and heals the banish pile\'s top card back under the reserve deck when played. Can never be banished — it returns to the bottom of the reserve deck instead.'
+      : '';
     const reaverSuffix = card.reaver
       ? " Reveals cards off the reserve deck equal to this attack's total value (including anything combo'd with it), then choose one to add its strength to the attack — every revealed card is banished. Always doubles the play's total damage."
       : '';
     const displayName = card.name ?? (card.wildSuit ? 'Any-Suit Ace' : 'Mercenary');
-    return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${extraSuffix}${stickerSuffix}${flexSuffix}${wildSuffix}${corruptedSuffix}${reaverSuffix}`;
+    return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${extraSuffix}${stickerSuffix}${flexSuffix}${wildSuffix}${corruptedSuffix}${restoredSuffix}${reaverSuffix}`;
   }
   const tierSuffix = card.tier ? ` (upgraded ${card.tier} tier${card.tier > 1 ? 's' : ''} past King, from an Endless Mode win)` : '';
   return `${rankLabel} of ${SUIT_NAME[card.suit]} — value ${cardValue(card)}${tierSuffix}. ${SUIT_ABILITY_TEXT[card.suit]}`;
@@ -165,7 +170,7 @@ export function PlayingCard({
   return (
     <button
       type="button"
-      className={`playing-card${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}${card.corrupted ? ' corrupted' : ''}`}
+      className={`playing-card${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}${card.corrupted ? ' corrupted' : ''}${card.restored ? ' restored' : ''}`}
       onClick={onClick}
       style={Object.keys(style).length > 0 ? style : undefined}
       aria-label={cardLabel(card)}
@@ -173,6 +178,7 @@ export function PlayingCard({
     >
       {card.special && !small && <span className="special-badge" aria-hidden="true">✦</span>}
       {card.corrupted && !small && <span className="corrupted-badge" aria-hidden="true">🥀</span>}
+      {card.restored && !small && <span className="restored-badge" aria-hidden="true">🌱</span>}
       <span className="rank">{rankLabel}</span>
       {/* Every class the card carries, side by side at one size (John, 2026-09-06) — they resolve together when
           the card is played, so none of them is a footnote to the others. A single-class card is the common

@@ -12,6 +12,10 @@ const CARDS: [string, Card][] = [
   ['Druid sticker', { id: 'dr', kind: 'suited', suit: 'H', rank: '4', name: 'Wren Fallow', secondClassDruid: true } as Card],
   ['Guardian sticker', { id: 'gd', kind: 'suited', suit: 'D', rank: '8', name: 'Ferro', secondClassGuardian: true } as Card],
   ['Dual + Chanter sticker', { id: 'x', kind: 'suited', suit: 'C', rank: '2', name: 'Talis Ashborn', secondSuit: 'H', secondClassChanter: true } as Card],
+  ['Corrupted', { id: 'c1', kind: 'suited', suit: 'C', rank: '9', name: 'Maren the Fallen', corrupted: true } as Card],
+  ['Corrupted + Druid sticker', { id: 'c2', kind: 'suited', suit: 'H', rank: '4', name: 'Wren Fallow', corrupted: true, secondClassDruid: true } as Card],
+  ['Corrupted + dual class', { id: 'c3', kind: 'suited', suit: 'S', rank: '6', name: 'Dask Emberwane', corrupted: true, secondSuit: 'D' } as Card],
+  ['Restored (Mission 12)', { id: 'r1', kind: 'suited', suit: 'C', rank: '9', name: 'Maren the Fallen', restored: true } as Card],
 ];
 
 export function CardPreview() {
