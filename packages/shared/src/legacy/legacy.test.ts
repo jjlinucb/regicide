@@ -3283,6 +3283,39 @@ describe("legacy: Azure Emblem relic (mission 6), sourced fix — banks the Mage
   });
 });
 
+describe("legacy: class powers follow the Player Helper's step order (2026-09-06)", () => {
+  it("a Guardian's Aegis resolves AFTER the Paladin's shield, so it takes precedence rather than stacking", () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'H', health: 200, attack: 20 };
+    let state = startMission(1, [boss]);
+    // Step 4a on the physical helper is "PALADIN — reduce enemy strength", then "GUARDIAN". Aegis SETS the
+    // shield to the enemy's base attack; Spades ADDS to it. Under the old order (Guardian first) the Spades
+    // value landed on top, leaving the enemy still attacking despite a power that reduces its attack to 0.
+    const aegis: SuitedCard = { ...suited('D', '5'), guardian: true, special: 'AEGIS' };
+    state = rig(state, [aegis, suited('S', '5')]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }),
+    );
+
+    expect(res.state.currentEnemy?.spadesShield).toBe(20); // exactly the base attack, not 20 + the Spades 10
+    expect(resolvedEnemyAttack(res.state)).toBe(0);
+  });
+
+  it('CONTROL: an ordinary Guardian alongside a Paladin still leaves the Spades shield intact', () => {
+    const boss: LegacyEnemySpec = { name: 'Statue', suit: 'H', health: 200, attack: 20 };
+    let state = startMission(1, [boss]);
+    const guard: SuitedCard = { ...suited('D', '5'), guardian: true };
+    state = rig(state, [guard, suited('S', '5')]);
+
+    const res = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }),
+    );
+
+    // No Aegis to overwrite it, so the Paladin's own reduction stands on its own.
+    expect(res.state.currentEnemy?.spadesShield).toBe(10);
+  });
+});
+
 describe('legacy: Guardian class power (absolute shield, one attack at a time)', () => {
   function guardianCard(suit: SuitedCard['suit'], rank: SuitedCard['rank'], special?: boolean): SuitedCard {
     return { ...suited(suit, rank), guardian: true, ...(special ? { special: 'AEGIS' } : {}) };

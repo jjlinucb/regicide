@@ -2406,31 +2406,16 @@ function continueResolveCommittedPlay(
     state.ruleset === 'legacy' && reaverCards.length > 0 && !classBlocked('REAVER', reaverCards[0]?.name ?? 'A Reaver');
   const reaverMultiplier = reaverActive ? 2 : 1;
 
-  // Guardians (Mission 6): playing one raises an absolute shield that blocks the enemy's very next attack
-  // entirely, regardless of the card's own value — spent the instant it's used, not a stacking reduction.
-  // Aegis instead holds the shield permanently, zeroing the enemy's attack for the rest of the fight (same
-  // final effect as Bulwark, but from a Guardian's suit-less card).
-  // Mission 6 reward, sourced fix: a secondClassGuardian card (the Guardian sticker granted to an existing
-  // rank-8 party card, see party.ts's applyGuardianSticker) fires this same shield ability on top of its own
-  // suit power, exactly like a secondClassArcane card's bonus arcane bolt fires on top of its own suit power.
+  // Guardians (Mission 6). Its shield resolves LATER, after the Paladin's — see below. The official Player
+  // Helper card puts both in "STEP 4a: SUFFER DAMAGE", in that order: "PALADIN — reduce enemy strength", then
+  // "GUARDIAN — players suffer no damage this turn". Only the card list and the immunity check happen here, so
+  // classBlocked still logs in play order.
   const guardianCards = resolvingCards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> => c.kind === 'suited' && Boolean(c.guardian || c.secondClassGuardian),
   );
+  const guardianActive =
+    state.ruleset === 'legacy' && guardianCards.length > 0 && !classBlocked('GUARDIAN', guardianCards[0].name ?? 'A Guardian');
   let guardianBlocksNextAttack = false;
-  if (
-    state.ruleset === 'legacy' &&
-    guardianCards.length > 0 &&
-    !classBlocked('GUARDIAN', guardianCards[0].name ?? 'A Guardian')
-  ) {
-    const enemy = state.currentEnemy!;
-    if (hasSpecial(guardianCards, 'AEGIS')) {
-      enemy.spadesShield = enemy.baseAttack;
-      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises Aegis — the shield holds permanently, the enemy's attack reduced to 0.`);
-    } else {
-      guardianBlocksNextAttack = true;
-      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises an absolute shield, blocking the enemy's next attack entirely.`);
-    }
-  }
 
   // Druids (Mission 7): playing one activates Regrowth — the whole discard pile is dealt out across the table
   // and every player assigns up to 4 of their own dealt cards (hand / banish / top of deck / bottom of deck),
@@ -2524,6 +2509,26 @@ function continueResolveCommittedPlay(
   // only, outside the multiplier — a real behavior change, not just a richer way of computing the same number.
   const effectiveTotalValue = totalValue + arcaneBonus;
   const clubsMultiplier = resolveSuitPowers(state, cards, effectiveSuits, effectiveTotalValue, ignoreImmunityForPlay, immunityIgnoringSuits);
+
+  // The Guardian's absolute shield, immediately after the Paladin's own Spades shield that resolveSuitPowers
+  // just applied — the Player Helper's step 4a order (John's photo of the physical card, 2026-09-06). It used
+  // to run BEFORE every base-class power, which mattered: Aegis SETS spadesShield to the enemy's base attack
+  // while Spades ADDS to it, so the old order let the Spades value land on top and left the enemy attacking for
+  // more than a power described as "reduce the attack to 0" should allow.
+  //
+  // Aegis holds the shield permanently (same final effect as Bulwark, from a Guardian's suit-less card); an
+  // ordinary Guardian instead blocks the enemy's very next attack entirely, spent the instant it's used. A
+  // secondClassGuardian card (Mission 6's sticker) fires this on top of its own suit power.
+  if (guardianActive) {
+    const guardedEnemy = state.currentEnemy!;
+    if (hasSpecial(guardianCards, 'AEGIS')) {
+      guardedEnemy.spadesShield = guardedEnemy.baseAttack;
+      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises Aegis — the shield holds permanently, the enemy's attack reduced to 0.`);
+    } else {
+      guardianBlocksNextAttack = true;
+      log(state, `${guardianCards[0].name ?? 'A Guardian'} raises an absolute shield, blocking the enemy's next attack entirely.`);
+    }
+  }
   const rawDamage = (effectiveTotalValue + reaverBonus) * reaverMultiplier * clubsMultiplier;
   // Mission 10: an enemy Paladin's extra power reduces the damage it takes by its own base strength (see
   // applyEnemyPaladinDamageReduction) — a no-op for every other mission/enemy.
