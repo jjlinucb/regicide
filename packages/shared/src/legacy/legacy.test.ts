@@ -412,7 +412,31 @@ describe('legacy: feign death', () => {
     expect(state.lossReason).toBeNull();
   });
 
-  it('fails (normal loss) if the player played a card this turn instead of yielding', () => {
+  it('leaves you able to call a standing Jester next turn, with an empty hand (John, 2026-09-06)', () => {
+    let state = startMission(1, [enemy]);
+    state = rig(state, [suited('D', '2')]);
+    state.standingJesters = [{ id: 'standing-j', kind: 'jester' }];
+
+    // Play the last card, then feign death against whatever comes back.
+    let res: EngineResult = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    );
+    state = (res as any).state;
+    if (state.turnPhase === 'AWAIT_DEFEND') {
+      state = ensureOk(
+        applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) }),
+      ).state;
+    }
+
+    expect(state.phase).toBe('IN_PROGRESS');
+    expect(state.turnPhase).toBe('AWAIT_PLAY');
+    // The way back in: a standing Jester needs no cards in hand.
+    expect(state.standingJesters.length).toBe(1);
+    const jester = ensureOk(applyAction(state, { type: 'USE_STANDING_JESTER', playerId: state.players[0].id }));
+    expect(jester.state.standingJesters.length).toBe(0);
+  });
+
+  it('STILL WORKS after playing a card this turn — the yield gate was dropped (John, 2026-09-06)', () => {
     let state = startMission(1, [enemy]);
     state = rig(state, [suited('D', '2'), suited('D', '3')]);
     state.maxHandSize = 3;
@@ -424,10 +448,11 @@ describe('legacy: feign death', () => {
     res = applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) });
     expect(res.ok).toBe(true);
     state = (res as any).state;
-    expect(state.phase).toBe('LOST'); // no Feign Death: last action wasn't a yield
+    expect(state.phase).toBe('IN_PROGRESS'); // discarding the whole hand always survives now
+    expect(state.players[0].hand.length).toBe(0);
   });
 
-  it('fails if the entire hand is discarded but the player was not at their hand-size limit', () => {
+  it('STILL WORKS below the hand-size limit — the full-hand gate was dropped too (John, 2026-09-06)', () => {
     let state = startMission(1, [enemy]);
     state = rig(state, [suited('D', '2')]); // only 1 card, but maxHandSize stays at the default (8) — not "at limit"
     let res: EngineResult = ensureOk(applyAction(state, { type: 'YIELD', playerId: state.players[0].id }));
@@ -435,7 +460,7 @@ describe('legacy: feign death', () => {
     res = applyAction(state, { type: 'DEFEND', playerId: state.players[0].id, cardIds: state.players[0].hand.map((c) => c.id) });
     expect(res.ok).toBe(true);
     state = (res as any).state;
-    expect(state.phase).toBe('LOST'); // whole hand discarded, but not at hand limit — Feign Death doesn't apply
+    expect(state.phase).toBe('IN_PROGRESS'); // a single card is still "your whole hand"
   });
 
   it('is not available in classic Regicide (ruleset gate)', () => {
