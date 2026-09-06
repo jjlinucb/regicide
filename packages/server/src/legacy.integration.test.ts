@@ -21,13 +21,13 @@ import { InMemoryEndlessSaveStore } from './db/endlessSaves.js';
 type Client = ClientSocket<ServerToClientEvents, ClientToServerEvents>;
 
 /**
- * Which of `wanted` suits still have an uncorrupted card at `rank` in this campaign's party. A jump-ahead grants
- * every earlier mission's reward, including several unseeded corruptAnotherCard steps, so a sticker test can't
- * hardcode its candidate suits — a corrupted card is permanently out (see shared party.ts's canGainSpecialClass).
+ * The suits a rank's sticker picker should offer. Since John's 2026-09-06 ruling this is simply every wanted
+ * suit: a corrupted card CAN take one of the four player-picked stickers, so the corruption ladder no longer
+ * quietly removes one candidate per rank. Kept as a named helper (rather than inlining the list) because the
+ * point of these assertions is that all three are offered, corruption or not.
  */
-function uncorruptedSuitsOfRank(party: Card[], rank: string, wanted: string[]): string[] {
-  const corrupted = party.filter((c) => c.kind === 'suited' && c.rank === rank && c.corrupted).map((c) => (c.kind === 'suited' ? String(c.suit) : ''));
-  return wanted.filter((s) => !corrupted.includes(s)).sort();
+function stickerSuitsOfRank(_party: Card[], _rank: string, wanted: string[]): string[] {
+  return [...wanted].sort();
 }
 
 function emitAsync<T>(socket: Client, event: keyof ClientToServerEvents, payload: unknown): Promise<T> {
@@ -691,10 +691,9 @@ describe('legacy campaign integration', () => {
     if ('error' in result) throw new Error(result.error);
     expect(result.room.legacy?.party.some((c) => c.kind === 'suited' && c.secondClassDruid)).toBe(false);
     const eligible = result.room.legacy!.party.filter(druidStickerEligible);
-    // The three rank-4 cards the source names — the 4 of Hearts is excluded — minus any that this run's random
-    // corruptAnotherCard rewards happened to hit, since a corrupted card can never gain a special class (see
-    // party.ts's canGainSpecialClass). Which cards get corrupted is unseeded, so this is derived, not hardcoded.
-    expect(eligible.map((c) => c.suit).sort()).toEqual(uncorruptedSuitsOfRank(result.room.legacy!.party, '4', ['C', 'D', 'S']));
+    // All three rank-4 cards the source names — the 4 of Hearts is excluded. A corrupted card among them is
+    // still offered (John, 2026-09-06): only the MAGE sticker refuses a corrupted target.
+    expect(eligible.map((c) => c.suit).sort()).toEqual(stickerSuitsOfRank(result.room.legacy!.party, '4', ['C', 'D', 'S']));
     expect(eligible.length).toBeGreaterThan(0);
 
     const notHost = await rooms.chooseDruidSticker(created.code, 'not-the-host', eligible[0].id);
@@ -732,7 +731,7 @@ describe('legacy campaign integration', () => {
     // Rank 2, any base class except Bard — minus any corrupted by an earlier mission's reward (see the Druid
     // test above for why this is derived rather than hardcoded).
     expect(eligible.every((c) => c.rank === '2')).toBe(true);
-    expect(eligible.map((c) => c.suit).sort()).toEqual(uncorruptedSuitsOfRank(result.room.legacy!.party, '2', ['C', 'H', 'S']));
+    expect(eligible.map((c) => c.suit).sort()).toEqual(stickerSuitsOfRank(result.room.legacy!.party, '2', ['C', 'H', 'S']));
     expect(eligible.length).toBeGreaterThan(0);
 
     const notHost = await rooms.chooseChanterSticker(created.code, 'not-the-host', eligible[0].id);

@@ -8063,16 +8063,24 @@ describe('legacy: the other direction — an already-corrupted card can never GA
     }
   });
 
-  it('the four player-picked stickers reject a corrupted card too', () => {
-    expect(reaverStickerEligible(corruptedCard('H', '6'))).toBe(false);
-    expect(guardianStickerEligible({ ...corruptedCard('H', '8'), name: 'Ealda Mercyhand' })).toBe(false);
-    expect(druidStickerEligible(corruptedCard('D', '4'))).toBe(false);
-    expect(chanterStickerEligible(corruptedCard('C', '2'))).toBe(false);
-    // Sanity: the same cards uncorrupted ARE eligible, so the assertions above can't be passing for another reason.
+  it('the four player-picked stickers ACCEPT a corrupted card (John, live play 2026-09-06)', () => {
+    // The no-corrupted rule is the MAGE sticker's alone — nothing forbids a corrupted Reaver, Guardian, Druid or
+    // Chanter. Applying it to all five silently cost each picker one of its three candidates, because the
+    // corruption ladder corrupts exactly one card per rank 2-9 and these stickers each pick within one rank.
+    expect(reaverStickerEligible(corruptedCard('H', '6'))).toBe(true);
+    expect(guardianStickerEligible({ ...corruptedCard('H', '8'), name: 'Ealda Mercyhand' })).toBe(true);
+    expect(druidStickerEligible(corruptedCard('D', '4'))).toBe(true);
+    expect(chanterStickerEligible(corruptedCard('C', '2'))).toBe(true);
+    // ...and the same cards uncorrupted are of course still eligible.
     expect(reaverStickerEligible(suited('H', '6'))).toBe(true);
     expect(guardianStickerEligible({ ...suited('H', '8'), name: 'Ealda Mercyhand' })).toBe(true);
     expect(druidStickerEligible(suited('D', '4'))).toBe(true);
     expect(chanterStickerEligible(suited('C', '2'))).toBe(true);
+  });
+
+  it('but the MAGE sticker still rejects one — a corrupted Mage is the state John says cannot exist', () => {
+    expect(mageStickerEligible(corruptedCard('H', '4'), '4')).toBe(false);
+    expect(mageStickerEligible(suited('H', '4'), '4')).toBe(true);
   });
 });
 
@@ -8194,10 +8202,14 @@ describe('legacy: the eight-mission corruption ladder — one corrupted card per
       const corrupted = corruptedCards(party);
       expect(corrupted.length).toBe(CORRUPTED_PARTY_ENEMY_COUNT);
       expect([...corruptedRanks(party)].sort()).toEqual([...CORRUPTIBLE_RANKS].sort());
-      // Every one of them is still rank-and-file: canBeCorrupted's rule held all the way down the ladder.
+      // canBeCorrupted's rule held all the way down the ladder: nothing that already carried a special class
+      // was ever corrupted. The reverse is now allowed — a card corrupted early CAN pick up a sticker later
+      // (John, 2026-09-06), so `hasSpecialClass` is deliberately not asserted here any more; only the Mage
+      // sticker still refuses a corrupted target, which is the one combination he ruled out.
       for (const c of corrupted) {
-        expect(hasSpecialClass(c)).toBe(false);
         expect(c.name).not.toBe('Goran');
+        expect(c.arcane).toBeFalsy();
+        expect(c.secondClassArcane).toBeFalsy();
       }
     }
   });

@@ -481,9 +481,15 @@ export function corruptedRanks(party: Card[]): Set<Rank> {
  * corrupted Mage, exactly the state John says is impossible. The other four stickers had the same hole.
  *
  * JUDGMENT CALL: John said the state can't exist; he didn't say which side gives way. Skipping the card is the
- * least destructive option — these rewards pick from ~40 party members, so another target is always available,
- * and nothing is lost. The alternative (a sticker CLEANSING the corruption) would invent a mechanic he never
- * described.
+ * least destructive option, and the alternative (a sticker CLEANSING the corruption) would invent a mechanic he
+ * never described.
+ *
+ * SCOPE CORRECTED (John, live play 2026-09-06): this is the MAGE sticker's rule alone, and it used to be applied
+ * to all five. His rule is about corrupted MAGES; nothing forbids a corrupted Reaver, Guardian, Druid or Chanter.
+ * Applying it everywhere had a visible cost, because these four stickers each pick from ONE rank's three
+ * candidates rather than from the whole party: the corruption ladder corrupts exactly one card per rank 2-9, so
+ * at every sticker's own rank precisely one candidate was corrupted and silently filtered out, and each picker
+ * offered 2 choices where it should have offered 3. Only mageStickerEligible calls this now.
  */
 export function canGainSpecialClass(card: Extract<Card, { kind: 'suited' }>): boolean {
   return !card.corrupted;
@@ -543,7 +549,6 @@ export function guardianStickerEligible(card: Card): card is Extract<Card, { kin
   return (
     card.kind === 'suited' &&
     card.rank === '8' &&
-    canGainSpecialClass(card) &&
     ['WARRIOR', 'BARD', 'CLERIC'].includes(SUIT_TO_CLASS[card.suit].id) && // never a Paladin — see the doc above
     card.name !== 'Goran' &&
     !card.arcane &&
@@ -605,7 +610,6 @@ export function druidStickerEligible(card: Card): card is Extract<Card, { kind: 
   return (
     card.kind === 'suited' &&
     card.rank === '4' &&
-    canGainSpecialClass(card) &&
     ['D', 'C', 'S'].includes(card.suit) &&
     !card.arcane &&
     !card.reaver &&
@@ -646,7 +650,6 @@ export function chanterStickerEligible(card: Card): card is Extract<Card, { kind
   return (
     card.kind === 'suited' &&
     card.rank === '2' &&
-    canGainSpecialClass(card) &&
     SUIT_TO_CLASS[card.suit].id !== 'BARD' &&
     !card.arcane &&
     !card.reaver &&
@@ -789,7 +792,6 @@ export function reaverStickerEligible(card: Card): card is Extract<Card, { kind:
   return (
     card.kind === 'suited' &&
     card.rank === '6' &&
-    canGainSpecialClass(card) &&
     ['BARD', 'CLERIC', 'PALADIN'].includes(SUIT_TO_CLASS[card.suit].id) &&
     !card.arcane &&
     !card.reaver &&
