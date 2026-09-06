@@ -911,6 +911,37 @@ describe('legacy campaign integration', () => {
     }
   });
 
+  it('Mission 12 arrives with every corrupted card in a restored sleeve, and no High Arcana in play', async () => {
+    const client = ioClient(`http://localhost:${port}`);
+    await waitFor(client, 'connect');
+    const created = await emitAsync<{ ok: true; code: string; playerToken: string; playerId: string }>(client, 'legacy:create', { name: 'Vesna' });
+
+    const result = rooms.startLegacyMission(created.code, created.playerId, 12);
+    if ('error' in result) throw new Error(result.error);
+
+    const inPlay = [
+      ...result.room.gameState.players.flatMap((p) => p.hand),
+      ...result.room.gameState.tavernDeck,
+    ];
+    // Jumping to 12 grants Missions 1-11's rewards, so the corruption ladder has run: no PARTY card survives it
+    // corrupted, and the cards it produced are restored instead. The only corrupted cards left in play are the
+    // two invented placeholder heroes seeded straight into the reserve deck (missions.ts's extraReserveCards),
+    // which the party transform never sees — John is deciding their fate separately.
+    const placeholders = new Set(['Maren the Fallen', 'Dask Emberwane']);
+    const corruptedInPlay = inPlay.filter((c) => c.kind === 'suited' && c.corrupted);
+    expect(corruptedInPlay.every((c) => c.kind === 'suited' && placeholders.has(c.name ?? ''))).toBe(true);
+    expect(inPlay.filter((c) => c.kind === 'suited' && c.restored).length).toBeGreaterThan(0);
+    // High Arcana is the boss, never a card in hand or deck.
+    expect(inPlay.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '25')).toBe(false);
+    // ...and the persisted roster still holds him, and still holds its corrupted cards — this is a mission-time
+    // transform, not a rewrite of the campaign.
+    const roster = result.room.legacy!.party;
+    expect(roster.some((c) => c.kind === 'suited' && c.suit === 'D' && c.rank === '25')).toBe(true);
+    expect(roster.filter((c) => c.kind === 'suited' && c.corrupted).length).toBeGreaterThan(0);
+
+    client.close();
+  });
+
   it('a campaign that walks Missions 1-9 through RoomManager reaches Mission 10 with exactly one corrupted card per rank 2-9', async () => {
     const client = ioClient(`http://localhost:${port}`);
     await waitFor(client, 'connect');

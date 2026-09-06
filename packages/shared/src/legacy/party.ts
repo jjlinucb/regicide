@@ -685,6 +685,22 @@ export function applyChanterStickerChoice(party: Card[], cardId: string): Card[]
  * party member the whole time, never sidelined at all). A no-op (same reference) if `identity` is unset or no
  * matching card is found.
  */
+/**
+ * Mission 12 only (John, 2026-09-05 — see MissionDef.restoreCorruptedParty): swaps a restored sleeve onto every
+ * corrupted card in `party`. `corrupted` comes off and `restored` goes on, so the card keeps its immunity bypass
+ * but its cost flips from banishing the reserve deck's top card to healing the banish pile's top card back into
+ * the game (see engine.ts's applyCorruptedCost / applyRestoredHeal). Returns the same array reference when there
+ * is nothing corrupted to restore, matching applyEvergreenUpgrade's own no-op contract.
+ */
+export function applyRestoredSleeves(party: Card[]): Card[] {
+  if (!party.some((c) => c.kind === 'suited' && c.corrupted)) return party;
+  return party.map((c) => {
+    if (c.kind !== 'suited' || !c.corrupted) return c;
+    const { corrupted: _corrupted, ...rest } = c;
+    return { ...rest, restored: true };
+  });
+}
+
 export function applyEvergreenUpgrade(party: Card[], identity?: { suit: Suit; rank: Rank }): Card[] {
   if (!identity) return party;
   let upgraded = false;

@@ -51,6 +51,18 @@ export interface Mission {
    * just as its own separate flag since sidelineIdentity is already spoken for by Mission 11's Esme).
    */
   sidelineHighArcana?: boolean;
+  /**
+   * JOHN, 2026-09-05: Mission 12 only — every corrupted party card gets a RESTORED SLEEVE. The eight corrupted
+   * 2-9 characters the campaign's corruption ladder produced (see MissionReward.corruptAnotherCard) arrive at the
+   * final mission purified: SuitedCard.corrupted off, SuitedCard.restored on. That is what gives the mission's
+   * restored-card mechanic real cards to work with — the immunity bypass survives the swap, and the cost flips
+   * from banishing the reserve deck's top card to healing the banish pile's (see engine.ts's applyRestoredHeal).
+   *
+   * Applied to the MISSION's party at setup, not to the persisted campaign roster — the same shape sidelining
+   * uses. A physical restored sleeve is permanent, but Mission 12 is the last mission, so nothing follows it that
+   * could tell the difference; doing it at setup keeps the persisted roster untouched and the change reversible.
+   */
+  restoreCorruptedParty?: boolean;
   /** See GameState.standingJesters. */
   standingJesters?: boolean;
   /**
@@ -1532,10 +1544,16 @@ export const MISSIONS: Mission[] = [
       corruptedHero('Maren the Fallen', 'C', '9'),
       corruptedHero('Dask Emberwane', 'S', '6'),
     ],
-    // Same standing-Jester house rule as every other mission — see GameState.standingJesters. No
-    // sidelineHighArcana here: this is the mission where High Arcana himself is unmasked as The Hierarch, not a
-    // playable party card to exclude.
+    // Same standing-Jester house rule as every other mission — see GameState.standingJesters.
     standingJesters: true,
+    // JOHN, 2026-09-05, correcting this file directly: High Arcana is "definitely not a playable party card, it
+    // is just the boss" here. He IS The Hierarch — so this mission excludes him like every mission since his
+    // Mission 1 recruitment, rather than being the one place he becomes playable. The previous comment argued the
+    // opposite ("the mission where High Arcana is unmasked, not a card to exclude"), which had him sitting in
+    // your hand while also standing at the end of the gauntlet.
+    sidelineHighArcana: true,
+    // Every corrupted 2-9 character arrives in a restored sleeve — see MissionDef.restoreCorruptedParty.
+    restoreCorruptedParty: true,
     // JOHN, 2026-09-05 — THIS ANSWERS THE LONG-OPEN QUESTION parked in Mission 9's entry ("which mission heals
     // the relic?"). It heals HERE, at this mission's setup, which is what this mission's own story text has
     // always described: the ally freed in the depths "hands the party a gift before they press on: a way to
@@ -1547,10 +1565,9 @@ export const MISSIONS: Mission[] = [
     // banishCards, now gated on holding this relic). What a restored card carries by itself is the immunity
     // bypass and the heal-instead-of-banish cost.
     //
-    // STILL OPEN, deliberately not invented: whether the purified tier ALSO keeps the corrupted tier's own power
-    // (a corrupted card's cost becoming another player banishing from hand — see engine.ts's applyCorruptedCost,
-    // which today answers yes on the reasoning that an upgrade shouldn't lose a power). Mostly moot here if every
-    // corrupted 2-9 card arrives restored, but it is a judgment call, not his ruling.
+    // SETTLED (John, 2026-09-05): the purified tier "does not do anything else" — the restored-card protection is
+    // its whole power. It does not also carry the corrupted tier's hand-banish cost (see engine.ts's
+    // applyCorruptedCost), and purifying swaps the relics rather than stacking them (see startLegacyMission).
     startingRelics: ['EVERGREEN_MOTHER'],
     // No reward: the campaign's final mission — completing it ends the story, nothing further to grant. Some
     // pasted community research describes an un-banishable restored-card "immunity shield" and a Paladin power

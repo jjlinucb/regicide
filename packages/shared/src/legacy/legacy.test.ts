@@ -25,6 +25,7 @@ import {
   applyExtraSuitByName,
   applyDualClassStickers,
   applyEvergreenUpgrade,
+  applyRestoredSleeves,
   applyGuardianStickerChoice,
   chanterStickerEligible,
   druidStickerEligible,
@@ -7125,6 +7126,62 @@ describe('legacy: mission 12 restored-card redirect (can never land in the banis
 
     expect(res.state.banishPile.some((c) => c.id === reserveTop.id)).toBe(false);
     expect(res.state.tavernDeck[res.state.tavernDeck.length - 1]?.id).toBe(reserveTop.id);
+  });
+});
+
+describe('legacy: mission 12 restored sleeves and the boss who is not a card (John, 2026-09-05)', () => {
+  it('swaps a restored sleeve onto every corrupted card — corrupted off, restored on, everything else untouched', () => {
+    const party = buildInitialParty();
+    const targets = party.slice(0, 3).map((c) => c.id);
+    const seeded = party.map((c) => (targets.includes(c.id) ? { ...c, corrupted: true } : c));
+
+    const next = applyRestoredSleeves(seeded);
+
+    expect(next.filter((c) => c.kind === 'suited' && c.corrupted).length).toBe(0);
+    const restored = next.filter((c) => c.kind === 'suited' && (c as SuitedCard).restored);
+    expect(restored.map((c) => c.id).sort()).toEqual([...targets].sort());
+    expect(next.length).toBe(seeded.length);
+  });
+
+  it('is a no-op (same reference) when nothing in the party is corrupted', () => {
+    const party = buildInitialParty();
+    expect(applyRestoredSleeves(party)).toBe(party);
+  });
+
+  it('a restored sleeve keeps the immunity bypass but flips the cost from banish to heal', () => {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 200, attack: 10 };
+    const [sleeved] = applyRestoredSleeves([{ ...suited('H', '4'), corrupted: true } as Card]) as SuitedCard[];
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER'];
+    const inBanish = suited('C', '7');
+    state.banishPile = [inBanish];
+    const reserveTop = suited('S', '2');
+    state.tavernDeck = [reserveTop, ...state.tavernDeck];
+    state = rig(state, [sleeved]);
+
+    state = ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [sleeved.id] }),
+    ).state;
+
+    // Healed the banish pile's top card back under the reserve deck, rather than banishing the reserve deck's top.
+    expect(state.banishPile.some((c) => c.id === inBanish.id)).toBe(false);
+    expect(state.tavernDeck[state.tavernDeck.length - 1]?.id).toBe(inBanish.id);
+    expect(state.tavernDeck[0]?.id).toBe(reserveTop.id); // the reserve top was never touched
+  });
+
+  it('Mission 12 carries the flag, and no other mission does', () => {
+    expect(getMission(12)!.restoreCorruptedParty).toBe(true);
+    expect(MISSIONS.filter((m) => m.restoreCorruptedParty).map((m) => m.id)).toEqual([12]);
+  });
+
+  it('Mission 12 sidelines High Arcana — he is the boss, never a playable card', () => {
+    expect(getMission(12)!.sidelineHighArcana).toBe(true);
+    // Every mission from 2 on now excludes him (Mission 3 does it via sidelineIdentity, its own flag).
+    const playable = MISSIONS.filter(
+      (m) => m.id >= 2 && !m.sidelineHighArcana && !(m.sidelineIdentity?.suit === 'D' && m.sidelineIdentity.rank === '25'),
+    );
+    expect(playable.map((m) => m.id)).toEqual([]);
   });
 });
 
