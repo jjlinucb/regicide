@@ -337,32 +337,6 @@ function druidCompanion(name: string, suit: Suit, rank: Rank): Card {
   return { id: `druid-companion-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, druid: true };
 }
 
-/**
- * Mission 12's own flavor pair, seeded into its extraReserveCards: heroes the antagonist's corruption reached
- * along the campaign's road. `restoredHero` carries SuitedCard.restored — the relic upgrade's beneficiaries,
- * healing the banish pile back into the game whenever they're played (see engine.ts's applyRestoredHeal).
- * `corruptedHero` carries the plain SuitedCard.corrupted the rest of the campaign already uses (Mission 1's full
- * corrupted court) — the relic didn't reach these few in time, so they still pay
- * the ordinary immunity-ignoring cost, redirected to the bottom of the banish pile instead of the reserve deck
- * this mission (see engine.ts's toReserveDeck). Named separately from zoneCompanion/pilgrim above since neither
- * fits: these aren't mission-zone fixtures or Pilgrim-style rescues, just ordinary reserve-deck cards carrying one
- * of the two flags this mission's whole mechanic is built around.
- */
-function restoredHero(name: string, suit: Suit, rank: Rank): Card {
-  return { id: `restored-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name, restored: true };
-}
-function corruptedHero(name: string, suit: Suit, rank: Rank): Card {
-  const card: Card = { id: `corrupted-${name.replace(/\s+/g, '-').toLowerCase()}`, kind: 'suited', suit, rank, name };
-  // Authored mission data is held to the same corruption eligibility rule as a reward's random pick (party.ts's
-  // canBeCorrupted — rank 2-9, base class only, never a Mage). Thrown at module load rather than filtered
-  // silently: MISSIONS is static, so this can only ever fire on a bad edit to the two entries below, and a loud
-  // failure the first test run catches beats shipping a card the rules say cannot exist.
-  if (!canBeCorrupted(card)) {
-    throw new Error(`Mission data error: "${name}" (${suit}${rank}) is not an eligible corruption target — see party.ts's canBeCorrupted.`);
-  }
-  return { ...card, corrupted: true };
-}
-
 /** Converts a mission's enemy specs into the engine's LegacyEnemySpec shape (suit-keyed). Mage enemies aren't used yet — the class only exists as a party reward so far. */
 export function missionEnemiesToSpecs(enemies: MissionEnemySpec[]): LegacyEnemySpec[] {
   return enemies.map((e) => ({
@@ -1531,19 +1505,11 @@ export const MISSIONS: Mission[] = [
     // kill skips the very next turn's flip (see GameState.skipNextBanishZoneFlip), mirroring Mission 11's
     // skipNextBeastDeckFlip.
     restoredCardMechanic: true,
-    // The relic's beneficiaries and the few it didn't reach in time — named heroes seeded straight into this
-    // mission's reserve deck (not the persisted campaign party, same as Mission 8/9's own flavor extras), giving
-    // the restored/corrupted-card mechanic real cards to exercise from turn one instead of waiting on a source
-    // that doesn't otherwise exist yet in this digital campaign (see missions.ts's restoredHero/corruptedHero and
-    // their doc comment for the full reasoning).
-    extraReserveCards: [
-      restoredHero('Aldric Rootbound', 'H', '6'),
-      restoredHero('Senna Brightloom', 'D', '7'),
-      restoredHero('Torvin Ashendale', 'C', '5'),
-      restoredHero('Wren Hollowmere', 'S', '8'),
-      corruptedHero('Maren the Fallen', 'C', '9'),
-      corruptedHero('Dask Emberwane', 'S', '6'),
-    ],
+    // NO extraReserveCards (John, 2026-09-06: "there are no six placeholder heroes at all"). Six invented heroes
+    // used to be seeded here — four restored, two corrupted — purely because no real restored cards existed yet
+    // in this digital campaign. They do now: every corrupted 2-9 character arrives in a restored sleeve (see
+    // restoreCorruptedParty below), so the mechanic has the campaign's own cards to work with and the
+    // placeholders were both redundant and, for the two corrupted ones, in direct contradiction of that rule.
     // Same standing-Jester house rule as every other mission — see GameState.standingJesters.
     standingJesters: true,
     // JOHN, 2026-09-05, correcting this file directly: High Arcana is "definitely not a playable party card, it
