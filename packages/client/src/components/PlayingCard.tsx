@@ -42,12 +42,21 @@ function tieredRankLabel(card: Extract<Card, { kind: 'suited' }>): string {
  * equivalent, so they are now laid out side by side at one size.
  */
 export function cardClasses(card: Extract<Card, { kind: 'suited' }>) {
-  const themes = [classForCard(card)];
+  const themes: (typeof CLASS_THEME)[keyof typeof CLASS_THEME][] = [];
   const push = (theme: (typeof CLASS_THEME)[keyof typeof CLASS_THEME]) => {
     if (!themes.some((t) => t.id === theme.id)) themes.push(theme);
   };
-  if (card.secondSuit) push(SUIT_TO_CLASS[card.secondSuit]);
-  for (const s of card.extraSuits ?? []) push(SUIT_TO_CLASS[s]);
+  // An Evergreen card shows its own single 🌳 and nothing else (John, 2026-09-06: "at the end of Mission 9 he
+  // becomes Evergreen, so for Mission 10 it should show a tree"). Gøran collects one base suit per mission and
+  // carries all four separate icons right through Mission 9 — then the upgrade REPLACES them, because Evergreen
+  // already means all four powers at once. The suit-derived pushes are skipped rather than deduped: he keeps
+  // `secondSuit` and `extraSuits` on the card after the upgrade, so without this he rendered as the tree plus
+  // three orphaned suit icons.
+  push(classForCard(card));
+  if (!card.evergreen) {
+    if (card.secondSuit) push(SUIT_TO_CLASS[card.secondSuit]);
+    for (const s of card.extraSuits ?? []) push(SUIT_TO_CLASS[s]);
+  }
   if (card.secondClassArcane) push(CLASS_THEME.MAGE);
   if (card.secondClassReaver) push(CLASS_THEME.REAVER);
   if (card.secondClassGuardian) push(CLASS_THEME.GUARDIAN);

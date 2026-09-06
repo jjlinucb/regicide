@@ -105,7 +105,9 @@ export const CLASS_THEME: Record<ClassId, ClassTheme> = {
     id: 'MAGE',
     name: 'Mage',
     tag: 'Arcane Bolt',
-    glyph: '✦',
+    // NOT '✦' (John, 2026-09-06): that is also PlayingCard's special-ability badge, so a Mage carrying a
+    // signature ability drew the same mark twice for two unrelated reasons and neither one read as anything.
+    glyph: '🔮',
     color: '#5b3f8c',
     specialAbility: 'ARCANE_SURGE',
     specialName: 'Arcane Surge',
