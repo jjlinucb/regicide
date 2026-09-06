@@ -6945,13 +6945,15 @@ describe('legacy: mission 12 setup (Decay to Growth)', () => {
     expect(mission12.reward.relics ?? []).toEqual([]);
   });
 
-  it('seeds restored and corrupted flavor heroes into the reserve deck (not the persisted party)', () => {
+  it('seeds NO extra cards of its own — the six invented placeholder heroes are gone (John, 2026-09-06)', () => {
+    expect(getMission(12)!.extraReserveCards).toBeUndefined();
+    // The restored cards this mission works with are the campaign's own: every corrupted 2-9 character arrives
+    // in a restored sleeve (see restoreCorruptedParty), so nothing invented is needed to exercise the mechanic.
     const state = startMission12(1);
     const inCirculation = [...state.players.flatMap((p) => p.hand), ...state.tavernDeck];
-    const restoredCount = inCirculation.filter((c) => c.kind === 'suited' && (c as SuitedCard).restored).length;
-    const corruptedCount = inCirculation.filter((c) => c.kind === 'suited' && (c as SuitedCard).corrupted).length;
-    expect(restoredCount).toBe(4);
-    expect(corruptedCount).toBe(2);
+    for (const name of ['Aldric Rootbound', 'Senna Brightloom', 'Torvin Ashendale', 'Wren Hollowmere', 'Maren the Fallen', 'Dask Emberwane']) {
+      expect(inCirculation.some((c) => c.kind === 'suited' && c.name === name), name).toBe(false);
+    }
   });
 
   it("doesn't crash on the first turn's flip when the banish pile starts empty", () => {
@@ -7943,7 +7945,8 @@ describe('legacy: corruption eligibility — a Mage can never be corrupted (John
       ...(m.presetBanishPile ?? []),
     ]);
     const corruptedPresets = presets.filter((c): c is SuitedCard => c.kind === 'suited' && Boolean(c.corrupted));
-    expect(corruptedPresets.length).toBeGreaterThan(0); // Mission 12's pair — if this ever hits 0, the test has gone blind
+    // No mission bakes a corrupted card into its own data any more — Mission 12's pair were the last, and they
+    // were removed on 2026-09-06. The guard is kept so the rule still holds if one is ever added back.
     for (const c of corruptedPresets) {
       // Strip the flag the preset was built with and re-check eligibility from scratch.
       expect(canBeCorrupted({ ...c, corrupted: false })).toBe(true);
