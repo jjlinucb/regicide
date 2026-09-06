@@ -7212,6 +7212,33 @@ describe('legacy: mission 12 restored sleeves and the boss who is not a card (Jo
   });
 });
 
+describe('legacy: the Hierarch has no class and hits for 25 (John, 2026-09-06)', () => {
+  it('is 120 health / 25 attack, and carries no class of its own', () => {
+    const specs = missionEnemiesToSpecs(getMission(12)!.enemies);
+    const hierarch = specs.find((e) => e.name === 'The Hierarch')!;
+
+    expect(hierarch.health).toBe(120);
+    expect(hierarch.attack).toBe(25);
+    expect(hierarch.noClass).toBe(true);
+  });
+
+  it('CONTRAST: the Queens and Kings all keep their own class', () => {
+    const specs = missionEnemiesToSpecs(getMission(12)!.enemies);
+    const royals = specs.filter((e) => e.name !== 'The Hierarch');
+
+    expect(royals.length).toBe(8);
+    expect(royals.every((e) => !e.noClass)).toBe(true);
+  });
+
+  it('blocks nothing on his own account — his immunity comes solely from the mission zone', () => {
+    const hierarch = makeLegacyEnemy(missionEnemiesToSpecs(getMission(12)!.enemies).find((e) => e.name === 'The Hierarch')!);
+
+    for (const suit of ['H', 'D', 'C', 'S'] as const) {
+      expect(isSuitBlockedByImmunity(suit, hierarch)).toBe(false);
+    }
+  });
+});
+
 describe('legacy: mission 12 zone immunity reads the real class (John, 2026-09-06)', () => {
   function zoneFlipWith(card: Card): GameState {
     const boss: LegacyEnemySpec = { name: 'Queen of Ash', suit: 'C', health: 30, attack: 15 };

@@ -1458,15 +1458,18 @@ export const MISSIONS: Mission[] = [
       "mastermind's own underground throne room, where he unleashes his corrupted royalty — Queens, Kings, and " +
       "finally the Hierarch himself — as a last line of defense between the party and the campaign's end.",
     // Queen/King/Hierarch, reusing classic Regicide's own royalty stat table (Q: 30 health / 15 attack, K: 40/20 —
-    // see deck.ts's ENEMY_STATS) for the first eight, one of each base class per tier, then a final boss standing
-    // a clear step past Mission 11's 60/30 elites — a title above King fitting the campaign's true mastermind,
-    // only unmasked at the very end.
+    // see deck.ts's ENEMY_STATS) for the first eight, one of each base class per tier. The Hierarch's own 120/25
+    // is John's figure (2026-09-06), replacing an invented 120/30: three Kings' worth of health, but an attack
+    // only a step above a King's 20 — the fight is meant to be long rather than sharp, which is what makes the
+    // mission zone's uncapped escalation the real threat rather than his printed strength.
     //
     // Sourced correction: the Hierarch used to also carry a permanent CLERIC+PALADIN secondClass immunity — the
     // identical bug already found and fixed on Mission 3 (see that mission's comment above), stacked on top of
     // this mission's own escalating immunity grant (flipBanishPileZoneCard below). No source corroborates a
     // baked-in immunity on the final boss; the real design intent is that immunity comes solely from the zone,
-    // same as Mission 3. Removed the secondClass argument.
+    // same as Mission 3. Removed the secondClass argument — and, as of John's 2026-09-06 "the High Arcana has no
+    // suit", removed his own single class too (see the noClass wrapper on his entry below), which makes that
+    // "solely from the zone" intent literally true rather than merely mostly true.
     //
     // Deliberately NOT also applying Mission 3's second-pass zone-immunity cap here — that cap was only added
     // after playtest data showed the uncapped zone alone was still driving a ~0% win rate there, and it would
@@ -1489,7 +1492,14 @@ export const MISSIONS: Mission[] = [
         enemy('King of Ruin', 'CLERIC', 40, 20),
         enemy('King of Thorns', 'PALADIN', 40, 20),
       ]),
-      ...rankLabel('H', [enemy('The Hierarch', 'CLERIC', 120, 30)]),
+      // JOHN, 2026-09-06: "the High Arcana has no suit." He is The Hierarch, so the boss carries NO CLASS of its
+      // own (see MissionEnemySpec.noClass, the same flag Mission 11's Wardens use) — which is exactly what this
+      // mission's design intent already claimed in prose: immunity comes solely from the mission zone. The
+      // 'CLERIC' below still has to be named, because the shape requires a class and it picks the card face's
+      // suit, but it grants nothing. Note the contrast he drew the same day: the Queens and Kings DO have their
+      // own regular suits — the Hierarch is the exception, not the rule, for this mission.
+      // 120 health / 25 attack — John, 2026-09-06.
+      ...rankLabel('H', classless([enemy('The Hierarch', 'CLERIC', 120, 25)])),
     ],
     // The mission's whole mechanic, gating the restored/corrupted-card bundle (see GameState.restoredCardMechanic):
     // a previous relic gets swapped for an upgraded version this mission — restored cards ignore enemy immunity
