@@ -649,12 +649,19 @@ function hasSpecial(cards: Card[], ability: SpecialAbilityId): boolean {
 }
 
 /**
- * Legacy-only (Mission 12, "Decay to Growth"): sends `cards` to the banish pile, honoring the restored-card
- * redirect (see SuitedCard.restored) first — a restored card can never land in the banish pile itself; it's sent
- * to the bottom of the reserve deck instead. A no-op wrapper (behaves exactly like `state.banishPile.push(...)`)
- * whenever this mission's mechanic isn't active, so it's safe to use at every banish-pile call site across the
- * whole engine, no matter which mission-specific mechanic (Reaver's tear, a corrupted card's own cost, mission-zone
- * cleanup, etc.) is doing the banishing.
+ * Sends `cards` to the banish pile, honoring the restored-card redirect first — a restored card can never land in
+ * the banish pile; it goes to the bottom of the reserve deck instead.
+ *
+ * JOHN, 2026-09-05: THAT REDIRECT IS THE PURIFIED EVERGREEN MOTHER RELIC'S OWN RULE, not something intrinsic to a
+ * restored card. It is gated on holding 'EVERGREEN_MOTHER' (see types.ts's RelicId), which Mission 12 puts on the
+ * table at setup — the relic upgrade its own story text describes. Without the relic a restored card banishes like
+ * anything else; what a restored card carries on its own is the immunity bypass and the heal-instead-of-banish
+ * cost (see applyRestoredHeal). The corrupted tier, 'CORRUPTED_EVERGREEN_MOTHER', does NOT grant this — it is the
+ * weaker tier, and this protection is exactly what purifying it buys.
+ *
+ * A no-op wrapper (behaves exactly like `state.banishPile.push(...)`) whenever the relic isn't held, so it's safe
+ * to use at every banish-pile call site across the whole engine, no matter which mission-specific mechanic
+ * (Reaver's tear, a corrupted card's own cost, mission-zone cleanup, etc.) is doing the banishing.
  *
  * Also applies the same low-to-high cleanup ordering pushToDiscardPile does when GameState.discardCleanupLowToHigh
  * is set (see that function's doc comment for the sourced rule and rationale) — Mission 11's own pileTopEnemyBonus
@@ -662,21 +669,20 @@ function hasSpecial(cards: Card[], ability: SpecialAbilityId): boolean {
  * banishPileTopValue/pileTopImmuneSuits, engine.ts's resolvedEnemyAttack), and a defeated enemy's accumulated
  * table cards are routed here instead of to the discard pile for that same mission (see finishEnemyDefeatTail),
  * so leaving this pile's ordering arbitrary would reopen the identical self-reinforcing spiral the discard-pile
- * fix closed, just one pile over. Only reached via the plain (non-restored-card) branch below, since no mission
- * sets both discardCleanupLowToHigh and restoredCardMechanic at once (Mission 12's own three-step cleanup bulk-
- * banishes with order explicitly preserved instead — see missions.ts's restoredCardMechanic doc comment).
+ * fix closed, just one pile over. Applied to whatever actually reaches the pile, after the restored cards have
+ * been pulled out of the batch — the two rules compose rather than excluding each other.
  */
 function banishCards(state: GameState, cards: Card[]): void {
   if (cards.length === 0) return;
-  if (!state.restoredCardMechanic) {
-    const ordered = state.discardCleanupLowToHigh && cards.length > 1 ? lowToHighForCleanup(cards) : cards;
-    state.banishPile.push(...ordered);
-    return;
-  }
+  const protectsRestored = state.relics.includes('EVERGREEN_MOTHER');
+  const reachingPile: Card[] = [];
   for (const c of cards) {
-    if (c.kind === 'suited' && c.restored) state.tavernDeck.push(c); // bottom of the reserve deck
-    else state.banishPile.push(c);
+    if (protectsRestored && c.kind === 'suited' && c.restored) state.tavernDeck.push(c); // bottom of the reserve deck
+    else reachingPile.push(c);
   }
+  if (reachingPile.length === 0) return;
+  const ordered = state.discardCleanupLowToHigh && reachingPile.length > 1 ? lowToHighForCleanup(reachingPile) : reachingPile;
+  state.banishPile.push(...ordered);
 }
 
 /**
@@ -754,7 +760,11 @@ function pushToDiscardPile(state: GameState, cards: Card[]): void {
  * do not read it as "the two tiers are the same relic." When he specs the healed version, split this branch.
  */
 function applyCorruptedCost(state: GameState, player: PlayerState, label: string): void {
-  if (state.relics.includes('EVERGREEN_MOTHER') || state.relics.includes('CORRUPTED_EVERGREEN_MOTHER')) {
+  // JOHN, 2026-09-05: the hand-banish cost belongs to the CORRUPTED tier. Purifying the relic trades it for the
+  // restored-card protection (see banishCards) rather than stacking on top of it — he described the protection as
+  // "the new Evergreen Mother relic rule", so the purified tier is read as replacing the old power, not keeping
+  // it. The previous version fired this branch for either tier.
+  if (state.relics.includes('CORRUPTED_EVERGREEN_MOTHER')) {
     const candidates = state.players.length === 1 ? [player] : state.players.filter((p) => p.id !== player.id);
     const eligible = candidates.filter((p) => p.hand.length > 0);
     if (eligible.length === 0) {
@@ -2007,7 +2017,15 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   // can't stack copies. Mission 9's case is two DIFFERENT relics, not one twice: it sets out holding the
   // Corrupted Evergreen Mother and, once won, banks the healed Evergreen Mother permanently, so a replay
   // legitimately has both in `relics` at once (they share one power today — see applyCorruptedCost).
-  state.relics = Array.from(new Set([...(action.relics ?? []), ...(action.startingRelics ?? [])]));
+  //
+  // PURIFICATION IS A SWAP, NOT A STACK (John, 2026-09-05): Mission 12's story text describes upgrading a relic
+  // the party already holds — "turning its corruption-craft inside out" — so the purified Evergreen Mother
+  // REPLACES the corrupted tier it was made from rather than sitting alongside it. Without this the party would
+  // reach Mission 12 holding both, and applyCorruptedCost would still read the corrupted tier's hand-banish
+  // power off the banked copy, quietly undoing the upgrade.
+  const mergedRelics = new Set([...(action.relics ?? []), ...(action.startingRelics ?? [])]);
+  if (mergedRelics.has('EVERGREEN_MOTHER')) mergedRelics.delete('CORRUPTED_EVERGREEN_MOTHER');
+  state.relics = Array.from(mergedRelics);
   state.comboAssist = null;
   state.kinfolkBankedThisTurn = false;
   state.azureEmblemWindow = null;

@@ -5177,7 +5177,7 @@ describe("legacy: Mission 9's Mage sticker is a rank choice, with a random recip
 // The HEALED tier's own behavior. No mission grants it any more (John, 2026-09-04 — the relic stays corrupted
 // through Mission 10 and possibly 11), so these cover the relic itself, not a reachable campaign state; the
 // corrupted tier, which every mission from 9 on actually holds, is covered by the "two Evergreen Mothers" suite.
-describe('legacy: Evergreen Mother relic (the healed tier — corrupted-card cost redirect)', () => {
+describe('legacy: Corrupted Evergreen Mother relic (the weaker tier — corrupted-card cost redirect)', () => {
   function startWithRelic(n: number, enemies: LegacyEnemySpec[]): GameState {
     const ids = Array.from({ length: n }, (_, i) => `p${i}`);
     const names = Array.from({ length: n }, (_, i) => `Player ${i}`);
@@ -5189,7 +5189,9 @@ describe('legacy: Evergreen Mother relic (the healed tier — corrupted-card cos
       party: buildInitialParty(),
       enemies,
       jesterCount: 0,
-      relics: ['EVERGREEN_MOTHER'],
+      // The hand-banish cost is the CORRUPTED tier's power (John, 2026-09-05) — purifying trades it for the
+      // restored-card protection rather than keeping both.
+      relics: ['CORRUPTED_EVERGREEN_MOTHER'],
     });
     if (!res.ok) throw new Error(res.error);
     return res.state;
@@ -6921,6 +6923,7 @@ function startMission12(n: number, opts: { party?: Card[] } = {}): GameState {
     jesterCount: 0,
     extraReserveCards: mission12.extraReserveCards,
     restoredCardMechanic: mission12.restoredCardMechanic,
+    startingRelics: mission12.startingRelics, // the purified Evergreen Mother — what protects restored cards
   });
   if (!res.ok) throw new Error(res.error);
   return res.state;
@@ -6962,6 +6965,7 @@ describe('legacy: mission 12 restored-card mechanic (ignores immunity, heals ins
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'H', health: 200, attack: 10 };
     let state = startMission(1, [boss]);
     state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER']; // the protection is the relic's, not the mission's
     state.banishPile = []; // isolate: no heal side-effect to worry about
     state.discardPile = [suited('C', '2')];
     state = rig(state, [restoredCard('H', '3')]);
@@ -6978,6 +6982,7 @@ describe('legacy: mission 12 restored-card mechanic (ignores immunity, heals ins
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'S', health: 200, attack: 10 };
     let state = startMission(1, [boss]);
     state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER']; // the protection is the relic's, not the mission's
     const toHeal = suited('D', '4');
     const reserveTop = suited('C', '9');
     state.banishPile = [toHeal];
@@ -6998,6 +7003,7 @@ describe('legacy: mission 12 restored-card mechanic (ignores immunity, heals ins
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'S', health: 200, attack: 10 };
     let state = startMission(1, [boss]);
     state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER']; // the protection is the relic's, not the mission's
     state.banishPile = [];
     state = rig(state, [restoredCard('H', '3')]);
 
@@ -7013,6 +7019,7 @@ describe('legacy: mission 12 corrupted-card redirect (into the reserve deck redi
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'S', health: 200, attack: 10 };
     let state = startMission(1, [boss]);
     state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER']; // the protection is the relic's, not the mission's
     const corrupted = corruptedCard('D', '9');
     state.discardPile = [corrupted];
     state = rig(state, [suited('H', '5')]); // Hearts, value 5 — heals the lone discard card
@@ -7029,6 +7036,7 @@ describe('legacy: mission 12 corrupted-card redirect (into the reserve deck redi
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'S', health: 200, attack: 10 };
     let state = startMission(1, [boss]);
     state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER']; // the protection is the relic's, not the mission's
     const corrupted = corruptedCard('D', '9');
     state.banishPile = [corrupted];
     state = rig(state, [restoredCard('H', '3')]);
@@ -7042,6 +7050,37 @@ describe('legacy: mission 12 corrupted-card redirect (into the reserve deck redi
   });
 });
 
+describe('legacy: the restored-card protection belongs to the PURIFIED RELIC (John, 2026-09-05)', () => {
+  // Driven through a corrupted card's own cost, which banishes the reserve deck's top card — the shortest real
+  // path to "something tries to banish a restored card".
+  function playCorruptedOver(restoredTop: SuitedCard, relics: string[]): GameState {
+    const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 200, attack: 10 };
+    let state = startMission(1, [boss]);
+    state.restoredCardMechanic = true;
+    state.relics = relics;
+    state.tavernDeck = [restoredTop, ...state.tavernDeck];
+    state = rig(state, [corruptedCard('H', '4')]);
+    return ensureOk(
+      applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }),
+    ).state;
+  }
+
+  it('WITH the purified relic: the restored card goes under the reserve deck instead of being banished', () => {
+    const top = restoredCard('D', '3');
+    const state = playCorruptedOver(top, ['EVERGREEN_MOTHER']);
+
+    expect(state.banishPile.some((c) => c.id === top.id)).toBe(false);
+    expect(state.tavernDeck[state.tavernDeck.length - 1]?.id).toBe(top.id);
+  });
+
+  it('WITHOUT it: the same card banishes like anything else — the mission mechanic alone does not protect it', () => {
+    const top = restoredCard('D', '3');
+    const state = playCorruptedOver(top, []);
+
+    expect(state.banishPile.some((c) => c.id === top.id)).toBe(true);
+  });
+});
+
 describe('legacy: mission 12 restored-card redirect (can never land in the banish pile)', () => {
   function reaverRecruitCard(): SuitedCard {
     const spec = getMission(5)!.reward.recruits.find((r) => r.class === 'REAVER')!;
@@ -7052,6 +7091,7 @@ describe('legacy: mission 12 restored-card redirect (can never land in the banis
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'S', health: 200, attack: 10 };
     let state = startMission(1, [boss]);
     state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER']; // the protection is the relic's, not the mission's
     const toReveal = restoredCard('D', '4');
     state.tavernDeck = [toReveal, ...state.tavernDeck];
     state = rig(state, [reaverRecruitCard()]);
@@ -7074,6 +7114,7 @@ describe('legacy: mission 12 restored-card redirect (can never land in the banis
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 200, attack: 10 };
     let state = startMission(1, [boss]);
     state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER']; // the protection is the relic's, not the mission's
     const reserveTop = restoredCard('D', '3');
     state.tavernDeck = [reserveTop, ...state.tavernDeck];
     state = rig(state, [corruptedCard('H', '4')]); // an unrelated corrupted card, its own cost is what banishes
@@ -7215,6 +7256,7 @@ describe('legacy: mission 12 defeat cleanup (banish the mission zone, then the e
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 10, attack: 0 };
     let state = startMission(1, [boss]);
     state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER']; // the protection is the relic's, not the mission's
     const zoneA = suited('H', '2');
     const zoneB = suited('C', '3');
     const discA = suited('S', '4');
@@ -7242,6 +7284,7 @@ describe('legacy: mission 12 defeat cleanup (banish the mission zone, then the e
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 5, attack: 0 };
     let state = startMission(1, [boss]);
     state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER']; // the protection is the relic's, not the mission's
     state.missionZone = [suited('H', '2')];
     state.discardPile = [suited('S', '4')];
     const killCard = suited('D', '10'); // overkill: 10 damage on 5 health
@@ -7261,6 +7304,7 @@ describe('legacy: mission 12 defeat cleanup (banish the mission zone, then the e
     const boss: LegacyEnemySpec = { name: 'The Hierarch', suit: 'D', health: 10, attack: 0 };
     let state = startMission(1, [boss]);
     state.restoredCardMechanic = true;
+    state.relics = ['EVERGREEN_MOTHER']; // the protection is the relic's, not the mission's
     const restoredInZone = restoredCard('H', '2');
     state.missionZone = [restoredInZone];
     state.discardPile = [];
@@ -7524,18 +7568,19 @@ describe('legacy: mission 9 — the two Evergreen Mother relics, only one of whi
     expect(mission9.reward.relics).toEqual(['CORRUPTED_EVERGREEN_MOTHER']);
   });
 
-  it('NO MISSION grants the healed Evergreen Mother — John has not said where the relic heals', () => {
+  it("Mission 12 grants the healed Evergreen Mother at setup — John's 2026-09-05 answer to where the relic heals", () => {
     const granting = MISSIONS.filter(
       (m) => m.startingRelics?.includes('EVERGREEN_MOTHER') || m.reward.relics?.includes('EVERGREEN_MOTHER'),
     );
-    expect(granting.map((m) => m.id)).toEqual([]);
-    // The relic is still DEFINED and still works (see the regression test further down) — it is unreachable, not
-    // deleted. When John says whether it arrives after Mission 10 or Mission 11, this expectation flips to [10]
-    // or [11] and the answer is a one-line data change on that mission's reward.
+    // Mission 12's setup, not a mission reward — the relic upgrade its own story text describes, handed over by
+    // the ally freed in the depths. The corrupted tier stays live through Missions 9-11.
+    expect(granting.map((m) => m.id)).toEqual([12]);
   });
 
-  it('is the only mission that puts a relic on the table at setup', () => {
-    expect(MISSIONS.filter((m) => m.startingRelics?.length).map((m) => m.id)).toEqual([9]);
+  it('Missions 9 and 12 are the two that put a relic on the table at setup — the corrupted tier, then the purified one', () => {
+    expect(MISSIONS.filter((m) => m.startingRelics?.length).map((m) => m.id)).toEqual([9, 12]);
+    expect(getMission(9)!.startingRelics).toEqual(['CORRUPTED_EVERGREEN_MOTHER']);
+    expect(getMission(12)!.startingRelics).toEqual(['EVERGREEN_MOTHER']);
   });
 
   it('CORRECTS PR #87: the corrupted relic is fully FUNCTIONAL from mission start — another player banishes from hand, not the reserve deck', () => {
@@ -7570,18 +7615,17 @@ describe('legacy: mission 9 — the two Evergreen Mother relics, only one of whi
     expect(cost.banished).toBe(1);
   });
 
-  it('a save written while Mission 9 still granted the healed tier holds both, each once, and pays the cost once', () => {
+  it('purification is a SWAP: holding the purified tier drops the corrupted one it was made from', () => {
     const state = startWithRelics(2, [boss], {
-      relics: ['EVERGREEN_MOTHER'], // no mission grants this any more — only an older save can carry it
+      relics: ['EVERGREEN_MOTHER'], // banked, or handed over at setup — either way it supersedes
       startingRelics: ['CORRUPTED_EVERGREEN_MOTHER'],
     });
-    expect(state.relics.filter((r) => r === 'EVERGREEN_MOTHER').length).toBe(1);
-    expect(state.relics.filter((r) => r === 'CORRUPTED_EVERGREEN_MOTHER').length).toBe(1);
+    expect(state.relics).toEqual(['EVERGREEN_MOTHER']);
 
-    // Both relics carry the same power today, so this is the guard against the cost double-firing.
+    // ...so the corrupted tier's hand-banish cost is gone with it, and a corrupted card pays the ordinary cost.
     const cost = playCorruptedCard(state);
-    expect(cost.otherHandSpent).toBe(1);
-    expect(cost.banished).toBe(1);
+    expect(cost.otherHandSpent).toBe(0);
+    expect(cost.tavernSpent).toBe(1);
   });
 
   it('a mission that hands over no relic of its own is untouched — the campaign keeps exactly what it earned', () => {
@@ -7596,11 +7640,13 @@ describe('legacy: mission 9 — the two Evergreen Mother relics, only one of whi
     expect(cost.otherHandSpent).toBe(1);
   });
 
-  it('the healed relic alone still redirects the cost too — unreachable from mission data, kept working for older saves', () => {
+  it("the PURIFIED relic does NOT redirect the cost — that power belongs to the corrupted tier (John, 2026-09-05)", () => {
     const state = startWithRelics(2, [boss], { relics: ['EVERGREEN_MOTHER'] });
     const cost = playCorruptedCard(state);
-    expect(cost.tavernSpent).toBe(0);
-    expect(cost.otherHandSpent).toBe(1);
+    // Purifying trades the hand-banish cost for the restored-card protection (see the banishCards suite), so a
+    // corrupted card falls back to the ordinary reserve-deck-top cost.
+    expect(cost.tavernSpent).toBe(1);
+    expect(cost.otherHandSpent).toBe(0);
   });
 
   it('REGRESSION: with neither relic, a corrupted card still costs the reserve deck its top card', () => {
