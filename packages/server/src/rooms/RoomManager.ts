@@ -8,6 +8,7 @@ import {
   applyMageStickerRankChoice,
   applyReaverStickerChoice,
   applyReward,
+  applyRestoredSleeves,
   buildInitialParty,
   buildMercenaryLoadout,
   buildRecruitCard,
@@ -592,6 +593,12 @@ export class RoomManager {
     // sidelineIdentity for Esme (see missions.ts's MissionDef.sidelineHighArcana).
     if (mission.sidelineHighArcana) {
       missionParty = missionParty.filter((c) => !(c.kind === 'suited' && c.suit === 'D' && c.rank === '25'));
+    }
+
+    // Mission 12: every corrupted party card arrives in a restored sleeve (see MissionDef.restoreCorruptedParty).
+    // Applied to THIS mission's party only — the persisted campaign roster is never rewritten.
+    if (mission.restoreCorruptedParty) {
+      missionParty = applyRestoredSleeves(missionParty);
     }
 
     // Beast Companion pool (Mission 4's reward, sourced — see tutorial_vids/summaries/mission-4.md): Mission 11's
