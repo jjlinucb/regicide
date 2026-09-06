@@ -3116,14 +3116,15 @@ function defend(state: GameState, action: Extract<GameAction, { type: 'DEFEND' }
   }
   const discardTotal = cards.reduce((sum, c) => sum + cardValue(c), 0);
   const isEntireHand = cards.length === player.hand.length;
-  // Legacy "Feign Death": discarding a full hand always succeeds, but only if you didn't play a card this turn
-  // (so your hand wasn't reduced below your limit) — i.e. you yielded straight into this defend.
-  const feignDeath =
-    state.ruleset === 'legacy' &&
-    isEntireHand &&
-    cards.length > 0 &&
-    player.hand.length === state.maxHandSize &&
-    state.lastActionWasYield[state.currentPlayerIndex];
+  // Legacy "Feign Death" (John, 2026-09-06): discarding your WHOLE HAND always survives, even when it doesn't
+  // cover the damage — "I can discard my whole hand even if it doesn't cover the damage." No other condition.
+  //
+  // The previous version also required a full hand AND that you had yielded straight into this defend, so
+  // playing a card first spent the option and discarding everything simply lost. He dropped that gate outright:
+  // the move is available on any defend, whatever you did that turn and however many cards you are holding. What
+  // it costs is your entire hand, which is the balance — you come out the other side with nothing, and a standing
+  // Jester (which needs no cards in hand) is the usual way back in on the following turn.
+  const feignDeath = state.ruleset === 'legacy' && isEntireHand && cards.length > 0;
 
   if (discardTotal < state.pendingDamage && !isEntireHand) {
     return fail(`That only covers ${discardTotal} of ${state.pendingDamage} damage — select more cards or your whole hand.`);
