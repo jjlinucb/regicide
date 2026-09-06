@@ -29,14 +29,38 @@ function tieredRankLabel(card: Extract<Card, { kind: 'suited' }>): string {
   return card.flexibleComboRank ? `${card.flexibleComboRank}/${base}` : card.tier ? `${base}+${card.tier}` : base;
 }
 
+/**
+ * Every class a Legacy card actually carries, base first — what the card face needs to show.
+ *
+ * John, live play 2026-09-06: "for cards with multiple abilities, like Druid or [Guardian] that gets added on,
+ * it's hard to know their abilities... I think they can just be side by side because they're equivalent."
+ *
+ * Two things were missing before. The five STICKER classes (SuitedCard.secondClassArcane/Reaver/Guardian/Druid/
+ * Chanter) drew no glyph at all — a card granted Regrowth by Mission 7's reward looked identical to one without
+ * it. And the suit-based bonus icons that did draw were shrunk into a corner stack, which read as "main class
+ * plus footnotes" when a stickered card's two classes both resolve in full whenever it is played. They are
+ * equivalent, so they are now laid out side by side at one size.
+ */
+export function cardClasses(card: Extract<Card, { kind: 'suited' }>) {
+  const themes = [classForCard(card)];
+  const push = (theme: (typeof CLASS_THEME)[keyof typeof CLASS_THEME]) => {
+    if (!themes.some((t) => t.id === theme.id)) themes.push(theme);
+  };
+  if (card.secondSuit) push(SUIT_TO_CLASS[card.secondSuit]);
+  for (const s of card.extraSuits ?? []) push(SUIT_TO_CLASS[s]);
+  if (card.secondClassArcane) push(CLASS_THEME.MAGE);
+  if (card.secondClassReaver) push(CLASS_THEME.REAVER);
+  if (card.secondClassGuardian) push(CLASS_THEME.GUARDIAN);
+  if (card.secondClassDruid) push(CLASS_THEME.DRUID);
+  if (card.secondClassChanter) push(CLASS_THEME.CHANTER);
+  return themes;
+}
+
 export function cardLabel(card: Card): string {
   if (card.kind === 'jester') return 'Jester';
   const rankLabel = tieredRankLabel(card);
   if (isLegacyCard(card)) {
-    const extraGlyphs = [...(card.secondSuit ? [card.secondSuit] : []), ...(card.extraSuits ?? [])]
-      .map((s) => SUIT_TO_CLASS[s].glyph)
-      .join('');
-    return `${rankLabel} ${classForCard(card).glyph}${extraGlyphs}`;
+    return `${rankLabel} ${cardClasses(card).map((t) => t.glyph).join('')}`;
   }
   return `${rankLabel}${SUIT_GLYPH[card.suit]}`;
 }
@@ -54,6 +78,16 @@ export function cardAbilityText(card: Card): string {
     const extraSuffix = card.extraSuits?.length
       ? ` Also ${card.extraSuits.map((s) => SUIT_TO_CLASS[s].name).join(' and ')}.`
       : '';
+    // The five sticker classes (Mission 5-9's rewards). These used to be invisible here AND on the card face —
+    // a card granted the Druid's Regrowth read exactly like one without it. Each names what it adds, since the
+    // whole point of a sticker is that the card keeps its own class power and gains this one on top.
+    // A sticker class is exactly a bonus class with no suit of its own — the four base classes all have one.
+    const stickerClasses = cardClasses(card)
+      .slice(1)
+      .filter((t) => t.suit === undefined);
+    const stickerSuffix = stickerClasses.length
+      ? ` ${stickerClasses.map((t) => `Also a ${t.name} (sticker) — ${t.tag}.`).join(' ')}`
+      : '';
     const flexSuffix = card.flexibleComboRank ? ` Combos as a ${card.flexibleComboRank} too.` : '';
     const wildSuffix = card.wildSuit ? ' Choose a suit for it when you play it.' : '';
     const corruptedSuffix = card.corrupted ? ' Cursed: ignores enemy immunity, but burns the top card of the reserve deck when played.' : '';
@@ -61,7 +95,7 @@ export function cardAbilityText(card: Card): string {
       ? " Reveals cards off the reserve deck equal to this attack's total value (including anything combo'd with it), then choose one to add its strength to the attack — every revealed card is banished. Always doubles the play's total damage."
       : '';
     const displayName = card.name ?? (card.wildSuit ? 'Any-Suit Ace' : 'Mercenary');
-    return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${extraSuffix}${flexSuffix}${wildSuffix}${corruptedSuffix}${reaverSuffix}`;
+    return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${extraSuffix}${stickerSuffix}${flexSuffix}${wildSuffix}${corruptedSuffix}${reaverSuffix}`;
   }
   const tierSuffix = card.tier ? ` (upgraded ${card.tier} tier${card.tier > 1 ? 's' : ''} past King, from an Endless Mode win)` : '';
   return `${rankLabel} of ${SUIT_NAME[card.suit]} — value ${cardValue(card)}${tierSuffix}. ${SUIT_ABILITY_TEXT[card.suit]}`;
@@ -108,6 +142,7 @@ export function PlayingCard({
   const red = !legacy && RED_SUITS.has(card.suit);
   const rankLabel = rankLabelOverride ?? tieredRankLabel(card);
   const classInfo = legacy ? classForCard(card) : null;
+  const classThemes = legacy ? cardClasses(card) : [];
   // An unresolved Mercenary any-suit Ace (see SuitedCard.wildSuit) still carries its inert placeholder suit ('H')
   // in-hand — classForCard would otherwise render it as a plain Cleric card, misleadingly hiding that it needs a
   // suit chosen before it can be played (see GamePage's chosenSuits picker).
@@ -130,19 +165,19 @@ export function PlayingCard({
       {card.special && !small && <span className="special-badge" aria-hidden="true">✦</span>}
       {card.corrupted && !small && <span className="corrupted-badge" aria-hidden="true">🥀</span>}
       <span className="rank">{rankLabel}</span>
-      <span className="glyph">{glyph}</span>
-      {/* Every class icon beyond the printed suit — `secondSuit` from a Dual-class Sticker, plus any
-          `extraSuits` a card has accumulated mission by mission (Gøran, see SuitedCard.extraSuits). Wrapped in a
-          stack rather than positioned individually: the glyphs used to be absolutely placed at one fixed
-          top/right, so a card carrying more than one extra icon drew them all on the same spot. */}
-      {legacy && !small && (card.secondSuit || card.extraSuits?.length) && (
-        <span className="second-class-stack">
-          {[...(card.secondSuit ? [card.secondSuit] : []), ...(card.extraSuits ?? [])].map((s) => (
-            <span key={s} className="glyph second-class-glyph" style={{ color: SUIT_TO_CLASS[s].color }}>
-              {SUIT_TO_CLASS[s].glyph}
+      {/* Every class the card carries, side by side at one size (John, 2026-09-06) — they resolve together when
+          the card is played, so none of them is a footnote to the others. A single-class card is the common
+          case and looks exactly as it always did; only a multi-class card spreads. See cardClasses. */}
+      {classThemes.length > 1 && !small && !isWildUnresolved ? (
+        <span className={`glyph class-glyph-row count-${Math.min(classThemes.length, 4)}`}>
+          {classThemes.map((t) => (
+            <span key={t.id} className="class-glyph" style={{ color: t.color }}>
+              {t.glyph}
             </span>
           ))}
         </span>
+      ) : (
+        <span className="glyph">{glyph}</span>
       )}
       {legacy && !small && (
         <span className="legacy-card-name">

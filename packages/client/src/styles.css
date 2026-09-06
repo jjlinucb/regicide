@@ -989,6 +989,23 @@ button {
   color: var(--heart);
 }
 
+/* Every class a card carries, side by side on the card face at one size (John, live play 2026-09-06: "I think
+   they can just be side by side because they're equivalent"). A stickered card's two class powers BOTH resolve
+   when it is played, so drawing one large and the rest as corner footnotes misread the rules. Scales down as
+   the count grows so even Gøran's four still fit the face. */
+.playing-card .class-glyph-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  line-height: 1;
+}
+
+.playing-card .class-glyph-row.count-2 .class-glyph { font-size: 1.3rem; }
+.playing-card .class-glyph-row.count-3 .class-glyph { font-size: 1.05rem; }
+.playing-card .class-glyph-row.count-4 { flex-wrap: wrap; max-width: 100%; gap: 1px 2px; }
+.playing-card .class-glyph-row.count-4 .class-glyph { font-size: 0.95rem; }
+
 /* Bonus class icons stack down the card's right edge. A card can carry more than one (see
    SuitedCard.extraSuits — Gøran ends the campaign with three suits), so they're laid out in a flow container
    instead of each being pinned to the same absolute top/right, which drew them on top of each other. */
