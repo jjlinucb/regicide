@@ -398,11 +398,19 @@ export const MISSIONS: Mission[] = [
     // Reward also includes (sourced from the same solo playthrough above): the sourced-elsewhere
     // corruptAnotherCard step (permanently corrupts one random EXISTING party member — never this same reward's
     // own new recruit, see party.ts's applyCorruptAnotherCard), and a new one-off recruit, "High Arcana" — a flat
-    // 25 value with no class ability shown at the point it's granted, so it's modeled as an ordinary base-class
-    // recruit rather than folded into the (unbuilt in this codebase) Mage mechanic Mission 3 introduces later.
-    // UNSOURCED JUDGMENT CALL: no footage shows this card's suit — picked Bard (Diamonds) arbitrarily.
+    // 25 value with no class ability shown at the point it's granted.
+    //
+    // JOHN, 2026-09-06: "there is no suit right now, he doesn't have one." That settles what this file had long
+    // flagged as an arbitrary guess (Bard/Diamonds was picked because SOME class had to be named). He carries
+    // RecruitSpec.noSuitPower now — the same inert shape Mission 4's Gøran joined with — so no class power ever
+    // resolves for him and he lends no immunity anywhere. The 'BARD' below survives only as the storage suit the
+    // card shape requires; it is a filing label, not a class. That suit is also how sidelineHighArcana finds him
+    // (D + rank 25), which is why it is kept rather than swapped for something arbitrary of its own.
+    //
+    // He is never playable in any case — he sits out every mission from 2 on, and is Mission 12's final boss (The
+    // Hierarch), who is likewise noClass.
     reward: {
-      recruits: [{ name: 'High Arcana', class: 'BARD', rank: '25' }],
+      recruits: [{ name: 'High Arcana', class: 'BARD', rank: '25', noSuitPower: true }],
       relics: ['KINFOLK_FLUTE'],
       corruptAnotherCard: true,
     },
