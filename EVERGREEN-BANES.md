@@ -1,7 +1,8 @@
 # Evergreen Mode — Banes (1–23)
 
 Transcribed from photographs of the physical cards (John, 2026-09-06). **Reference only — none of this
-is implemented.** See [EVERGREEN-BOONS.md](EVERGREEN-BOONS.md) for the other half.
+is implemented.** See [EVERGREEN-BOONS.md](EVERGREEN-BOONS.md) and
+[EVERGREEN-LOCATIONS.md](EVERGREEN-LOCATIONS.md).
 
 Banes are numbered **1–23** (23 cards). A published scenario code is one Location plus four banes plus
 two boons, e.g. `C-4-8-15-19-25-32`.

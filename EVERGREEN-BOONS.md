@@ -1,8 +1,8 @@
 # Evergreen Mode — Boons (24–35)
 
 Transcribed from photographs of the physical cards (John, 2026-09-06). **Reference only — none of this
-is implemented.** See [EVERGREEN-BANES.md](EVERGREEN-BANES.md) for the other half, and the Evergreen
-Mode research note for the structure a scenario is built from.
+is implemented.** See [EVERGREEN-BANES.md](EVERGREEN-BANES.md) and
+[EVERGREEN-LOCATIONS.md](EVERGREEN-LOCATIONS.md).
 
 Boons are numbered **24–35** (12 cards). A published scenario code is one Location plus four banes
 plus two boons, e.g. `C-4-8-15-19-25-32`.
