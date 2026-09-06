@@ -2281,9 +2281,41 @@ function enemyBlocksClass(state: GameState, cls: SuitlessImmuneClass): boolean {
   return pileTopImmuneClasses(state.discardPile, state.banishPile).includes(cls);
 }
 
+/**
+ * Step 1 of the Player Helper's turn order ("FORM AN ATTACK"): the costs a Corruption or Restoration card pays
+ * the instant it is played, before a single spell is cast.
+ *
+ * ORDER MATTERS (John's Player Helper photo, 2026-09-06). Both of these touch the reserve deck that step 2's
+ * Mage reveal then looks at: Corruption banishes its top card, Restoration heals a card back under it. These
+ * used to run after the Mage and Reaver reveals, which put a step-1 cost after two step-2/3 abilities and let a
+ * Mage look at a reserve deck a corrupted card in the same play had not yet burned.
+ *
+ * A corrupted MAGE is not handled here: its cost fires during its own reveal instead (see revealForMage), since
+ * the reveal is the thing the cost is paying for. `resolvesOwnSuitPower` already excludes arcane cards, so the
+ * two paths cannot double-charge one card.
+ */
+function applyStepOneCosts(state: GameState, player: PlayerState, cards: Card[]): void {
+  if (state.ruleset !== 'legacy') return;
+  // The same predicate continueResolveCommittedPlay uses for `nonArcaneCards`, so exactly the cards that were
+  // charged before still are — no corrupted Druid or Guardian starts paying a cost it never paid.
+  const played = cards.filter(
+    (c): c is Extract<Card, { kind: 'suited' }> =>
+      c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.chanter && !c.evergreen && !c.noSuitPower,
+  );
+  for (const c of played.filter((x) => x.corrupted)) {
+    applyCorruptedCost(state, player, c.name ?? 'A corrupted card');
+  }
+  for (const c of played.filter((x) => x.restored)) {
+    applyRestoredHeal(state, c.name ?? 'A restored card');
+  }
+}
+
 function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null, forcedPlay = false): EngineResult {
   const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
+
+  // STEP 1 — see applyStepOneCosts. Runs before the Mage reveal below, which is step 2.
+  applyStepOneCosts(state, player, cards);
 
   // Mage (Mission 3+, sourced from a full solo playthrough — see tutorial_vids/summaries/mission-3.md): each Mage
   // card (or secondClassArcane bonus-sticker card) in the play triggers its own independent reveal off the top of
@@ -2358,20 +2390,17 @@ function continueResolveCommittedPlay(
   // reserve deck the instant they're played (see SuitedCard.corrupted) — unless the Evergreen Mother relic is
   // in play, in which case the cost becomes another player banishing a card from their own hand instead (see
   // applyCorruptedCost).
+  // Their COST is paid back in step 1, before any spell is cast (see applyStepOneCosts) — the Player Helper
+  // puts Corruption and Restoration in "STEP 1: FORM AN ATTACK", above "STEP 2: CAST SPELLS". Only the suits
+  // they contribute to the immunity checks below are derived here.
   const corruptedCards = nonArcaneCards.filter((c) => c.corrupted);
   const corruptedSuits = Array.from(new Set(corruptedCards.flatMap(cardSuits)));
-  for (const c of corruptedCards) {
-    applyCorruptedCost(state, player, c.name ?? 'A corrupted card');
-  }
 
   // Restored cards (Mission 12, "Decay to Growth"): the campaign-finale upgrade of a corrupted card — same
   // immunity-ignoring class power, but instead of banishing the reserve deck's top card as the cost, it heals the
   // banish pile's top card back into the game, returned to the bottom of the reserve deck (see applyRestoredHeal).
   const restoredCards = nonArcaneCards.filter((c) => c.restored);
   const restoredSuits = Array.from(new Set(restoredCards.flatMap(cardSuits)));
-  for (const c of restoredCards) {
-    applyRestoredHeal(state, c.name ?? 'A restored card');
-  }
 
   // Reavers (Mission 5), John's ruling ("Reveal and Add"): playing one already revealed cards off the reserve
   // deck and folded the player's chosen card's raw strength into `reaverBonus` (see startReaverPhase/
