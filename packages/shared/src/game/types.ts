@@ -359,6 +359,10 @@ export type GamePhase = 'LOBBY' | 'IN_PROGRESS' | 'WON' | 'LOST';
  * AWAIT_CHANT_COUNT is Mission 8 only (see GameState.chanterCountChoice), John's house rule (2026-09-04) —
  * opened by a Chanter card in a play, BEFORE any cards are drawn, resolved via CHOOSE_CHANT_COUNT into
  * beginChant/AWAIT_CHANT_TRIM.
+ * AWAIT_EVERGREEN_HAND_CHOICE is Mission 9+ only, gated by the 'CORRUPTED_EVERGREEN_MOTHER' relic (see
+ * GameState.evergreenHandChoice) — opened by applyCorruptedCost's hand-banish cost, resolved via
+ * CHOOSE_EVERGREEN_HAND_CARD. John's ruling (2026-09-07): the player paying the cost chooses which of their own
+ * cards to banish, rather than the engine picking one at random.
  */
 export type TurnPhase =
   | 'AWAIT_PLAY'
@@ -378,7 +382,8 @@ export type TurnPhase =
   | 'AWAIT_MAGE_REVEAL'
   | 'AWAIT_REAVER_REVEAL_COUNT'
   | 'AWAIT_REAVER_REVEAL'
-  | 'AWAIT_SCARLET_WHISTLE_SOLO';
+  | 'AWAIT_SCARLET_WHISTLE_SOLO'
+  | 'AWAIT_EVERGREEN_HAND_CHOICE';
 
 /**
  * Legacy-only: what engine.ts does once the last pending player finishes with a per-player window that deferred
@@ -395,6 +400,41 @@ export type TurnPhase =
 export type ChanterResolution =
   | { kind: 'deferredAttack'; blockNextAttack: boolean }
   | { kind: 'resumeResolved'; turnPhase: TurnPhase; pendingDamage: number };
+
+/**
+ * What engine.ts's applyCorruptedCost resumes once its AWAIT_EVERGREEN_HAND_CHOICE window resolves (see
+ * GameState.evergreenHandChoice) — everything the two call sites it can pause need to pick back up exactly where
+ * they left off:
+ * - `mageReveal` — paused inside revealForMage, before a corrupted Mage's own reveal is drawn. Carries every
+ *   parameter that reveal needs to continue with.
+ * - `stepOneCosts` — paused inside applyStepOneCosts (resolveCommittedPlay's step 1), before its own remaining
+ *   corrupted-cost and restored-heal cards are processed and step 2 (the Mage reveal) begins. `remainingCorrupted`
+ *   and `restored` are whatever of the play's own cards applyStepOneCosts had not yet processed.
+ */
+export type EvergreenCostResume =
+  | {
+      kind: 'mageReveal';
+      playerId: string;
+      cards: Card[];
+      claimedJester: Card | null;
+      forcedPlay: boolean;
+      totalValue: number;
+      queue: Card[];
+      arcaneBonus: number;
+      arcaneCards: SuitedCard[];
+      arcaneImmuneSuits: Suit[];
+      count: number;
+      trigger: Card;
+    }
+  | {
+      kind: 'stepOneCosts';
+      playerId: string;
+      cards: Card[];
+      claimedJester: Card | null;
+      forcedPlay: boolean;
+      remainingCorrupted: Extract<Card, { kind: 'suited' }>[];
+      restored: Extract<Card, { kind: 'suited' }>[];
+    };
 
 /**
  * Legacy-only (Mission 9): one of the 3 captured piles seeding GameState.capturedPiles. `faceDown[0]` is the
@@ -543,6 +583,16 @@ export interface GameState {
     arcaneImmuneSuits: Suit[];
     trigger: Card;
   } | null;
+  /**
+   * Legacy-only (Mission 9+), gated by the 'CORRUPTED_EVERGREEN_MOTHER' relic: the open window for a corrupted
+   * card's hand-banish cost (see engine.ts's applyCorruptedCost). `victimId` is the player who must banish one of
+   * their OWN cards, resolved via CHOOSE_EVERGREEN_HAND_CARD — John's ruling (2026-09-07), correcting a random
+   * pick: the player paying the cost decides which card the Evergreen Mother takes. Which PLAYER pays is still
+   * random in multiplayer (and is always the acting player solo), since nothing sourced says who picks the victim.
+   * No candidate list is carried here — the eligible cards are simply the victim's own hand, which redact.ts
+   * already shows to exactly that one player. `label` is the corrupted card's name, for the resolution log line.
+   */
+  evergreenHandChoice: { victimId: string; label: string; resume: EvergreenCostResume } | null;
   /**
    * Legacy-only (Mission 5+), John's ruling: the open window for choosing HOW MANY cards a Reaver's reveal pulls,
    * opened by a Reaver card in a play BEFORE any card is actually revealed. `playerId` picks any count from 1 up
@@ -1143,6 +1193,13 @@ export type GameAction =
    */
   | { type: 'CHOOSE_MAGE_REVEAL_CARD'; playerId: string; cardId: string }
   /**
+   * Legacy-only (Mission 9+), gated by the 'CORRUPTED_EVERGREEN_MOTHER' relic, John's ruling (2026-09-07), from
+   * AWAIT_EVERGREEN_HAND_CHOICE: the player paying a corrupted card's cost (see GameState.evergreenHandChoice)
+   * picks `cardId` from their own hand for the Evergreen Mother to banish. Only that player may resolve it, even
+   * when it is not their turn — in multiplayer the cost falls on someone other than the acting player.
+   */
+  | { type: 'CHOOSE_EVERGREEN_HAND_CARD'; playerId: string; cardId: string }
+  /**
    * Legacy-only (Mission 5+), John's ruling, from AWAIT_REAVER_REVEAL_COUNT: the player whose Reaver card opened
    * the window (see GameState.reaverRevealCountChoice) picks `count`, from 1 up to the window's own `maxCount`,
    * for how many cards the reveal should actually pull off the reserve deck — resolved by
@@ -1277,6 +1334,12 @@ export interface ClientGameState {
     arcaneImmuneSuits: Suit[];
     trigger: Card;
   } | null;
+  /**
+   * See GameState.evergreenHandChoice. Trimmed to who owes the cost and what charged it — the window's `resume`
+   * payload is server-side bookkeeping, and carrying it here would hand every client the acting player's hand.
+   * The victim picks from their own hand, which they can already see (see redact.ts).
+   */
+  evergreenHandChoice: { victimId: string; label: string } | null;
   /** See GameState.reaverRevealCountChoice. Public information, same as every other pending-choice window. */
   reaverRevealCountChoice: {
     playerId: string;
