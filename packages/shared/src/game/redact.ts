@@ -47,6 +47,9 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     kinfolkBankedThisTurn: state.kinfolkBankedThisTurn,
     azureEmblemWindow: state.azureEmblemWindow,
     mageReveal: state.mageReveal,
+    evergreenHandChoice: state.evergreenHandChoice
+      ? { victimId: state.evergreenHandChoice.victimId, label: state.evergreenHandChoice.label }
+      : null,
     reaverRevealCountChoice: state.reaverRevealCountChoice,
     reaverReveal: state.reaverReveal,
     discardTopBuffsAttack: state.discardTopBuffsAttack,

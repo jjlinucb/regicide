@@ -1,4 +1,4 @@
-import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, GameAction, GameState, PlayerState, Rank, SpecialAbilityId, Suit, SuitedCard, SuitlessImmuneClass, TurnPhase } from './types.js';
+import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, EvergreenCostResume, GameAction, GameState, PlayerState, Rank, SpecialAbilityId, Suit, SuitedCard, SuitlessImmuneClass, TurnPhase } from './types.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,
@@ -768,7 +768,7 @@ function pushToDiscardPile(state: GameState, cards: Card[]): void {
  * one, because he has not yet said what healing it changes. That equality is a stand-in, NOT a decided rule —
  * do not read it as "the two tiers are the same relic." When he specs the healed version, split this branch.
  */
-function applyCorruptedCost(state: GameState, player: PlayerState, label: string): void {
+function applyCorruptedCost(state: GameState, player: PlayerState, label: string, resume: EvergreenCostResume): 'paid' | 'awaiting-choice' {
   // JOHN, 2026-09-05: the hand-banish cost belongs to the CORRUPTED tier. Purifying the relic trades it for the
   // restored-card protection (see banishCards) rather than stacking on top of it — he described the protection as
   // "the new Evergreen Mother relic rule", so the purified tier is read as replacing the old power, not keeping
@@ -778,20 +778,24 @@ function applyCorruptedCost(state: GameState, player: PlayerState, label: string
     const eligible = candidates.filter((p) => p.hand.length > 0);
     if (eligible.length === 0) {
       log(state, `${label} ignores immunity — no hand for the Evergreen Mother to banish from.`);
-      return;
+      return 'paid';
     }
+    // WHICH PLAYER pays is still random (solo always lands on the acting player, since they're the only
+    // candidate); WHICH CARD is not. John's ruling, 2026-09-07: "I choose the card to banish, not randomly." The
+    // engine used to pick the hand index with the same seeded RNG as the victim, so a corrupted card could eat a
+    // player's best card with no say in it. The window below hands that pick to the victim themselves.
     const victim = eligible[Math.floor(nextRandom(state) * eligible.length)];
-    const idx = Math.floor(nextRandom(state) * victim.hand.length);
-    const [lost] = victim.hand.splice(idx, 1);
-    banishCards(state, [lost]);
-    log(state, `${label} ignores immunity — the Evergreen Mother banishes a card from ${victim.name}'s hand as the cost.`);
-    return;
+    state.evergreenHandChoice = { victimId: victim.id, label, resume };
+    state.turnPhase = 'AWAIT_EVERGREEN_HAND_CHOICE';
+    log(state, `${label} ignores immunity — ${victim.name} must choose a card from hand for the Evergreen Mother to banish as the cost.`);
+    return 'awaiting-choice';
   }
   const banished = state.tavernDeck.shift();
   if (banished) {
     banishCards(state, [banished]);
     log(state, `${label} ignores immunity — the reserve deck's top card is banished as the cost.`);
   }
+  return 'paid';
 }
 
 /**
@@ -1012,8 +1016,42 @@ function revealForMage(
   // whatever card it chooses (see resolveMageRevealChoice's arcaneImmuneSuits).
   if (trigger.kind === 'suited' && trigger.corrupted) {
     const triggerPlayer = state.players.find((p) => p.id === playerId)!;
-    applyCorruptedCost(state, triggerPlayer, trigger.name ?? 'A corrupted Mage');
+    const paid = applyCorruptedCost(state, triggerPlayer, trigger.name ?? 'A corrupted Mage', {
+      kind: 'mageReveal',
+      playerId,
+      cards,
+      claimedJester,
+      forcedPlay,
+      totalValue,
+      queue,
+      arcaneBonus,
+      arcaneCards,
+      arcaneImmuneSuits,
+      count,
+      trigger,
+    });
+    // The cost's hand-banish is now a player choice, so nothing below can run yet — chooseEvergreenHandCard
+    // re-enters continueMageReveal with these same arguments once the victim has picked (see EvergreenCostResume).
+    if (paid === 'awaiting-choice') return ok(state);
   }
+  return continueMageReveal(state, playerId, cards, claimedJester, forcedPlay, totalValue, queue, arcaneBonus, arcaneCards, arcaneImmuneSuits, count, trigger);
+}
+
+/** revealForMage's own body, past a corrupted Mage's cost — split out so that cost's AWAIT_EVERGREEN_HAND_CHOICE window can pause here and resume into exactly this. */
+function continueMageReveal(
+  state: GameState,
+  playerId: string,
+  cards: Card[],
+  claimedJester: Card | null,
+  forcedPlay: boolean,
+  totalValue: number,
+  queue: Card[],
+  arcaneBonus: number,
+  arcaneCards: SuitedCard[],
+  arcaneImmuneSuits: Suit[],
+  count: number,
+  trigger: Card,
+): EngineResult {
   const revealed: Card[] = [];
   for (let i = 0; i < count; i++) {
     const card = state.tavernDeck.shift();
@@ -2294,29 +2332,77 @@ function enemyBlocksClass(state: GameState, cls: SuitlessImmuneClass): boolean {
  * the reveal is the thing the cost is paying for. `resolvesOwnSuitPower` already excludes arcane cards, so the
  * two paths cannot double-charge one card.
  */
-function applyStepOneCosts(state: GameState, player: PlayerState, cards: Card[]): void {
-  if (state.ruleset !== 'legacy') return;
+function applyStepOneCosts(
+  state: GameState,
+  player: PlayerState,
+  cards: Card[],
+  claimedJester: Card | null,
+  forcedPlay: boolean,
+): 'paid' | 'awaiting-choice' {
+  if (state.ruleset !== 'legacy') return 'paid';
   // The same predicate continueResolveCommittedPlay uses for `nonArcaneCards`, so exactly the cards that were
   // charged before still are — no corrupted Druid or Guardian starts paying a cost it never paid.
   const played = cards.filter(
     (c): c is Extract<Card, { kind: 'suited' }> =>
       c.kind === 'suited' && !c.arcane && !c.reaver && !c.guardian && !c.druid && !c.chanter && !c.evergreen && !c.noSuitPower,
   );
-  for (const c of played.filter((x) => x.corrupted)) {
-    applyCorruptedCost(state, player, c.name ?? 'A corrupted card');
+  return payStepOneCosts(state, player, cards, claimedJester, forcedPlay, played.filter((x) => x.corrupted), played.filter((x) => x.restored));
+}
+
+/**
+ * Pays out a list of step-one costs, one corrupted card at a time. Split from applyStepOneCosts so a corrupted
+ * card whose Evergreen Mother cost needs a player's pick can pause here and resume with whatever costs (and
+ * restored-card heals, which still come second) had not been paid yet — see EvergreenCostResume's `stepOneCosts`.
+ */
+function payStepOneCosts(
+  state: GameState,
+  player: PlayerState,
+  cards: Card[],
+  claimedJester: Card | null,
+  forcedPlay: boolean,
+  corrupted: Extract<Card, { kind: 'suited' }>[],
+  restored: Extract<Card, { kind: 'suited' }>[],
+): 'paid' | 'awaiting-choice' {
+  for (let i = 0; i < corrupted.length; i++) {
+    const c = corrupted[i];
+    const paid = applyCorruptedCost(state, player, c.name ?? 'A corrupted card', {
+      kind: 'stepOneCosts',
+      playerId: player.id,
+      cards,
+      claimedJester,
+      forcedPlay,
+      remainingCorrupted: corrupted.slice(i + 1),
+      restored,
+    });
+    if (paid === 'awaiting-choice') return 'awaiting-choice';
   }
-  for (const c of played.filter((x) => x.restored)) {
+  for (const c of restored) {
     applyRestoredHeal(state, c.name ?? 'A restored card');
   }
+  return 'paid';
 }
 
 function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card[], claimedJester: Card | null, forcedPlay = false): EngineResult {
   const shape = validatePlayShape(cards, state.endlessLoop);
   if ('error' in shape) return fail(shape.error);
 
-  // STEP 1 — see applyStepOneCosts. Runs before the Mage reveal below, which is step 2.
-  applyStepOneCosts(state, player, cards);
+  // STEP 1 — see applyStepOneCosts. Runs before the Mage reveal below, which is step 2. A corrupted card's
+  // Evergreen Mother cost can open a player choice here (AWAIT_EVERGREEN_HAND_CHOICE), in which case step 2 waits:
+  // chooseEvergreenHandCard finishes the remaining costs and calls continueCommittedPlayAfterStepOne itself.
+  if (applyStepOneCosts(state, player, cards, claimedJester, forcedPlay) === 'awaiting-choice') return ok(state);
 
+  return continueCommittedPlayAfterStepOne(state, player, cards, claimedJester, forcedPlay, shape.totalValue);
+}
+
+/** resolveCommittedPlay from step 2 (the Mage reveal) onward — split out so step 1's Evergreen Mother cost can pause for a player's pick and resume into exactly this. */
+function continueCommittedPlayAfterStepOne(
+  state: GameState,
+  player: PlayerState,
+  cards: Card[],
+  claimedJester: Card | null,
+  forcedPlay: boolean,
+  totalValue: number,
+): EngineResult {
   // Mage (Mission 3+, sourced from a full solo playthrough — see tutorial_vids/summaries/mission-3.md): each Mage
   // card (or secondClassArcane bonus-sticker card) in the play triggers its own independent reveal off the top of
   // the reserve deck, always before every other class power resolves (see continueResolveCommittedPlay) —
@@ -2334,9 +2420,9 @@ function resolveCommittedPlay(state: GameState, player: PlayerState, cards: Card
   if (mageQueue.length > 0) {
     const [trigger] = mageQueue;
     const rest = mageQueue.slice(1);
-    return revealForMage(state, player.id, cards, claimedJester, forcedPlay, shape.totalValue, rest, 0, [], [], mageRevealCount(trigger, shape.totalValue), trigger);
+    return revealForMage(state, player.id, cards, claimedJester, forcedPlay, totalValue, rest, 0, [], [], mageRevealCount(trigger, totalValue), trigger);
   }
-  return startReaverPhase(state, player, cards, claimedJester, forcedPlay, shape.totalValue, 0, [], []);
+  return startReaverPhase(state, player, cards, claimedJester, forcedPlay, totalValue, 0, [], []);
 }
 
 /**
@@ -3748,6 +3834,69 @@ function chooseZoneReliefCard(state: GameState, action: Extract<GameAction, { ty
   return ok(state);
 }
 
+/**
+ * Resolves the AWAIT_EVERGREEN_HAND_CHOICE window opened by a corrupted card's Evergreen Mother cost (see
+ * applyCorruptedCost / GameState.evergreenHandChoice), then picks the paused play back up exactly where the cost
+ * interrupted it — the rest of a Mage's reveal, or the rest of step 1's costs and then step 2 onward.
+ *
+ * Only the victim may resolve this, and NOT via requireCurrentPlayerTurn: in multiplayer the cost falls on a
+ * player other than the one whose turn it is (see applyCorruptedCost's own candidate list), so gating on the
+ * current player would wedge the game there permanently.
+ */
+function chooseEvergreenHandCard(state: GameState, action: Extract<GameAction, { type: 'CHOOSE_EVERGREEN_HAND_CARD' }>): EngineResult {
+  if (state.phase !== 'IN_PROGRESS') return fail('The game is not in progress.');
+  if (state.turnPhase !== 'AWAIT_EVERGREEN_HAND_CHOICE' || !state.evergreenHandChoice) {
+    return fail('There is no open Evergreen Mother cost to pay.');
+  }
+  const pending = state.evergreenHandChoice;
+  if (action.playerId !== pending.victimId) return fail('The Evergreen Mother is not taking a card from your hand.');
+  const victim = state.players.find((p) => p.id === pending.victimId);
+  if (!victim) return fail('Unknown player.');
+  const idx = victim.hand.findIndex((c) => c.id === action.cardId);
+  if (idx === -1) return fail('Card is not in your hand.');
+
+  const [lost] = victim.hand.splice(idx, 1);
+  banishCards(state, [lost]);
+  log(
+    state,
+    `${victim.name} feeds ${lost.kind === 'suited' ? lost.name ?? `the ${lost.rank}` : 'the Jester'} to the Evergreen Mother — banished as ${pending.label}'s cost.`,
+  );
+
+  const { resume } = pending;
+  state.evergreenHandChoice = null;
+  state.turnPhase = 'AWAIT_PLAY';
+
+  if (resume.kind === 'mageReveal') {
+    return continueMageReveal(
+      state,
+      resume.playerId,
+      resume.cards,
+      resume.claimedJester,
+      resume.forcedPlay,
+      resume.totalValue,
+      resume.queue,
+      resume.arcaneBonus,
+      resume.arcaneCards,
+      resume.arcaneImmuneSuits,
+      resume.count,
+      resume.trigger,
+    );
+  }
+  const player = state.players.find((p) => p.id === resume.playerId);
+  if (!player) return fail('Unknown player.');
+  // Another corrupted card in the same play can open this window all over again, which is why this goes back
+  // through payStepOneCosts rather than finishing the list inline.
+  if (
+    payStepOneCosts(state, player, resume.cards, resume.claimedJester, resume.forcedPlay, resume.remainingCorrupted, resume.restored) ===
+    'awaiting-choice'
+  ) {
+    return ok(state);
+  }
+  const shape = validatePlayShape(resume.cards, state.endlessLoop);
+  if ('error' in shape) return fail(shape.error);
+  return continueCommittedPlayAfterStepOne(state, player, resume.cards, resume.claimedJester, resume.forcedPlay, shape.totalValue);
+}
+
 export function createLobbyState(): GameState {
   return {
     phase: 'LOBBY',
@@ -3776,6 +3925,7 @@ export function createLobbyState(): GameState {
     kinfolkBankedThisTurn: false,
     azureEmblemWindow: null,
     mageReveal: null,
+    evergreenHandChoice: null,
     reaverRevealCountChoice: null,
     reaverReveal: null,
     endOfTurnZoneFlip: false,
@@ -3873,6 +4023,8 @@ export function applyAction(state: GameState, action: GameAction): EngineResult 
       return chooseZoneReliefCard(draft, action);
     case 'CHOOSE_MAGE_REVEAL_CARD':
       return resolveMageRevealChoice(draft, action);
+    case 'CHOOSE_EVERGREEN_HAND_CARD':
+      return chooseEvergreenHandCard(draft, action);
     case 'CHOOSE_REAVER_REVEAL_COUNT':
       return resolveReaverRevealCount(draft, action);
     case 'CHOOSE_REAVER_REVEAL_CARD':

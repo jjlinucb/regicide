@@ -184,6 +184,12 @@ export function GamePage({
   // card it pulls up (see engine.ts's resolveMageRevealChoice) — flagged here so the reveal prompt can call it out.
   const mageTriggerIsCursed = mageTrigger?.kind === 'suited' && Boolean(mageTrigger.corrupted);
 
+  // Mission 9+, John's ruling (2026-09-07): a corrupted card's Evergreen Mother cost — the player it falls on
+  // picks which of their own cards is banished, instead of the engine taking one at random. Not gated on isMyTurn:
+  // in multiplayer the cost lands on someone other than the player who is acting.
+  const isEvergreenHandWindow = state.turnPhase === 'AWAIT_EVERGREEN_HAND_CHOICE' && Boolean(state.evergreenHandChoice);
+  const isMyEvergreenHandWindow = isEvergreenHandWindow && state.evergreenHandChoice?.victimId === myPlayerId;
+
   // Mission 5+, John's ruling: opened by a Reaver card BEFORE anything is revealed — the player picks how many
   // cards (1 up to the play's total value) the reveal should actually pull off the reserve deck.
   const isReaverRevealCountWindow = state.turnPhase === 'AWAIT_REAVER_REVEAL_COUNT' && Boolean(state.reaverRevealCountChoice);
@@ -300,6 +306,10 @@ export function GamePage({
                   ? isMyMageRevealWindow
                     ? `${mageTriggerLabel}'s reveal${mageTriggerIsCursed ? ' (cursed — the chosen card will ignore immunity)' : ''} — choose one card to banish and add to the attack.${mageQueueRemaining > 0 ? ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)` : ''}`
                     : `${state.players.find((p) => p.id === mageRevealPlayerId)?.name} is choosing a card from ${mageTriggerLabel}'s reveal...`
+                  : isEvergreenHandWindow
+                  ? isMyEvergreenHandWindow
+                    ? `${state.evergreenHandChoice?.label} ignores immunity — choose a card from your hand for the Evergreen Mother to banish.`
+                    : `${state.players.find((p) => p.id === state.evergreenHandChoice?.victimId)?.name} is choosing a card for the Evergreen Mother to banish...`
                   : isChanterCountWindow
                   ? isMyChanterCountWindow
                     ? 'A Chanter leads the chant — choose how many cards everyone draws, independent of the card\'s own rank.'
@@ -504,6 +514,7 @@ export function GamePage({
           interactive={
             canAssistCombo ||
             isMyChantTrim ||
+            isMyEvergreenHandWindow ||
             (isMyTurn &&
               !isComboAssistWindow &&
               state.turnPhase !== 'AWAIT_JESTER_CLAIM' &&
@@ -704,6 +715,26 @@ export function GamePage({
           discardPile={state.discardPile}
           onResolve={(banishCardIds) => sendAction({ type: 'RESOLVE_ZONE_PURGE', playerId: myPlayerId, banishCardIds })}
         />
+      )}
+
+      {isMyEvergreenHandWindow && (
+        <div className="jester-picker">
+          <span>
+            {state.evergreenHandChoice?.label} ignores immunity — select one card from your hand for the Evergreen Mother to banish as the cost.
+          </span>
+          <div className="jester-picker-choices">
+            <button
+              className="btn"
+              disabled={selectedCards.length !== 1}
+              onClick={() => {
+                sendAction({ type: 'CHOOSE_EVERGREEN_HAND_CARD', playerId: myPlayerId, cardId: selectedCards[0].id });
+                setSelectedIds(new Set());
+              }}
+            >
+              Feed it to the Evergreen Mother
+            </button>
+          </div>
+        </div>
       )}
 
       {isMyTurn && isAwaitEndOfTurn && (

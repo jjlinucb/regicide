@@ -5296,7 +5296,18 @@ describe('legacy: Corrupted Evergreen Mother relic (the weaker tier — corrupte
     return res.state;
   }
 
-  it('redirects the cost to another player banishing a card from their own hand instead of the reserve deck', () => {
+  /**
+   * The cost is a real player choice now (John, 2026-09-07 — see engine.ts's applyCorruptedCost), so every test
+   * below plays the corrupted card and then answers the window it opens with the victim's own `pick`.
+   */
+  function payHandCost(state: GameState, pick: (hand: Card[]) => Card): GameState {
+    expect(state.turnPhase).toBe('AWAIT_EVERGREEN_HAND_CHOICE');
+    const victimId = state.evergreenHandChoice!.victimId;
+    const victim = state.players.find((p) => p.id === victimId)!;
+    return ensureOk(applyAction(state, { type: 'CHOOSE_EVERGREEN_HAND_CARD', playerId: victimId, cardId: pick(victim.hand).id })).state;
+  }
+
+  it('redirects the cost to another player banishing a card of their own choosing from their hand, instead of the reserve deck', () => {
     const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 10 };
     let state = startWithRelic(2, [boss]);
     const corrupted: SuitedCard = { ...suited('H', '5'), corrupted: true };
@@ -5304,23 +5315,41 @@ describe('legacy: Corrupted Evergreen Mother relic (the weaker tier — corrupte
     const tavernBefore = state.tavernDeck.length;
     const otherHandBefore = state.players[1].hand.length;
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    let next = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    // The victim picks — here, the last card in their hand, which a random index would have hit only by luck.
+    const chosen = next.players[1].hand[next.players[1].hand.length - 1];
+    next = payHandCost(next, (hand) => hand[hand.length - 1]);
 
-    expect(res.state.tavernDeck.length).toBe(tavernBefore); // reserve deck untouched
-    expect(res.state.players[1].hand.length).toBe(otherHandBefore - 1); // the other player lost a card
-    expect(res.state.banishPile.length).toBe(1);
+    expect(next.tavernDeck.length).toBe(tavernBefore); // reserve deck untouched
+    expect(next.players[1].hand.length).toBe(otherHandBefore - 1); // the other player lost a card
+    expect(next.banishPile.map((c) => c.id)).toEqual([chosen.id]); // ...exactly the one they chose
   });
 
-  it('in solo play, banishes from the same player\'s own remaining hand instead', () => {
+  it('in solo play, banishes the card the same player picks out of their own remaining hand', () => {
     const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 10 };
     let state = startWithRelic(1, [boss]);
     const corrupted: SuitedCard = { ...suited('H', '5'), corrupted: true };
     state = rig(state, [corrupted, suited('C', '2')]); // one extra card left in hand after playing the corrupted one
 
-    const res = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+    let next = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+    next = payHandCost(next, (hand) => hand[0]);
 
-    expect(res.state.players[0].hand.length).toBe(0); // the leftover card was banished
-    expect(res.state.banishPile.some((c) => c.kind === 'suited' && c.rank === '2')).toBe(true);
+    expect(next.players[0].hand.length).toBe(0); // the leftover card was banished
+    expect(next.banishPile.some((c) => c.kind === 'suited' && c.rank === '2')).toBe(true);
+  });
+
+  it('only the victim can pay the cost, and only with a card actually in their hand', () => {
+    const boss: LegacyEnemySpec = { name: 'Test', suit: 'S', health: 100, attack: 10 };
+    let state = startWithRelic(2, [boss]);
+    const corrupted: SuitedCard = { ...suited('H', '5'), corrupted: true };
+    state = rig(state, [corrupted]);
+    const opened = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] })).state;
+
+    const victimId = opened.evergreenHandChoice!.victimId;
+    const other = opened.players.find((p) => p.id !== victimId)!;
+    const victimCardId = opened.players.find((p) => p.id === victimId)!.hand[0].id;
+    expect(applyAction(opened, { type: 'CHOOSE_EVERGREEN_HAND_CARD', playerId: other.id, cardId: victimCardId }).ok).toBe(false);
+    expect(applyAction(opened, { type: 'CHOOSE_EVERGREEN_HAND_CARD', playerId: victimId, cardId: 'not-a-card' }).ok).toBe(false);
   });
 
   it('does nothing when there is no eligible hand to banish from', () => {
@@ -7906,12 +7935,19 @@ describe('legacy: mission 9 — the two Evergreen Mother relics, only one of whi
     const rigged = rig(state, [corrupted, suited('D', '2')]);
     const tavernBefore = rigged.tavernDeck.length;
     const otherBefore = rigged.players[1]?.hand.length ?? 0;
-    const res = ensureOk(applyAction(rigged, { type: 'PLAY_CARDS', playerId: rigged.players[0].id, cardIds: [corrupted.id] }));
+    let after = ensureOk(applyAction(rigged, { type: 'PLAY_CARDS', playerId: rigged.players[0].id, cardIds: [corrupted.id] })).state;
+    // Under the corrupted relic the cost now waits on the victim's own pick (John, 2026-09-07) — answer it here so
+    // these tests keep measuring WHO paid, which is what they are about.
+    if (after.turnPhase === 'AWAIT_EVERGREEN_HAND_CHOICE') {
+      const victimId = after.evergreenHandChoice!.victimId;
+      const cardId = after.players.find((p) => p.id === victimId)!.hand[0].id;
+      after = ensureOk(applyAction(after, { type: 'CHOOSE_EVERGREEN_HAND_CARD', playerId: victimId, cardId })).state;
+    }
     return {
-      tavernSpent: tavernBefore - res.state.tavernDeck.length,
-      otherHandSpent: otherBefore - (res.state.players[1]?.hand.length ?? 0),
-      ownHandLeft: res.state.players[0].hand.length,
-      banished: res.state.banishPile.length,
+      tavernSpent: tavernBefore - after.tavernDeck.length,
+      otherHandSpent: otherBefore - (after.players[1]?.hand.length ?? 0),
+      ownHandLeft: after.players[0].hand.length,
+      banished: after.banishPile.length,
     };
   }
 
