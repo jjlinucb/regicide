@@ -1782,3 +1782,157 @@ button {
     height: 280px;
   }
 }
+
+/* ---------- Legacy playmat ----------
+   The printed Legacy set gives each central game area a marked home: the enemy sits in the centre, decks and
+   permanent campaign pieces occupy the left, and the party/support areas stay to the right. This is an original
+   digital mat rather than a copied scan. Its layered green field, brass zone frames, and dark card wells carry the
+   same readable physical-table structure while leaving every interactive element in the app's own visual system. */
+
+.playmat-shell {
+  min-width: 0;
+}
+
+.legacy-playmat {
+  --mat-bg-a: #28385c;
+  --mat-bg-b: #121b35;
+  --mat-line: rgba(202, 222, 154, 0.34);
+  --mat-border: #15203a;
+  --mat-ink: #f6f1df;
+  --mat-ink-dim: #d8ddbd;
+  position: relative;
+  isolation: isolate;
+  padding: 14px;
+  border: 2px solid #283d2d;
+  border-radius: 26px;
+  background:
+    radial-gradient(ellipse at 12% 4%, rgba(213, 225, 149, 0.25), transparent 27%),
+    radial-gradient(ellipse at 90% 94%, rgba(103, 155, 91, 0.26), transparent 33%),
+    repeating-linear-gradient(122deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 7px),
+    linear-gradient(135deg, #31523d 0%, #1e392f 48%, #122d2d 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 0 0 5px rgba(14, 41, 31, 0.27), 0 12px 28px rgba(20, 37, 31, 0.22);
+}
+
+.legacy-playmat::before {
+  content: '';
+  position: absolute;
+  inset: 7px;
+  z-index: 0;
+  pointer-events: none;
+  border: 1px solid rgba(222, 229, 169, 0.32);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 5% 15%, transparent 0 20px, rgba(213, 227, 156, 0.24) 21px 22px, transparent 23px),
+    radial-gradient(circle at 95% 83%, transparent 0 28px, rgba(213, 227, 156, 0.2) 29px 30px, transparent 31px);
+  opacity: 0.72;
+}
+
+.legacy-playmat .relic-row {
+  position: relative;
+  z-index: 1;
+  justify-content: center;
+  padding: 3px 5px 12px;
+}
+
+.legacy-playmat .relic-chip {
+  background: rgba(245, 245, 220, 0.92);
+  border-color: rgba(218, 191, 112, 0.78);
+  color: #3b4433;
+  box-shadow: 0 2px 0 rgba(16, 42, 32, 0.24);
+}
+
+.legacy-playmat .relic-chip.filled {
+  color: #6d4511;
+  border-color: #c7943b;
+  background: #fff7d7;
+}
+
+.legacy-playmat .game-board {
+  position: relative;
+  z-index: 1;
+  grid-template-columns: minmax(172px, 0.78fr) minmax(238px, 1.22fr) minmax(185px, 0.9fr);
+  grid-template-areas:
+    'decks enemy players'
+    'decks zone log';
+  gap: 12px;
+}
+
+.legacy-playmat .game-board.has-captured-piles {
+  grid-template-columns: minmax(172px, 0.78fr) minmax(238px, 1.22fr) minmax(185px, 0.9fr);
+  grid-template-areas:
+    'piles enemy players'
+    'decks zone log';
+}
+
+.legacy-playmat .board-panel,
+.legacy-playmat .mission-zone-panel {
+  background: linear-gradient(150deg, rgba(255, 253, 235, 0.97), rgba(232, 240, 215, 0.94));
+  border: 1px solid #b7c690;
+  box-shadow: 0 5px 0 rgba(20, 57, 40, 0.24), 0 8px 16px rgba(8, 33, 28, 0.2);
+}
+
+.legacy-playmat .board-panel-title,
+.legacy-playmat .mission-zone-title {
+  color: #284431;
+  font-size: 0.72rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.legacy-playmat .z-enemy .enemy-card {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 14%, rgba(246, 230, 177, 0.5), transparent 42%),
+    linear-gradient(155deg, #f5f0da, #dce7cf);
+  border: 2px solid #b79852;
+  box-shadow: 0 6px 0 rgba(29, 64, 47, 0.3), 0 12px 22px rgba(8, 31, 27, 0.2);
+}
+
+.legacy-playmat .z-enemy .enemy-card::before {
+  content: 'ENEMY';
+  color: #73581d;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+}
+
+.legacy-playmat .z-enemy .enemy-title {
+  color: #36235f;
+}
+
+.legacy-playmat .health-bar-track {
+  background: #e1e5cd;
+  border-color: #9cab75;
+}
+
+.legacy-playmat .table-mat {
+  min-height: 100%;
+  border-color: #0f1e36;
+  box-shadow: inset 0 1px 18px rgba(0, 0, 0, 0.38), 0 5px 0 rgba(17, 57, 39, 0.28), 0 9px 16px rgba(7, 29, 25, 0.2);
+}
+
+.legacy-playmat .mission-zone-panels {
+  height: 100%;
+}
+
+.legacy-playmat .mission-zone-panel {
+  min-height: 126px;
+}
+
+@media (max-width: 900px) {
+  .legacy-playmat {
+    padding: 10px;
+    border-radius: 20px;
+  }
+
+  .legacy-playmat .game-board,
+  .legacy-playmat .game-board.has-captured-piles {
+    grid-template-columns: 1fr;
+    grid-template-areas: 'enemy' 'zone' 'decks' 'players' 'log' 'piles';
+  }
+
+  .legacy-playmat .game-board.has-captured-piles {
+    grid-template-areas: 'enemy' 'piles' 'zone' 'decks' 'players' 'log';
+  }
+}

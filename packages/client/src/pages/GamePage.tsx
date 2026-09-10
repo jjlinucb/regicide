@@ -419,8 +419,9 @@ export function GamePage({
           </div>
         )}
         {isMyRegrowth && <RegrowthWindow dealt={myRegrowthDealt} myPlayerId={myPlayerId} sendAction={sendAction} />}
-        {isLegacy && <RelicsTray state={state} myPlayerId={myPlayerId} />}
-        <div className={`game-board${state.capturedPilesActive ? ' has-captured-piles' : ''}`}>
+        <div className={`playmat-shell${isLegacy ? ' legacy-playmat' : ''}`}>
+          {isLegacy && <RelicsTray state={state} myPlayerId={myPlayerId} />}
+          <div className={`game-board${state.capturedPilesActive ? ' has-captured-piles' : ''}`}>
           <div className="z-enemy">
             {state.currentEnemy && (
               <EnemyDisplay
@@ -463,10 +464,11 @@ export function GamePage({
           <div className="z-decks">
             <DeckPiles state={state} myPlayerId={myPlayerId} />
           </div>
-          <div className="z-log">
-            <div className="board-panel">
-              <span className="board-panel-title">Log</span>
-              <ActionLog state={state} />
+            <div className="z-log">
+              <div className="board-panel">
+                <span className="board-panel-title">Log</span>
+                <ActionLog state={state} />
+              </div>
             </div>
           </div>
         </div>

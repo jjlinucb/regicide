@@ -1,4 +1,4 @@
-import { buildInitialParty, type Card, type Rank, type Suit } from '@regicide/shared';
+import { buildInitialParty, CLASS_THEME, MISSIONS, type Card, type Rank, type Suit } from '@regicide/shared';
 import { PlayingCard } from './components/PlayingCard';
 
 type CardEntry = [string, Card];
@@ -61,12 +61,30 @@ const CAMP_AND_PILGRIMS: CardEntry[] = [
   ['Pilgrim', { id: 'pilgrim', kind: 'suited', suit: 'C', rank: '4', name: 'Pilgrim', pilgrim: true, noSuitPower: true }],
 ];
 
+// All named bosses are generated straight from the live mission data, so this private gallery cannot drift from
+// which portrait appears during a real Legacy campaign. Mission 1 uses the standard court above and Mission 10
+// deliberately uses the player party itself, so neither has a fixed enemy roster to list here.
+const MISSION_BOSS_GALLERIES: [string, CardEntry[]][] = MISSIONS.filter((mission) => mission.enemies.length > 0).map((mission) => [
+  `Mission ${mission.id}: ${mission.title}`,
+  mission.enemies.map((enemy, index): CardEntry => [
+    enemy.name,
+    {
+      id: `mission-${mission.id}-boss-${index}`,
+      kind: 'suited',
+      suit: CLASS_THEME[enemy.class].suit!,
+      rank: 'J',
+      name: enemy.name,
+    },
+  ]),
+]);
+
 /** Private art gallery at ?preview=cards. It uses the live PlayingCard component and does not change game state. */
 export function CardPreview() {
   const groups: [string, CardEntry[]][] = [
     ['Starting Party', STARTING_PARTY],
     ['Campaign Heroes', CAMPAIGN_HEROES],
     ['Court Enemies', COURT],
+    ...MISSION_BOSS_GALLERIES,
     ['Mercenary Camp and Pilgrims', CAMP_AND_PILGRIMS],
   ];
 

@@ -56,6 +56,142 @@ const CAMPAIGN_ART: Record<string, CardArt> = {
   Ash: { sheet: 'enemy-grid', index: 12, rows: 3 },
 };
 
+function bossSheet(sheet: string, names: string[], columns: number, rows?: number): Record<string, CardArt> {
+  return Object.fromEntries(names.map((name, index) => [name, { sheet, index, columns, rows }]));
+}
+
+/** Each named Legacy enemy receives its own portrait cell, rather than falling through to the generic court faces. */
+const MISSION_BOSS_ART: Record<string, CardArt> = {
+  ...bossSheet(
+    'mission-2-bosses',
+    ['Coilfang Broodling', 'Ashmaw Broodling', 'Duskscale Broodling', 'Bramble-Throat Broodling', 'Grey Fen Broodling', 'The Nine-Coiled Matriarch'],
+    3,
+    2,
+  ),
+  ...bossSheet(
+    'mission-3-bosses',
+    ['Midnight the Cat', 'Japat', 'Blast', 'Senior Instructor Vail', 'Senior Instructor Rowe', 'The Grand Mage'],
+    3,
+    2,
+  ),
+  ...bossSheet(
+    'mission-4-bosses',
+    [
+      'Specimen 10-C: The Clawmass',
+      'Specimen 10-D: The Featherwrong',
+      'Specimen 10-H: The Bloodbloom',
+      'Specimen 10-S: The Chitinguard',
+      'Specimen 15-C: The Marrowhound',
+      'Specimen 15-D: The Static Choir',
+      'Specimen 15-H: The Weeping Graft',
+      'Specimen 15-S: The Ironmoss Bear',
+      'Specimen 20-C: The Fusion Prime',
+      'Specimen 20-D: The Discord Wing',
+      'Specimen 20-H: The Hollow Mercy',
+      'Specimen 20-S: The Cage-Breaker',
+    ],
+    4,
+    3,
+  ),
+  ...bossSheet(
+    'mission-5-bosses',
+    [
+      'Sporeling Choker',
+      'Sporeling Piper',
+      'Sporeling Wailer',
+      'Sporeling Bulwark',
+      'Gloom Spore Choker',
+      'Gloom Spore Piper',
+      'Gloom Spore Wailer',
+      'Gloom Spore Bulwark',
+    ],
+    4,
+    2,
+  ),
+  ...bossSheet(
+    'mission-6-bosses',
+    ['Statue Warden', 'Statue Cantor', 'Statue Penitent', 'Statue Sentinel', 'Graven Warden', 'Graven Cantor', 'Graven Penitent', 'Graven Sentinel'],
+    4,
+    2,
+  ),
+  ...bossSheet(
+    'mission-7-bosses',
+    [
+      'Schole: Glimmerfin',
+      'Schole: Murkgill',
+      'Schole: Tideclaw',
+      'Schole: Brackenshell',
+      'Deep: Waterlogged',
+      'Deep: Silttongue',
+      'Deep: Chorus-Eel',
+      'Deep: Ironscale',
+      'Abyssal: Wormvein',
+      'Abyssal: Drownsong',
+      'Abyssal: Hollowfang',
+      'Abyssal: Leadmaw',
+    ],
+    4,
+    3,
+  ),
+  ...bossSheet(
+    'mission-8-bosses',
+    [
+      'Grael Stonejaw',
+      'Mossen Foghide',
+      'Rimtusk the Wet',
+      'Cragfoot',
+      'Windbroken Skarn',
+      'The Last Bridgekeeper',
+      'Wyvern of the First Veil',
+      'Wyvern of the Second Veil',
+      'Wyvern of the Third Veil',
+      'Wyvern of the Fourth Veil',
+      'Stormrend, Elder Wyvern',
+      "Skytallon, Warden of Heaven's Edge",
+    ],
+    4,
+    3,
+  ),
+  ...bossSheet(
+    'mission-9-bosses',
+    [
+      'Loreguard: Ember-Wrought',
+      'Loreguard: Cinder-Tongue',
+      'Loreguard: Ashbound',
+      'Loreguard: Soot-Ward',
+      'Lorekeeper: Emberclaw',
+      'Lorekeeper: Smoke-Herald',
+      'Lorekeeper: Pyre-Anointed',
+      'Lorekeeper: Blaze-Warden',
+      'Myla',
+    ],
+    3,
+    3,
+  ),
+  ...bossSheet(
+    'mission-11-bosses',
+    ['Warden of the Depths: Ashclad', 'Warden of the Depths: Bellsong', 'Warden of the Depths: Hollowmourn', 'Warden of the Depths: Ironvow', 'Evil Goran'],
+    3,
+    2,
+  ),
+  ...bossSheet(
+    'mission-12-bosses',
+    [
+      'Queen of Ash',
+      'Queen of Silence',
+      'Queen of Ruin',
+      'Queen of Thorns',
+      'King of Ash',
+      'King of Silence',
+      'King of Ruin',
+      'King of Thorns',
+      'The Hierarch',
+    ],
+    3,
+    3,
+  ),
+};
+
 const MERCENARY_ART: Record<string, CardArt> = {
   Ghali: { sheet: 'mercenary-grid', index: 0, rows: 3 },
   'Pàviõ': { sheet: 'mercenary-grid', index: 1, rows: 3 },
@@ -93,7 +229,7 @@ export function cardArtFor(card: Card): CardArt | null {
 
   if (card.pilgrim) return (card.name ? PILGRIM_NAME_ART[card.name] : undefined) ?? PILGRIM_RANK_ART[card.rank] ?? null;
 
-  const namedArt = card.name ? MAGE_ART[card.name] ?? CAMPAIGN_ART[card.name] ?? MERCENARY_ART[card.name] : undefined;
+  const namedArt = card.name ? MAGE_ART[card.name] ?? CAMPAIGN_ART[card.name] ?? MISSION_BOSS_ART[card.name] ?? MERCENARY_ART[card.name] : undefined;
   if (namedArt) return namedArt;
 
   if (card.flexibleComboRank) return { sheet: 'mercenary-grid', index: 4 + ENEMY_SUIT_INDEX[card.suit], rows: 3 };

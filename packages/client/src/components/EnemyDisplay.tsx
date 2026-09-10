@@ -88,13 +88,18 @@ export function EnemyDisplay({
     ? []
     : Array.from(new Set([...(pileImmuneClasses ?? []), ...(zoneImmuneClasses ?? [])]));
 
+  // Mission 10 turns actual campaign heroes into bosses. Preserve the hero's original suit/rank here, so its
+  // portrait is the same character the player knew before the corruption, with the existing thorn treatment
+  // making the transformation visible. All other missions use their own named boss-art mapping.
+  const bossCard =
+    enemy.sourceCard?.kind === 'suited'
+      ? { ...enemy.sourceCard, id: 'boss', name: enemy.name ?? enemy.sourceCard.name, corrupted: true }
+      : { id: 'boss', kind: 'suited' as const, suit: enemy.suit, rank: enemy.rank, name: enemy.name };
+
   return (
     <div className="enemy-card">
       <div className="boss-playing-card">
-        <PlayingCard
-          card={{ id: 'boss', kind: 'suited', suit: enemy.suit, rank: enemy.rank, name: enemy.name }}
-          rankLabelOverride={enemy.rankLabel}
-        />
+        <PlayingCard card={bossCard} rankLabelOverride={enemy.sourceCard?.kind === 'suited' ? undefined : enemy.rankLabel} />
       </div>
       <div className={`enemy-title${red ? ' red' : ''}`}>
         {isLegacy ? enemy.name : `${RANK_NAME[enemy.rank]} of ${SUIT_GLYPH[enemy.suit]}`}
