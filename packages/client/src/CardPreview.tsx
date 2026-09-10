@@ -1,7 +1,7 @@
 import { buildInitialParty, CLASS_THEME, MISSIONS, type Card, type Rank, type Suit } from '@regicide/shared';
 import { PlayingCard } from './components/PlayingCard';
 
-type CardEntry = [string, Card];
+type CardEntry = [label: string, card: Card, rankLabelOverride?: string];
 
 const SUITS: Suit[] = ['C', 'D', 'H', 'S'];
 const COURT_RANKS: Rank[] = ['J', 'Q', 'K'];
@@ -75,6 +75,7 @@ const MISSION_BOSS_GALLERIES: [string, CardEntry[]][] = MISSIONS.filter((mission
       rank: 'J',
       name: enemy.name,
     },
+    enemy.rankLabel,
   ]),
 ]);
 
@@ -96,9 +97,9 @@ export function CardPreview() {
         <section key={title} style={{ marginTop: 30 }}>
           <h2 style={{ margin: '0 0 14px' }}>{title}</h2>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-            {entries.map(([label, card]) => (
+            {entries.map(([label, card, rankLabelOverride]) => (
               <div key={card.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, width: 108 }}>
-                <PlayingCard card={card} />
+                <PlayingCard card={card} rankLabelOverride={rankLabelOverride} />
                 <span style={{ fontSize: 11, textAlign: 'center', color: '#51463d', lineHeight: 1.25 }}>{label}</span>
               </div>
             ))}
