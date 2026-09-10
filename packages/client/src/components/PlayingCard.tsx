@@ -1,5 +1,5 @@
 import { cardValue, classForCard, CLASS_THEME, JESTER_ABILITY_TEXT, SUIT_ABILITY_TEXT, SUIT_TO_CLASS, type Card } from '@regicide/shared';
-import { cardArtFor, cardArtStyle } from '../cardArt';
+import { cardArtFor, cardArtStyle, JESTER_ART } from '../cardArt';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
 const SUIT_NAME: Record<string, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
@@ -142,12 +142,13 @@ export function PlayingCard({
     return (
       <button
         type="button"
-        className={`playing-card jester${selected ? ' selected' : ''}`}
+        className={`playing-card jester illustrated${selected ? ' selected' : ''}`}
         onClick={onClick}
         style={small ? { width: 44, height: 62 } : undefined}
         aria-label="Jester"
         title={cardAbilityText(card)}
       >
+        <span className="card-art" style={cardArtStyle(JESTER_ART)} aria-hidden="true" />
         <span className="glyph">🃏</span>
         {!small && <span className="jester-label">JESTER</span>}
       </button>

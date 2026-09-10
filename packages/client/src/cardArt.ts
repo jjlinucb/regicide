@@ -56,15 +56,49 @@ const CAMPAIGN_ART: Record<string, CardArt> = {
   Ash: { sheet: 'enemy-grid', index: 12, rows: 3 },
 };
 
+const MERCENARY_ART: Record<string, CardArt> = {
+  Ghali: { sheet: 'mercenary-grid', index: 0, rows: 3 },
+  'Pàviõ': { sheet: 'mercenary-grid', index: 1, rows: 3 },
+  Argo: { sheet: 'mercenary-grid', index: 2, rows: 3 },
+  Hella: { sheet: 'mercenary-grid', index: 3, rows: 3 },
+};
+
+const PILGRIM_NAME_ART: Record<string, CardArt> = {
+  'Old Yarrow': { sheet: 'pilgrim-grid', index: 0 },
+  'Little Mireille': { sheet: 'pilgrim-grid', index: 1 },
+  'Bosk the Carter': { sheet: 'pilgrim-grid', index: 2 },
+  'Sister Halvard': { sheet: 'pilgrim-grid', index: 3 },
+  'Corin Drizzlecoat': { sheet: 'pilgrim-grid', index: 4 },
+  'Fenna Longrope': { sheet: 'pilgrim-grid', index: 5 },
+  Scrap: { sheet: 'pilgrim-grid', index: 6 },
+};
+
+const PILGRIM_RANK_ART: Record<string, CardArt> = {
+  '2': { sheet: 'pilgrim-grid', index: 7 },
+  '3': { sheet: 'pilgrim-grid', index: 1 },
+  '4': { sheet: 'pilgrim-grid', index: 8 },
+  '5': { sheet: 'pilgrim-grid', index: 2 },
+  '6': { sheet: 'pilgrim-grid', index: 9 },
+  '7': { sheet: 'pilgrim-grid', index: 5 },
+};
+
 const ENEMY_RANK_INDEX: Record<string, number> = { J: 0, Q: 1, K: 2 };
 const ENEMY_SUIT_INDEX: Record<Suit, number> = { C: 0, D: 1, H: 2, S: 3 };
 
-/** Finds the stable portrait for every starting, campaign, and court character card. */
+export const JESTER_ART: CardArt = { sheet: 'mercenary-grid', index: 10, rows: 3 };
+
+/** Finds the stable portrait for every playable card family. */
 export function cardArtFor(card: Card): CardArt | null {
   if (card.kind !== 'suited') return null;
 
-  const namedArt = card.name ? MAGE_ART[card.name] ?? CAMPAIGN_ART[card.name] : undefined;
+  if (card.pilgrim) return (card.name ? PILGRIM_NAME_ART[card.name] : undefined) ?? PILGRIM_RANK_ART[card.rank] ?? null;
+
+  const namedArt = card.name ? MAGE_ART[card.name] ?? CAMPAIGN_ART[card.name] ?? MERCENARY_ART[card.name] : undefined;
   if (namedArt) return namedArt;
+
+  if (card.flexibleComboRank) return { sheet: 'mercenary-grid', index: 4 + ENEMY_SUIT_INDEX[card.suit], rows: 3 };
+  if (card.noSuitPower && card.rank === '19') return { sheet: 'mercenary-grid', index: 8, rows: 3 };
+  if (card.wildSuit) return { sheet: 'mercenary-grid', index: 9, rows: 3 };
 
   const enemyRank = ENEMY_RANK_INDEX[card.rank];
   if (enemyRank !== undefined) {

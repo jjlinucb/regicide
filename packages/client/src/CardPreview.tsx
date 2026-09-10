@@ -39,12 +39,35 @@ const COURT: CardEntry[] = COURT_RANKS.flatMap((rank) =>
   SUITS.map((suit): CardEntry => [`${rank} ${suit}`, { id: `${rank}-${suit}`, kind: 'suited', suit, rank }]),
 );
 
+const CAMP_AND_PILGRIMS: CardEntry[] = [
+  ['Ghali', { id: 'ghali', kind: 'suited', suit: 'H', rank: '12', name: 'Ghali' }],
+  ['Pàviõ', { id: 'pavio', kind: 'suited', suit: 'D', rank: '12', name: 'Pàviõ' }],
+  ['Argo', { id: 'argo', kind: 'suited', suit: 'C', rank: '12', name: 'Argo' }],
+  ['Hella', { id: 'hella', kind: 'suited', suit: 'S', rank: '12', name: 'Hella' }],
+  ['Hearts 2/5', { id: 'two-five-h', kind: 'suited', suit: 'H', rank: '5', flexibleComboRank: '2' }],
+  ['Diamonds 2/5', { id: 'two-five-d', kind: 'suited', suit: 'D', rank: '5', flexibleComboRank: '2' }],
+  ['Clubs 2/5', { id: 'two-five-c', kind: 'suited', suit: 'C', rank: '5', flexibleComboRank: '2' }],
+  ['Spades 2/5', { id: 'two-five-s', kind: 'suited', suit: 'S', rank: '5', flexibleComboRank: '2' }],
+  ['Nineteen', { id: 'nineteen', kind: 'suited', suit: 'H', rank: '19', noSuitPower: true }],
+  ['Any-Suit Ace', { id: 'wild-ace', kind: 'suited', suit: 'H', rank: 'A', wildSuit: true }],
+  ['Jester', { id: 'jester', kind: 'jester' }],
+  ['Old Yarrow', { id: 'old-yarrow', kind: 'suited', suit: 'H', rank: '2', name: 'Old Yarrow', pilgrim: true, noSuitPower: true }],
+  ['Little Mireille', { id: 'little-mireille', kind: 'suited', suit: 'D', rank: '3', name: 'Little Mireille', pilgrim: true, noSuitPower: true }],
+  ['Bosk the Carter', { id: 'bosk', kind: 'suited', suit: 'C', rank: '4', name: 'Bosk the Carter', pilgrim: true, noSuitPower: true }],
+  ['Sister Halvard', { id: 'halvard', kind: 'suited', suit: 'S', rank: '5', name: 'Sister Halvard', pilgrim: true, noSuitPower: true }],
+  ['Corin Drizzlecoat', { id: 'corin', kind: 'suited', suit: 'H', rank: '6', name: 'Corin Drizzlecoat', pilgrim: true, noSuitPower: true }],
+  ['Fenna Longrope', { id: 'fenna', kind: 'suited', suit: 'D', rank: '7', name: 'Fenna Longrope', pilgrim: true, noSuitPower: true }],
+  ['Scrap', { id: 'scrap', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true, noSuitPower: true }],
+  ['Pilgrim', { id: 'pilgrim', kind: 'suited', suit: 'C', rank: '4', name: 'Pilgrim', pilgrim: true, noSuitPower: true }],
+];
+
 /** Private art gallery at ?preview=cards. It uses the live PlayingCard component and does not change game state. */
 export function CardPreview() {
   const groups: [string, CardEntry[]][] = [
     ['Starting Party', STARTING_PARTY],
     ['Campaign Heroes', CAMPAIGN_HEROES],
     ['Court Enemies', COURT],
+    ['Mercenary Camp and Pilgrims', CAMP_AND_PILGRIMS],
   ];
 
   return (
