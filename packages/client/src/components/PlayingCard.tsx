@@ -1,4 +1,5 @@
 import { cardValue, classForCard, CLASS_THEME, JESTER_ABILITY_TEXT, SUIT_ABILITY_TEXT, SUIT_TO_CLASS, type Card } from '@regicide/shared';
+import { cardArtFor, cardArtStyle } from '../cardArt';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
 const SUIT_NAME: Record<string, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
@@ -167,15 +168,17 @@ export function PlayingCard({
   };
   const glyph = isWildUnresolved ? '★' : classInfo ? classInfo.glyph : SUIT_GLYPH[card.suit];
   const abilityText = cardAbilityText(card);
+  const art = cardArtFor(card);
   return (
     <button
       type="button"
-      className={`playing-card${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}${card.corrupted ? ' corrupted' : ''}${card.restored ? ' restored' : ''}`}
+      className={`playing-card${art ? ' illustrated' : ''}${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}${card.corrupted ? ' corrupted' : ''}${card.restored ? ' restored' : ''}`}
       onClick={onClick}
       style={Object.keys(style).length > 0 ? style : undefined}
       aria-label={cardLabel(card)}
       title={blocked ? `${abilityText} — no effect on this boss` : abilityText}
     >
+      {art && <span className="card-art" style={cardArtStyle(art)} aria-hidden="true" />}
       {card.special && !small && <span className="special-badge" aria-hidden="true">✦</span>}
       {card.corrupted && !small && <span className="corrupted-badge" aria-hidden="true">🥀</span>}
       {card.restored && !small && <span className="restored-badge" aria-hidden="true">🌱</span>}

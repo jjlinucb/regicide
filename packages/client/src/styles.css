@@ -969,6 +969,77 @@ button {
   position: relative;
 }
 
+.playing-card.illustrated {
+  overflow: hidden;
+  isolation: isolate;
+  color: #fff9e8;
+  border-color: #b8944d;
+  background: #201b17;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.92);
+}
+
+.playing-card .card-art {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  filter: saturate(1.06) contrast(1.02);
+}
+
+.playing-card.illustrated > :not(.card-art) {
+  position: relative;
+  z-index: 1;
+}
+
+.playing-card .card-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to bottom, rgba(10, 7, 5, 0.72), transparent 34%, transparent 66%, rgba(10, 7, 5, 0.82)),
+    linear-gradient(90deg, rgba(12, 8, 5, 0.22), transparent 24%, transparent 76%, rgba(12, 8, 5, 0.22));
+}
+
+.playing-card.illustrated .rank {
+  position: absolute;
+  top: 4px;
+  left: 5px;
+  z-index: 1;
+  font-size: 1.35rem;
+  color: #fff7d6;
+}
+
+.playing-card.illustrated .glyph {
+  position: absolute;
+  bottom: 4px;
+  right: 5px;
+  z-index: 1;
+  font-size: 1.05rem;
+  color: #f0d48e;
+}
+
+.playing-card.illustrated .legacy-card-name {
+  z-index: 1;
+  left: 4px;
+  right: 22px;
+  bottom: 5px;
+  color: #fff8df;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 1);
+}
+
+.playing-card.illustrated .class-glyph-row {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  z-index: 1;
+}
+
+@media (min-width: 640px) {
+  .playing-card.illustrated .rank { font-size: 1.55rem; }
+  .playing-card.illustrated .glyph { font-size: 1.2rem; }
+}
+
 .playing-card.selected {
   transform: translateY(-10px);
   border-color: var(--accent);
