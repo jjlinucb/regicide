@@ -2535,3 +2535,132 @@ body:has(.card-preview) {
   background-image: linear-gradient(to top, rgba(49, 29, 58, 0.7), rgba(49, 29, 58, 0.04) 70%), url('/board-art/player-camp-maps.png');
   background-position: center, right bottom;
 }
+/* ---------- Alternate Realms skin ----------
+   Storybook remains the default. Realms swaps only the character sheets, while cards retain the same rule-state
+   overlays for curses, restoration, and Evergreen upgrades. */
+.art-skin-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(213, 192, 116, 0.72);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(9, 42, 41, 0.93), rgba(29, 61, 50, 0.9));
+  box-shadow: inset 0 1px 0 rgba(255, 248, 208, 0.14), 0 3px 8px rgba(3, 25, 19, 0.22);
+  color: #fff8df;
+}
+
+.game-top > .art-skin-tabs {
+  align-self: center;
+  width: min(100%, 960px);
+}
+
+.card-preview > .art-skin-tabs {
+  max-width: 560px;
+  margin: -12px 0 22px;
+}
+
+.art-skin-tabs-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.art-skin-tabs-label {
+  color: #fff1bc;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.art-skin-tabs-description {
+  overflow: hidden;
+  color: #d9e6c0;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.art-skin-tablist {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 3px;
+  border: 1px solid rgba(255, 241, 182, 0.24);
+  border-radius: 9px;
+  background: rgba(4, 24, 24, 0.5);
+}
+
+.art-skin-tablist button {
+  min-height: 29px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #dce7c7;
+  font: inherit;
+  font-size: 0.71rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.art-skin-tablist button:hover {
+  color: #fff8df;
+  background: rgba(248, 231, 163, 0.13);
+}
+
+.art-skin-tablist button.active {
+  color: #2b3129;
+  background: linear-gradient(145deg, #fff1bd, #d5d78d);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.playing-card.art-skin-realms.illustrated {
+  border-color: #b99961;
+  background: #211c19;
+}
+
+.playing-card.art-skin-realms .card-art {
+  filter: saturate(0.82) contrast(1.02) brightness(1.01) sepia(0.08);
+}
+
+.playing-card.art-skin-realms .card-art::after {
+  background:
+    linear-gradient(to bottom, rgba(21, 17, 13, 0.62) 0%, rgba(21, 17, 13, 0.18) 28%, transparent 47%, transparent 63%, rgba(21, 17, 13, 0.35) 79%, rgba(21, 17, 13, 0.7) 100%),
+    linear-gradient(90deg, rgba(18, 13, 10, 0.12), transparent 24%, transparent 76%, rgba(18, 13, 10, 0.12));
+}
+
+.playing-card.art-skin-realms.illustrated .rank,
+.playing-card.art-skin-realms.illustrated .glyph,
+.playing-card.art-skin-realms.illustrated .class-glyph-row {
+  border-color: rgba(247, 224, 163, 0.7);
+  background: linear-gradient(145deg, rgba(30, 23, 17, 0.96), rgba(70, 52, 35, 0.83));
+}
+
+.app.art-skin-realms .legacy-playmat {
+  background:
+    radial-gradient(ellipse at 14% 5%, rgba(227, 194, 130, 0.16), transparent 25%),
+    radial-gradient(ellipse at 90% 96%, rgba(94, 126, 92, 0.22), transparent 31%),
+    repeating-linear-gradient(0deg, rgba(255, 240, 205, 0.025) 0 1px, transparent 1px 8px),
+    linear-gradient(135deg, #3a6258 0%, #58735b 48%, #3f655d 100%);
+}
+
+.app.art-skin-realms .legacy-playmat::before {
+  opacity: 0.22;
+}
+
+@media (max-width: 540px) {
+  .art-skin-tabs {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .art-skin-tablist {
+    width: 100%;
+  }
+
+  .art-skin-tablist button {
+    flex: 1;
+  }
+}

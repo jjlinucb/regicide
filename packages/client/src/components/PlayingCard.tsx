@@ -1,5 +1,6 @@
 import { cardValue, classForCard, CLASS_THEME, JESTER_ABILITY_TEXT, SUIT_ABILITY_TEXT, SUIT_TO_CLASS, type Card } from '@regicide/shared';
 import { cardArtFor, cardArtStyle, JESTER_ART } from '../cardArt';
+import { useArtSkin } from '../artSkin';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
 const SUIT_NAME: Record<string, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
@@ -141,17 +142,18 @@ export function PlayingCard({
    */
   rankLabelOverride?: string;
 }) {
+  const { skin } = useArtSkin();
   if (card.kind === 'jester') {
     return (
       <button
         type="button"
-        className={`playing-card jester illustrated${selected ? ' selected' : ''}`}
+        className={`playing-card jester illustrated art-skin-${skin}${selected ? ' selected' : ''}`}
         onClick={onClick}
         style={small ? { width: 44, height: 62 } : undefined}
         aria-label="Jester"
         title={cardAbilityText(card)}
       >
-        <span className="card-art" style={cardArtStyle(JESTER_ART)} aria-hidden="true" />
+        <span className="card-art" style={cardArtStyle(JESTER_ART, skin)} aria-hidden="true" />
         <span className="glyph">🃏</span>
         {!small && <span className="jester-label">JESTER</span>}
       </button>
@@ -176,13 +178,13 @@ export function PlayingCard({
   return (
     <button
       type="button"
-      className={`playing-card${art ? ' illustrated' : ''}${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}${cursed ? ' cursed' : ''}${card.corrupted ? ' corrupted' : ''}${card.restored ? ' restored' : ''}${card.evergreen ? ' evergreen' : ''}`}
+      className={`playing-card art-skin-${skin}${art ? ' illustrated' : ''}${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}${cursed ? ' cursed' : ''}${card.corrupted ? ' corrupted' : ''}${card.restored ? ' restored' : ''}${card.evergreen ? ' evergreen' : ''}`}
       onClick={onClick}
       style={Object.keys(style).length > 0 ? style : undefined}
       aria-label={cardLabel(card)}
       title={blocked ? `${abilityText} — no effect on this boss` : abilityText}
     >
-      {art && <span className="card-art" style={cardArtStyle(art)} aria-hidden="true" />}
+      {art && <span className="card-art" style={cardArtStyle(art, skin)} aria-hidden="true" />}
       {card.special && !small && <span className="special-badge" aria-hidden="true">✦</span>}
       {card.corrupted && !small && <span className="corrupted-badge" aria-hidden="true">🥀</span>}
       {card.restored && !small && <span className="restored-badge" aria-hidden="true">🌱</span>}

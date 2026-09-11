@@ -1,5 +1,6 @@
 import { buildInitialParty, CLASS_THEME, MISSIONS, type Card, type Rank, type Suit } from '@regicide/shared';
 import { PlayingCard } from './components/PlayingCard';
+import { ArtSkinTabs } from './components/ArtSkinTabs';
 
 type CardEntry = [label: string, card: Card, rankLabelOverride?: string, cursed?: boolean];
 
@@ -94,6 +95,7 @@ export function CardPreview() {
     <main className="card-preview">
       <h1 className="card-preview-title">Regicide character gallery</h1>
       <p className="card-preview-intro">Generated art shown through the same card component used in play.</p>
+      <ArtSkinTabs />
       {groups.map(([title, entries]) => (
         <section key={title} className="card-preview-section">
           <h2 className="card-preview-heading">{title}</h2>

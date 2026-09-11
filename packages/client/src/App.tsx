@@ -7,6 +7,7 @@ import { RewardRevealPage } from './pages/RewardRevealPage';
 import { GamePage } from './pages/GamePage';
 import { RulesPage } from './pages/RulesPage';
 import { CardPreview } from './CardPreview';
+import { ArtSkinProvider, useArtSkin } from './artSkin';
 
 function useRoute() {
   const [path, setPath] = useState(() => window.location.pathname);
@@ -23,10 +24,23 @@ function useRoute() {
 }
 
 export function App() {
+  return (
+    <ArtSkinProvider>
+      <AppContents />
+    </ArtSkinProvider>
+  );
+}
+
+function AppContents() {
+  const { skin } = useArtSkin();
   const { path, navigate } = useRoute();
   // Scratch preview of card faces (?preview=cards) — not linked from anywhere in the app.
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('preview') === 'cards') {
-    return <CardPreview />;
+    return (
+      <div className={'app art-skin-' + skin}>
+        <CardPreview />
+      </div>
+    );
   }
   const [mode, setMode] = useState<'regicide' | 'legacy'>('regicide');
   const {
@@ -176,7 +190,7 @@ export function App() {
   }
 
   return (
-    <div className="app">
+    <div className={'app art-skin-' + skin}>
       {error && (
         <div className="error-banner" onClick={clearError}>
           {error}

@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { Card, Suit } from '@regicide/shared';
+import type { ArtSkin } from './artSkin';
 
 /** A character portrait occupies one cell in a generated art sheet. */
 export interface CardArt {
@@ -249,8 +250,31 @@ export function cardArtFor(card: Card): CardArt | null {
   return index === undefined ? null : { sheet: BASE_SHEET[card.suit], index };
 }
 
+const REALMS_SHEETS = new Set([
+  'warrior-grid',
+  'bard-grid',
+  'cleric-grid',
+  'paladin-grid',
+  'mage-grid',
+  'legacy-hero-grid',
+  'mercenary-grid',
+  'pilgrim-grid',
+  'enemy-grid',
+  'mission-2-bosses-gravure',
+  'mission-3-bosses-gravure',
+  'mission-4-bosses-gravure',
+  'mission-5-bosses-gravure',
+  'mission-6-bosses-gravure',
+  'mission-7-bosses-gravure',
+  'mission-8-bosses-gravure',
+  'mission-9-bosses-gravure',
+  'mission-11-bosses-gravure',
+  'mission-12-bosses-gravure',
+]);
+
 /** Turns a sheet location into a CSS background crop without creating per-card image requests. */
-export function cardArtStyle(art: CardArt): CSSProperties {
+export function cardArtStyle(art: CardArt, skin: ArtSkin = 'storybook'): CSSProperties {
+  const sheet = skin === 'realms' && REALMS_SHEETS.has(art.sheet) ? art.sheet + '-realms' : art.sheet;
   const columns = art.columns ?? 5;
   const rows = art.rows ?? 2;
   const col = art.index % columns;
@@ -259,7 +283,7 @@ export function cardArtStyle(art: CardArt): CSSProperties {
   const y = rows > 1 ? (row * 100) / (rows - 1) : 0;
 
   return {
-    backgroundImage: `url(/card-art/sheets/${art.sheet}.png)`,
+    backgroundImage: 'url(/card-art/sheets/' + sheet + '.png)',
     backgroundSize: `${columns * 100}% ${rows * 100}%`,
     backgroundPosition: `${x}% ${y}%`,
   };

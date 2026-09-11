@@ -28,6 +28,7 @@ import { ReaverRevealCountPicker } from '../components/ReaverRevealCountPicker';
 import { ChanterCountPicker } from '../components/ChanterCountPicker';
 import { RelicsTray } from '../components/RelicsTray';
 import { RegrowthWindow } from '../components/RegrowthWindow';
+import { ArtSkinTabs } from '../components/ArtSkinTabs';
 
 const MEDAL_INFO: Record<'gold' | 'silver' | 'bronze', { emoji: string; label: string }> = {
   gold: { emoji: '🥇', label: 'Gold Victory' },
@@ -419,6 +420,7 @@ export function GamePage({
           </div>
         )}
         {isMyRegrowth && <RegrowthWindow dealt={myRegrowthDealt} myPlayerId={myPlayerId} sendAction={sendAction} />}
+        {isLegacy && <ArtSkinTabs />}
         <div className={`playmat-shell${isLegacy ? ' legacy-playmat' : ''}`}>
           {isLegacy && <RelicsTray state={state} myPlayerId={myPlayerId} />}
           <div className={`game-board${state.capturedPilesActive ? ' has-captured-piles' : ''}`}>
