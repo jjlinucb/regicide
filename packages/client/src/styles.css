@@ -1936,3 +1936,172 @@ button {
     grid-template-areas: 'enemy' 'piles' 'zone' 'decks' 'players' 'log';
   }
 }
+
+/* ---------- Legacy visual clarity ----------
+   The illustration should carry the character, while numbers, suit/class marks, and names stay readable at a
+   quick playing-table glance. Dark translucent corner plaques give every mark a stable contrast surface no
+   matter how light or colorful a generated portrait becomes. */
+.playing-card.illustrated {
+  border-color: #e0bd63;
+  box-shadow: 0 3px 9px rgba(5, 17, 14, 0.42), inset 0 0 0 1px rgba(255, 248, 209, 0.25);
+}
+
+.playing-card .card-art::after {
+  background:
+    linear-gradient(to bottom, rgba(6, 14, 17, 0.9) 0%, rgba(6, 14, 17, 0.66) 22%, transparent 42%, transparent 59%, rgba(6, 14, 17, 0.82) 79%, rgba(6, 14, 17, 0.95) 100%),
+    linear-gradient(90deg, rgba(6, 14, 17, 0.26), transparent 26%, transparent 74%, rgba(6, 14, 17, 0.26));
+}
+
+.playing-card.illustrated .rank,
+.playing-card.illustrated .glyph {
+  display: grid;
+  place-items: center;
+  min-width: 1.45em;
+  min-height: 1.35em;
+  padding: 1px 4px 2px;
+  border: 1px solid rgba(255, 239, 174, 0.76);
+  border-radius: 6px;
+  background: linear-gradient(145deg, rgba(9, 27, 29, 0.94), rgba(33, 43, 52, 0.8));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.68), inset 0 1px 0 rgba(255, 255, 255, 0.13);
+  font-weight: 900;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 1);
+}
+
+.playing-card.illustrated .rank {
+  color: #fff9dc;
+}
+
+.playing-card.illustrated .glyph {
+  color: #ffe19b;
+}
+
+.playing-card.illustrated .class-glyph-row {
+  gap: 3px;
+  padding: 3px 4px;
+  border: 1px solid rgba(255, 239, 174, 0.72);
+  border-radius: 7px;
+  background: linear-gradient(145deg, rgba(9, 27, 29, 0.94), rgba(33, 43, 52, 0.8));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.68), inset 0 1px 0 rgba(255, 255, 255, 0.13);
+}
+
+.playing-card.illustrated .class-glyph-row .class-glyph {
+  filter: saturate(1.22) brightness(1.18);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 1);
+}
+
+.playing-card.illustrated .legacy-card-name {
+  left: 4px;
+  right: 27px;
+  bottom: 4px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: rgba(7, 19, 22, 0.73);
+  color: #fff9e5;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+/* The physical-mat-inspired texture now frames the game instead of competing with it. The large dark wells make
+   the deck, enemy, and party zones unmistakable; cream panels are reserved for information that must be read. */
+.legacy-playmat {
+  padding: 16px;
+  border-color: #d2b96b;
+  background:
+    radial-gradient(ellipse at 14% 5%, rgba(222, 234, 157, 0.2), transparent 25%),
+    radial-gradient(ellipse at 90% 96%, rgba(108, 177, 122, 0.2), transparent 31%),
+    repeating-linear-gradient(0deg, rgba(244, 255, 223, 0.028) 0 1px, transparent 1px 8px),
+    linear-gradient(135deg, #173d36 0%, #214f43 48%, #12322f 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 250, 207, 0.42), inset 0 0 0 6px rgba(7, 37, 31, 0.38), 0 14px 30px rgba(8, 30, 24, 0.28);
+}
+
+.legacy-playmat::before {
+  border-color: rgba(244, 229, 150, 0.58);
+  background:
+    radial-gradient(circle at 5% 15%, transparent 0 20px, rgba(244, 229, 150, 0.34) 21px 22px, transparent 23px),
+    radial-gradient(circle at 95% 83%, transparent 0 28px, rgba(244, 229, 150, 0.3) 29px 30px, transparent 31px);
+}
+
+.legacy-playmat .game-board {
+  gap: 16px;
+}
+
+.legacy-playmat .board-panel,
+.legacy-playmat .mission-zone-panel {
+  border: 1px solid #d4c27e;
+  background: linear-gradient(150deg, rgba(255, 254, 239, 0.98), rgba(234, 243, 216, 0.97));
+  box-shadow: 0 5px 0 rgba(8, 48, 34, 0.34), 0 9px 18px rgba(3, 24, 19, 0.26);
+}
+
+.legacy-playmat .table-mat {
+  border: 2px solid #cdb86c;
+  background-color: #142e2f;
+  box-shadow: inset 0 0 0 1px rgba(247, 231, 155, 0.2), inset 0 1px 16px rgba(0, 0, 0, 0.48), 0 5px 0 rgba(8, 48, 34, 0.36), 0 9px 17px rgba(3, 24, 19, 0.26);
+}
+
+.legacy-playmat .z-enemy .enemy-card {
+  border-color: #d8bc63;
+  background:
+    radial-gradient(circle at 50% 9%, rgba(255, 239, 177, 0.7), transparent 40%),
+    linear-gradient(155deg, #fff9dd, #deebcf);
+  box-shadow: 0 6px 0 rgba(8, 48, 34, 0.36), 0 13px 23px rgba(3, 24, 19, 0.28);
+}
+
+/* Private gallery: give ?preview=cards the same world as the actual Legacy board. */
+body:has(.card-preview) {
+  background:
+    radial-gradient(ellipse at 14% 2%, rgba(222, 234, 157, 0.22), transparent 26%),
+    radial-gradient(ellipse at 88% 98%, rgba(108, 177, 122, 0.22), transparent 34%),
+    repeating-linear-gradient(0deg, rgba(244, 255, 223, 0.03) 0 1px, transparent 1px 8px),
+    linear-gradient(135deg, #173d36, #214f43 48%, #12322f);
+  background-attachment: fixed;
+}
+
+.card-preview {
+  min-height: 100vh;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 28px 24px 56px;
+  color: #fff9e5;
+}
+
+.card-preview-title {
+  margin: 0 0 8px;
+  color: #ffe7a4;
+  text-shadow: 0 2px 3px rgba(3, 23, 18, 0.72);
+}
+
+.card-preview-intro {
+  margin: 0 0 28px;
+  color: #e5edca;
+}
+
+.card-preview-section {
+  margin-top: 30px;
+  padding: 16px;
+  border: 1px solid rgba(232, 214, 137, 0.68);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(10, 47, 39, 0.86), rgba(18, 58, 48, 0.78));
+  box-shadow: 0 7px 16px rgba(3, 26, 20, 0.24), inset 0 1px 0 rgba(255, 255, 230, 0.13);
+}
+
+.card-preview-heading {
+  margin: 0 0 14px;
+  color: #fff0b9;
+  font-size: 1.08rem;
+}
+
+.card-preview-label {
+  min-height: 28px;
+  color: #f4f6db;
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
+}
+
+@media (max-width: 640px) {
+  .legacy-playmat { padding: 10px; }
+  .card-preview { padding: 20px 14px 44px; }
+  .card-preview-section { padding: 12px; }
+}

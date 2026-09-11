@@ -90,17 +90,17 @@ export function CardPreview() {
   ];
 
   return (
-    <main style={{ maxWidth: 1120, margin: '0 auto', padding: '28px 24px 56px' }}>
-      <h1 style={{ margin: '0 0 8px' }}>Regicide character gallery</h1>
-      <p style={{ margin: '0 0 28px', color: '#5c5148' }}>Generated art shown through the same card component used in play.</p>
+    <main className="card-preview">
+      <h1 className="card-preview-title">Regicide character gallery</h1>
+      <p className="card-preview-intro">Generated art shown through the same card component used in play.</p>
       {groups.map(([title, entries]) => (
-        <section key={title} style={{ marginTop: 30 }}>
-          <h2 style={{ margin: '0 0 14px' }}>{title}</h2>
+        <section key={title} className="card-preview-section">
+          <h2 className="card-preview-heading">{title}</h2>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
             {entries.map(([label, card, rankLabelOverride]) => (
               <div key={card.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, width: 108 }}>
                 <PlayingCard card={card} rankLabelOverride={rankLabelOverride} />
-                <span style={{ fontSize: 11, textAlign: 'center', color: '#51463d', lineHeight: 1.25 }}>{label}</span>
+                <span className="card-preview-label">{label}</span>
               </div>
             ))}
           </div>
