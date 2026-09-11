@@ -1,7 +1,7 @@
 import { buildInitialParty, CLASS_THEME, MISSIONS, type Card, type Rank, type Suit } from '@regicide/shared';
 import { PlayingCard } from './components/PlayingCard';
 
-type CardEntry = [label: string, card: Card, rankLabelOverride?: string];
+type CardEntry = [label: string, card: Card, rankLabelOverride?: string, cursed?: boolean];
 
 const SUITS: Suit[] = ['C', 'D', 'H', 'S'];
 const COURT_RANKS: Rank[] = ['J', 'Q', 'K'];
@@ -36,7 +36,7 @@ const CAMPAIGN_HEROES: CardEntry[] = [
 ];
 
 const COURT: CardEntry[] = COURT_RANKS.flatMap((rank) =>
-  SUITS.map((suit): CardEntry => [`${rank} ${suit}`, { id: `${rank}-${suit}`, kind: 'suited', suit, rank }]),
+  SUITS.map((suit): CardEntry => [`${rank} ${suit}`, { id: `${rank}-${suit}`, kind: 'suited', suit, rank }, undefined, true]),
 );
 
 const CAMP_AND_PILGRIMS: CardEntry[] = [
@@ -76,6 +76,7 @@ const MISSION_BOSS_GALLERIES: [string, CardEntry[]][] = MISSIONS.filter((mission
       name: enemy.name,
     },
     enemy.rankLabel,
+    true,
   ]),
 ]);
 
@@ -97,9 +98,9 @@ export function CardPreview() {
         <section key={title} className="card-preview-section">
           <h2 className="card-preview-heading">{title}</h2>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-            {entries.map(([label, card, rankLabelOverride]) => (
+            {entries.map(([label, card, rankLabelOverride, cursed]) => (
               <div key={card.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, width: 108 }}>
-                <PlayingCard card={card} rankLabelOverride={rankLabelOverride} />
+                <PlayingCard card={card} rankLabelOverride={rankLabelOverride} cursed={cursed} />
                 <span className="card-preview-label">{label}</span>
               </div>
             ))}

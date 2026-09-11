@@ -99,7 +99,7 @@ export function EnemyDisplay({
   return (
     <div className="enemy-card">
       <div className="boss-playing-card">
-        <PlayingCard card={bossCard} rankLabelOverride={enemy.sourceCard?.kind === 'suited' ? undefined : enemy.rankLabel} />
+        <PlayingCard card={bossCard} cursed rankLabelOverride={enemy.sourceCard?.kind === 'suited' ? undefined : enemy.rankLabel} />
       </div>
       <div className={`enemy-title${red ? ' red' : ''}`}>
         {isLegacy ? enemy.name : `${RANK_NAME[enemy.rank]} of ${SUIT_GLYPH[enemy.suit]}`}

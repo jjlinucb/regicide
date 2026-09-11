@@ -2106,3 +2106,432 @@ body:has(.card-preview) {
   .card-preview { padding: 20px 14px 44px; }
   .card-preview-section { padding: 12px; }
 }
+
+/* ---------- Legacy story states ----------
+   A boss is visually cursed without being marked `corrupted` in game logic. Actual corruption, restoration, and
+   Evergreen remain separate card states with their own rules, so the art always tells the same story as the engine. */
+.playing-card.cursed {
+  border-color: #47334e;
+  box-shadow: 0 3px 10px rgba(20, 6, 30, 0.64), inset 0 0 0 1px rgba(182, 124, 169, 0.24);
+}
+
+.playing-card.cursed .card-art {
+  filter: saturate(0.62) contrast(1.1) brightness(0.62) sepia(0.15) hue-rotate(228deg);
+}
+
+.playing-card.cursed .card-art::after {
+  background:
+    radial-gradient(ellipse at 50% 44%, transparent 24%, rgba(22, 7, 34, 0.24) 67%, rgba(11, 4, 19, 0.78) 100%),
+    linear-gradient(to bottom, rgba(15, 5, 25, 0.64), rgba(15, 5, 25, 0.1) 38%, rgba(15, 5, 25, 0.56) 100%);
+}
+
+.playing-card.cursed .rank,
+.playing-card.cursed .glyph,
+.playing-card.cursed .class-glyph-row {
+  border-color: rgba(232, 181, 225, 0.72);
+  background: linear-gradient(145deg, rgba(31, 13, 44, 0.96), rgba(66, 32, 72, 0.88));
+}
+
+.playing-card.cursed .legacy-card-name {
+  background: rgba(24, 8, 35, 0.8);
+}
+
+.playing-card.restored {
+  border-color: #f6d970;
+  box-shadow: 0 0 0 1px rgba(255, 251, 190, 0.72), 0 0 13px rgba(255, 230, 119, 0.58);
+}
+
+.playing-card.restored .card-art {
+  filter: saturate(1.04) contrast(0.88) brightness(1.19) sepia(0.02);
+}
+
+.playing-card.restored .card-art::after {
+  background:
+    radial-gradient(ellipse at 50% 34%, rgba(255, 253, 211, 0.58), transparent 54%),
+    linear-gradient(to bottom, rgba(255, 250, 207, 0.2), transparent 38%, rgba(208, 245, 239, 0.12));
+}
+
+.playing-card.restored .rank,
+.playing-card.restored .glyph,
+.playing-card.restored .class-glyph-row {
+  border-color: rgba(255, 245, 159, 0.9);
+  background: linear-gradient(145deg, rgba(31, 91, 91, 0.88), rgba(74, 148, 132, 0.8));
+}
+
+.playing-card.evergreen {
+  border-color: #cfe778;
+  box-shadow: 0 0 0 1px rgba(242, 255, 175, 0.75), 0 0 15px rgba(150, 220, 87, 0.58);
+}
+
+.playing-card.evergreen .card-art {
+  filter: saturate(1.13) contrast(0.91) brightness(1.16) sepia(0.08) hue-rotate(11deg);
+}
+
+.playing-card.evergreen .card-art::after {
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(214, 255, 151, 0.48), transparent 57%),
+    linear-gradient(to bottom, rgba(241, 255, 188, 0.16), transparent 45%, rgba(103, 179, 76, 0.16));
+}
+
+.playing-card.evergreen .rank,
+.playing-card.evergreen .glyph,
+.playing-card.evergreen .class-glyph-row {
+  border-color: rgba(239, 255, 175, 0.9);
+  background: linear-gradient(145deg, rgba(40, 100, 50, 0.9), rgba(91, 156, 67, 0.82));
+}
+
+/* A whisper of paper grain and diagonal engraving makes the standard, uncursed portraits belong with the new
+   gravure sheets too. Cursed enemies inherit stronger marks; restoration and Evergreen deliberately stay airy. */
+.playing-card.illustrated .card-art::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(157deg, rgba(71, 43, 26, 0.13) 0 1px, transparent 1px 4px);
+  mix-blend-mode: multiply;
+  opacity: 0.2;
+}
+
+.playing-card.cursed .card-art::before { opacity: 0.34; }
+.playing-card.restored .card-art::before { opacity: 0.07; }
+.playing-card.evergreen .card-art::before { opacity: 0.1; }
+
+.legacy-playmat .deck-inspector-hint {
+  position: relative;
+  z-index: 1;
+  margin: -5px 0 10px;
+  color: #e4edc5;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+/* ---------- Compact illustrated Legacy table ----------
+   The desktop board is shaped around a 14-inch laptop.  Rather than making a miniature version of a large
+   physical mat, each functional zone gets the feeling of a small illustrated map: a reserve forest, a boss
+   clearing, expedition camps, and a short journey record.  The decorative layers never cover a card or control. */
+
+.legacy-playmat {
+  padding: 10px;
+  border-radius: 20px;
+  background:
+    radial-gradient(ellipse at 9% 9%, rgba(229, 245, 166, 0.28), transparent 19%),
+    radial-gradient(ellipse at 88% 88%, rgba(103, 186, 152, 0.22), transparent 25%),
+    repeating-linear-gradient(0deg, rgba(249, 255, 212, 0.035) 0 1px, transparent 1px 8px),
+    linear-gradient(135deg, #78a86f 0%, #4f9075 48%, #34766e 100%);
+}
+
+.legacy-playmat::before {
+  inset: 5px;
+  border-radius: 15px;
+  opacity: 0.55;
+  background:
+    linear-gradient(110deg, transparent 0 48%, rgba(255, 247, 180, 0.2) 48.2% 48.5%, transparent 48.8%),
+    radial-gradient(circle at 4% 15%, transparent 0 16px, rgba(246, 230, 151, 0.35) 17px 18px, transparent 19px),
+    radial-gradient(circle at 96% 83%, transparent 0 21px, rgba(246, 230, 151, 0.3) 22px 23px, transparent 24px);
+}
+
+.legacy-playmat .relic-row {
+  gap: 4px;
+  padding: 0 2px 7px;
+}
+
+.legacy-playmat .relic-chip {
+  gap: 3px;
+  padding: 3px 7px 3px 4px;
+  font-size: 0.64rem;
+}
+
+.legacy-playmat .relic-glyph { font-size: 0.72rem; }
+
+.legacy-playmat .game-board,
+.legacy-playmat .game-board.has-captured-piles {
+  grid-template-columns: minmax(158px, 0.82fr) minmax(212px, 1.1fr) minmax(168px, 0.84fr);
+  gap: 9px;
+}
+
+.legacy-playmat .game-board {
+  grid-template-areas:
+    'decks enemy players'
+    'decks zone log';
+}
+
+.legacy-playmat .game-board.has-captured-piles {
+  grid-template-areas:
+    'piles enemy players'
+    'decks zone log';
+}
+
+.legacy-playmat .z-enemy .enemy-card {
+  min-height: 0;
+  padding: 9px 10px 10px;
+  gap: 4px;
+  border-radius: 17px;
+  background:
+    radial-gradient(ellipse at 50% 12%, rgba(255, 244, 181, 0.92), transparent 35%),
+    linear-gradient(155deg, rgba(255, 251, 220, 0.98), rgba(213, 235, 192, 0.96));
+}
+
+.legacy-playmat .z-enemy .enemy-card::before {
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+}
+
+.legacy-playmat .boss-playing-card .playing-card {
+  width: 104px;
+  height: 146px;
+}
+
+.legacy-playmat .boss-playing-card .playing-card .rank { font-size: 2.1rem; }
+.legacy-playmat .boss-playing-card .playing-card .glyph { font-size: 2.25rem; }
+.legacy-playmat .enemy-title { font-size: 1.08rem; line-height: 1.1; text-align: center; }
+.legacy-playmat .immunity-row { gap: 4px; }
+.legacy-playmat .immunity-label { font-size: 0.7rem; }
+.legacy-playmat .immunity-chip { width: 21px; height: 21px; border-width: 1.5px; font-size: 0.78rem; }
+.legacy-playmat .health-bar-track { height: 9px; }
+.legacy-playmat .enemy-stats { gap: 9px; font-size: 0.74rem; }
+
+.legacy-playmat .expedition-map {
+  min-height: 100%;
+  padding: 9px;
+  border: 2px solid #cdb86c;
+  border-radius: 17px;
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(227, 246, 183, 0.22), transparent 47%),
+    linear-gradient(132deg, rgba(8, 47, 56, 0.95), rgba(18, 55, 62, 0.98));
+  box-shadow: inset 0 0 0 1px rgba(247, 231, 155, 0.18), inset 0 1px 12px rgba(0, 0, 0, 0.46), 0 4px 0 rgba(8, 48, 34, 0.32), 0 7px 14px rgba(3, 24, 19, 0.24);
+}
+
+.legacy-playmat .expedition-map::before {
+  content: '';
+  position: absolute;
+  inset: 7px;
+  z-index: 0;
+  border-radius: 12px;
+  pointer-events: none;
+  opacity: 0.55;
+  background:
+    linear-gradient(152deg, transparent 0 54%, rgba(165, 217, 152, 0.18) 54.3% 55%, transparent 55.3%),
+    repeating-linear-gradient(117deg, rgba(216, 233, 168, 0.1) 0 1px, transparent 1px 24px);
+}
+
+.legacy-playmat .deck-inspector-hint {
+  margin: 0 2px 6px;
+  font-size: 0.59rem;
+  line-height: 1.25;
+}
+
+.legacy-playmat .expedition-map .deck-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+.legacy-playmat .map-pile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 103px;
+  border: 1px solid rgba(214, 230, 150, 0.36);
+  border-radius: 11px;
+  overflow: visible;
+  background: linear-gradient(145deg, rgba(44, 95, 82, 0.58), rgba(16, 40, 57, 0.3));
+}
+
+.legacy-playmat .map-pile::before {
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  color: rgba(229, 239, 190, 0.52);
+  font-size: 0.42rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  pointer-events: none;
+}
+
+.legacy-playmat .reserve-pile { background: linear-gradient(140deg, rgba(55, 120, 98, 0.7), rgba(16, 57, 68, 0.48)); }
+.legacy-playmat .reserve-pile::before { content: 'DEEP WOODS'; }
+.legacy-playmat .discard-pile { background: linear-gradient(140deg, rgba(79, 98, 113, 0.62), rgba(25, 47, 69, 0.52)); }
+.legacy-playmat .discard-pile::before { content: 'WAYSTONE'; }
+.legacy-playmat .banished-pile { background: linear-gradient(140deg, rgba(65, 81, 101, 0.62), rgba(34, 42, 68, 0.52)); }
+.legacy-playmat .banished-pile::before { content: 'SHADOW GATE'; }
+.legacy-playmat .enemy-pile { background: linear-gradient(140deg, rgba(104, 66, 101, 0.6), rgba(43, 31, 68, 0.55)); }
+.legacy-playmat .enemy-pile::before { content: 'CASTLE ROAD'; }
+.legacy-playmat .kinfolk-pile::before { content: 'KIN'; }
+
+.legacy-playmat .map-pile .card-pile { gap: 2px; }
+.legacy-playmat .map-pile .card-pile-face { padding: 2px; }
+.legacy-playmat .map-pile .card-pile-fan,
+.legacy-playmat .map-pile .card-back-stack { width: 60px; height: 84px; }
+.legacy-playmat .map-pile .card-pile-empty-slot { width: 60px; height: 84px; font-size: 0.58rem; }
+.legacy-playmat .map-pile .card-back { border-radius: 9px; }
+.legacy-playmat .map-pile .card-back::after { inset: 6px; border-radius: 5px; }
+.legacy-playmat .map-pile .card-pile-fan-card { transform: translate(calc(var(--fan-depth) * 3px), calc(var(--fan-depth) * -2px)) rotate(var(--fan-rotate)); }
+.legacy-playmat .map-pile .card-pile-count { min-width: 18px; height: 18px; font-size: 0.62rem; padding: 0 3px; }
+.legacy-playmat .map-pile .card-pile-label { font-size: 0.58rem; }
+
+.legacy-playmat .map-panel-heading {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.legacy-playmat .map-panel-caption {
+  color: #617757;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.legacy-playmat .party-camp-map {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  padding: 9px;
+  background:
+    radial-gradient(ellipse at 56% 92%, rgba(83, 139, 79, 0.22), transparent 35%),
+    linear-gradient(153deg, rgba(255, 254, 239, 0.98), rgba(222, 239, 209, 0.98));
+}
+
+.legacy-playmat .party-camp-map::after {
+  content: '';
+  position: absolute;
+  right: -10px;
+  bottom: -13px;
+  width: 78%;
+  height: 58%;
+  opacity: 0.17;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 22% 100%, #3d7d62 0 17%, transparent 18%),
+    radial-gradient(ellipse at 51% 100%, #3d7d62 0 23%, transparent 24%),
+    radial-gradient(ellipse at 81% 100%, #3d7d62 0 15%, transparent 16%),
+    linear-gradient(154deg, transparent 0 46%, #3d7d62 46.5% 49%, transparent 49.5%);
+}
+
+.legacy-playmat .party-camp-map .player-strip {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 6px;
+  overflow: visible;
+  padding: 3px 0 0;
+}
+
+.legacy-playmat .party-camp-map .player-map {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex: initial;
+  min-height: 64px;
+  overflow: hidden;
+  align-content: flex-end;
+  gap: 4px;
+  padding: 28px 7px 6px;
+  border: 1.5px solid rgba(38, 74, 58, 0.62);
+  border-radius: 12px;
+  color: #fdfbe8;
+  font-size: 0.68rem;
+  text-shadow: 0 1px 2px rgba(3, 25, 21, 0.8);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 233, 0.2), 0 2px 4px rgba(10, 48, 37, 0.18);
+}
+
+.legacy-playmat .party-camp-map .player-map > * { position: relative; z-index: 1; }
+.legacy-playmat .party-camp-map .player-map::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.74;
+  background:
+    linear-gradient(to top, rgba(8, 39, 39, 0.7), transparent 56%),
+    linear-gradient(145deg, transparent 0 46%, rgba(10, 59, 66, 0.68) 46.5% 65%, transparent 65.5%),
+    radial-gradient(ellipse at 16% 100%, rgba(16, 73, 68, 0.78) 0 19%, transparent 20%),
+    radial-gradient(ellipse at 70% 100%, rgba(16, 73, 68, 0.78) 0 25%, transparent 26%);
+}
+
+.legacy-playmat .party-camp-map .player-map-0 { background: linear-gradient(135deg, #75b2a3, #2d6b72); }
+.legacy-playmat .party-camp-map .player-map-1 { background: linear-gradient(135deg, #e0718a, #563a72); }
+.legacy-playmat .party-camp-map .player-map-2 { background: linear-gradient(135deg, #86bee6, #2b5e91); }
+.legacy-playmat .party-camp-map .player-map-3 { background: linear-gradient(135deg, #f1b66c, #7b4d78); }
+.legacy-playmat .party-camp-map .player-map.active-turn { border-color: #ffe084; box-shadow: 0 0 0 1px #ffe084, 0 2px 8px rgba(123, 83, 19, 0.45); }
+
+.legacy-playmat .journey-log-map {
+  min-height: 0;
+  padding: 9px;
+  background:
+    linear-gradient(118deg, transparent 0 18%, rgba(151, 193, 129, 0.14) 18.4% 19%, transparent 19.4%),
+    linear-gradient(150deg, rgba(255, 254, 239, 0.98), rgba(228, 241, 214, 0.98));
+}
+
+.legacy-playmat .journey-log-map .log-panel { max-height: 116px; padding: 7px 9px; font-size: 0.72rem; }
+
+.legacy-playmat .mission-zone-panel {
+  min-height: 82px;
+  padding: 9px 11px;
+  border-radius: 13px;
+  background:
+    radial-gradient(ellipse at 82% 20%, rgba(154, 205, 128, 0.22), transparent 35%),
+    linear-gradient(150deg, rgba(255, 254, 239, 0.98), rgba(226, 241, 210, 0.98));
+}
+
+.legacy-playmat .mission-zone-header { gap: 5px; }
+.legacy-playmat .mission-zone-caption { font-size: 0.66rem; line-height: 1.22; }
+.legacy-playmat .mission-zone-cards { gap: 4px; max-height: 122px; }
+
+@media (min-width: 901px) and (max-height: 900px) {
+  .legacy-playmat { padding: 8px; }
+  .legacy-playmat .relic-row { padding-bottom: 5px; }
+  .legacy-playmat .game-board,
+  .legacy-playmat .game-board.has-captured-piles { gap: 7px; }
+  .legacy-playmat .map-pile { min-height: 94px; }
+  .legacy-playmat .map-pile .card-pile-fan,
+  .legacy-playmat .map-pile .card-back-stack { width: 54px; height: 76px; }
+  .legacy-playmat .map-pile .card-pile-empty-slot { width: 54px; height: 76px; }
+  .legacy-playmat .boss-playing-card .playing-card { width: 94px; height: 132px; }
+  .legacy-playmat .z-enemy .enemy-card { padding: 7px 8px 8px; }
+  .legacy-playmat .mission-zone-panel { min-height: 70px; padding: 7px 9px; }
+}
+
+/* Original illustrated terrain is deliberately held behind a misty wash: it gives the board and player maps
+   real places to inhabit without ever turning the game into a seek-and-find picture. */
+.legacy-playmat::before {
+  opacity: 0.28;
+  background:
+    linear-gradient(135deg, rgba(84, 157, 113, 0.7), rgba(42, 105, 97, 0.76)),
+    url('/board-art/legacy-table-terrain.png') center / cover;
+}
+
+.legacy-playmat .party-camp-map .player-map::before {
+  z-index: 0;
+  opacity: 1;
+  background-repeat: no-repeat;
+  background-size: 200% 200%;
+}
+
+.legacy-playmat .party-camp-map .player-map-0::before {
+  background-image: linear-gradient(to top, rgba(5, 33, 38, 0.7), rgba(5, 33, 38, 0.04) 70%), url('/board-art/player-camp-maps.png');
+  background-position: center, left top;
+}
+
+.legacy-playmat .party-camp-map .player-map-1::before {
+  background-image: linear-gradient(to top, rgba(35, 13, 38, 0.72), rgba(35, 13, 38, 0.05) 70%), url('/board-art/player-camp-maps.png');
+  background-position: center, right top;
+}
+
+.legacy-playmat .party-camp-map .player-map-2::before {
+  background-image: linear-gradient(to top, rgba(6, 33, 59, 0.7), rgba(6, 33, 59, 0.04) 70%), url('/board-art/player-camp-maps.png');
+  background-position: center, left bottom;
+}
+
+.legacy-playmat .party-camp-map .player-map-3::before {
+  background-image: linear-gradient(to top, rgba(49, 29, 58, 0.7), rgba(49, 29, 58, 0.04) 70%), url('/board-art/player-camp-maps.png');
+  background-position: center, right bottom;
+}

@@ -63,19 +63,19 @@ function bossSheet(sheet: string, names: string[], columns: number, rows?: numbe
 /** Each named Legacy enemy receives its own portrait cell, rather than falling through to the generic court faces. */
 const MISSION_BOSS_ART: Record<string, CardArt> = {
   ...bossSheet(
-    'mission-2-bosses-soft',
+    'mission-2-bosses-gravure',
     ['Coilfang Broodling', 'Ashmaw Broodling', 'Duskscale Broodling', 'Bramble-Throat Broodling', 'Grey Fen Broodling', 'The Nine-Coiled Matriarch'],
     3,
     2,
   ),
   ...bossSheet(
-    'mission-3-bosses',
+    'mission-3-bosses-gravure',
     ['Midnight the Cat', 'Japat', 'Blast', 'Senior Instructor Vail', 'Senior Instructor Rowe', 'The Grand Mage'],
     3,
     2,
   ),
   ...bossSheet(
-    'mission-4-bosses',
+    'mission-4-bosses-gravure',
     [
       'Specimen 10-C: The Clawmass',
       'Specimen 10-D: The Featherwrong',
@@ -94,7 +94,7 @@ const MISSION_BOSS_ART: Record<string, CardArt> = {
     3,
   ),
   ...bossSheet(
-    'mission-5-bosses',
+    'mission-5-bosses-gravure',
     [
       'Sporeling Choker',
       'Sporeling Piper',
@@ -109,13 +109,13 @@ const MISSION_BOSS_ART: Record<string, CardArt> = {
     2,
   ),
   ...bossSheet(
-    'mission-6-bosses',
+    'mission-6-bosses-gravure',
     ['Statue Warden', 'Statue Cantor', 'Statue Penitent', 'Statue Sentinel', 'Graven Warden', 'Graven Cantor', 'Graven Penitent', 'Graven Sentinel'],
     4,
     2,
   ),
   ...bossSheet(
-    'mission-7-bosses',
+    'mission-7-bosses-gravure',
     [
       'Schole: Glimmerfin',
       'Schole: Murkgill',
@@ -134,7 +134,7 @@ const MISSION_BOSS_ART: Record<string, CardArt> = {
     3,
   ),
   ...bossSheet(
-    'mission-8-bosses-soft',
+    'mission-8-bosses-gravure',
     [
       'Grael Stonejaw',
       'Mossen Foghide',
@@ -153,7 +153,7 @@ const MISSION_BOSS_ART: Record<string, CardArt> = {
     3,
   ),
   ...bossSheet(
-    'mission-9-bosses',
+    'mission-9-bosses-gravure',
     [
       'Loreguard: Ember-Wrought',
       'Loreguard: Cinder-Tongue',
@@ -169,13 +169,13 @@ const MISSION_BOSS_ART: Record<string, CardArt> = {
     3,
   ),
   ...bossSheet(
-    'mission-11-bosses',
+    'mission-11-bosses-gravure',
     ['Warden of the Depths: Ashclad', 'Warden of the Depths: Bellsong', 'Warden of the Depths: Hollowmourn', 'Warden of the Depths: Ironvow', 'Evil Goran'],
     3,
     2,
   ),
   ...bossSheet(
-    'mission-12-bosses',
+    'mission-12-bosses-gravure',
     [
       'Queen of Ash',
       'Queen of Silence',

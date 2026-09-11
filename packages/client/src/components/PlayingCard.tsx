@@ -123,6 +123,7 @@ export function PlayingCard({
   small,
   blocked,
   rankLabelOverride,
+  cursed = false,
 }: {
   card: Card;
   selected?: boolean;
@@ -130,6 +131,8 @@ export function PlayingCard({
   small?: boolean;
   /** True when this card's suit power currently has no effect on the boss (immune, unbroken). */
   blocked?: boolean;
+  /** Visual-only curse treatment for an enemy card. It never changes a card's game rules. */
+  cursed?: boolean;
   /**
    * Replaces the computed rank label on the card face. Used for Legacy mission enemies, whose real `rank` is an
    * inert 'J' placeholder and whose printed letter comes from the mission data instead (see
@@ -173,7 +176,7 @@ export function PlayingCard({
   return (
     <button
       type="button"
-      className={`playing-card${art ? ' illustrated' : ''}${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}${card.corrupted ? ' corrupted' : ''}${card.restored ? ' restored' : ''}`}
+      className={`playing-card${art ? ' illustrated' : ''}${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}${cursed ? ' cursed' : ''}${card.corrupted ? ' corrupted' : ''}${card.restored ? ' restored' : ''}${card.evergreen ? ' evergreen' : ''}`}
       onClick={onClick}
       style={Object.keys(style).length > 0 ? style : undefined}
       aria-label={cardLabel(card)}

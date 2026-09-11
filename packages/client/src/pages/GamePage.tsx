@@ -456,8 +456,11 @@ export function GamePage({
             />
           </div>
           <div className="z-players">
-            <div className="board-panel">
-              <span className="board-panel-title">Party</span>
+            <div className="board-panel party-camp-map">
+              <div className="map-panel-heading">
+                <span className="board-panel-title">Party camp</span>
+                <span className="map-panel-caption">Your expedition</span>
+              </div>
               <PlayerList state={state} myPlayerId={myPlayerId} />
             </div>
           </div>
@@ -465,8 +468,11 @@ export function GamePage({
             <DeckPiles state={state} myPlayerId={myPlayerId} />
           </div>
             <div className="z-log">
-              <div className="board-panel">
-                <span className="board-panel-title">Log</span>
+              <div className="board-panel journey-log-map">
+                <div className="map-panel-heading">
+                  <span className="board-panel-title">Journey log</span>
+                  <span className="map-panel-caption">Recent events</span>
+                </div>
                 <ActionLog state={state} />
               </div>
             </div>
