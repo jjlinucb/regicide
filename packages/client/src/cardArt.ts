@@ -63,7 +63,7 @@ function bossSheet(sheet: string, names: string[], columns: number, rows?: numbe
 /** Each named Legacy enemy receives its own portrait cell, rather than falling through to the generic court faces. */
 const MISSION_BOSS_ART: Record<string, CardArt> = {
   ...bossSheet(
-    'mission-2-bosses',
+    'mission-2-bosses-soft',
     ['Coilfang Broodling', 'Ashmaw Broodling', 'Duskscale Broodling', 'Bramble-Throat Broodling', 'Grey Fen Broodling', 'The Nine-Coiled Matriarch'],
     3,
     2,
@@ -134,7 +134,7 @@ const MISSION_BOSS_ART: Record<string, CardArt> = {
     3,
   ),
   ...bossSheet(
-    'mission-8-bosses',
+    'mission-8-bosses-soft',
     [
       'Grael Stonejaw',
       'Mossen Foghide',
