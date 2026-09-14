@@ -110,6 +110,27 @@ describe('legacy: mission setup', () => {
     expect(handCount + state.tavernDeck.length).toBe(40);
   });
 
+  it('records the actual defeated boss for the playmat tracker when fight order differs from the printed roster', () => {
+    const state = startMission(1, [
+      { name: 'First in the printed roster', suit: 'H', health: 20, attack: 10 },
+      { name: 'Drawn first instead', suit: 'C', health: 2, attack: 0 },
+    ]);
+    // Simulates a shuffled deck revealing the second marker first. The tracker must cross out that marker,
+    // rather than blindly fading the first marker in its fixed physical layout.
+    const printedFirst = state.currentEnemy!;
+    const drawnFirst = state.castleDeck.shift()!;
+    state.currentEnemy = drawnFirst;
+    state.castleDeck = [printedFirst];
+    state.players[0].hand = [suited('H', '2')];
+
+    const result = ensureOk(applyAction(state, { type: 'PLAY_CARDS', playerId: state.players[0].id, cardIds: [state.players[0].hand[0].id] }));
+
+    expect(result.state.defeatedLegacyEnemies).toEqual([
+      expect.objectContaining({ name: 'Drawn first instead', suit: 'C', maxHealth: 2, baseAttack: 0 }),
+    ]);
+    expect(redactStateFor(result.state, result.state.players[0].id).defeatedLegacyEnemies).toEqual(result.state.defeatedLegacyEnemies);
+  });
+
   it('every non-standard-castle, non-corrupted-party-enemies mission has at least one enemy and converts cleanly to engine specs', () => {
     expect(MISSIONS.length).toBe(12);
     for (const mission of MISSIONS) {

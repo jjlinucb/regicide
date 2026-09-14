@@ -1,7 +1,7 @@
 import { cardValue, classForCard, CLASS_THEME, JESTER_ABILITY_TEXT, SUIT_ABILITY_TEXT, SUIT_TO_CLASS, type Card } from '@regicide/shared';
 import { cardArtFor, cardArtStyle, JESTER_ART } from '../cardArt';
 import { useArtSkin } from '../artSkin';
-import { ClassIcon } from './ClassIcon';
+import { ClassIcon, type GameIconId } from './ClassIcon';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
 const SUIT_NAME: Record<string, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
@@ -15,7 +15,20 @@ const RED_SUITS = new Set(['H', 'D']);
  * collapse the (still-needed) non-Legacy branch to `never`.
  */
 function isLegacyCard(card: Extract<Card, { kind: 'suited' }>): boolean {
-  return Boolean(card.name) || Boolean(card.noSuitPower) || Boolean(card.wildSuit) || Boolean(card.flexibleComboRank);
+  return Boolean(
+    card.name ||
+      card.noSuitPower ||
+      card.wildSuit ||
+      card.flexibleComboRank ||
+      card.arcane ||
+      card.reaver ||
+      card.guardian ||
+      card.druid ||
+      card.chanter ||
+      card.evergreen ||
+      card.corrupted ||
+      card.restored,
+  );
 }
 
 /** Classic Regicide Endless Mode only: a King pushed past its ceiling shows as "K+N" (see SuitedCard.tier). */
@@ -68,6 +81,51 @@ export function cardClasses(card: Extract<Card, { kind: 'suited' }>) {
   return themes;
 }
 
+interface AbilityMark {
+  id: GameIconId;
+  color: string;
+  label: string;
+  status?: boolean;
+}
+
+/** The card has one visual home for everything it can do: its classes plus its current story-state powers. */
+function cardAbilityMarks(
+  card: Extract<Card, { kind: 'suited' }>,
+  legacy: boolean,
+  cursed: boolean,
+  isWildUnresolved: boolean,
+): AbilityMark[] {
+  // Pilgrims and the other deliberately inert cards never receive a pretend class seal. Their empty portrait is
+  // the point: they are a body in the deck, not a power to remember.
+  const themes = card.pilgrim || card.noSuitPower
+    ? []
+    : isWildUnresolved
+      ? [CLASS_THEME.MERCENARY]
+      : legacy
+        ? cardClasses(card)
+        : [SUIT_TO_CLASS[card.suit]];
+  const marks: AbilityMark[] = themes.map((theme) => ({ id: theme.id, color: theme.color, label: theme.name }));
+  if (card.special) marks.push({ id: 'SPECIAL', color: '#ffe48c', label: 'Signature ability', status: true });
+  if (cursed) marks.push({ id: 'CURSED', color: '#d8a8e6', label: 'Cursed', status: true });
+  if (card.corrupted) marks.push({ id: 'CORRUPTED', color: '#edb2ff', label: 'Corrupted', status: true });
+  if (card.restored) marks.push({ id: 'RESTORED', color: '#f5f0a7', label: 'Restored', status: true });
+  return marks;
+}
+
+/** A face label should identify a friendly card at a glance, without covering its portrait or duplicating the full name in the gallery and tooltip. */
+function cardFaceLabel(card: Extract<Card, { kind: 'suited' }>, cursed: boolean, isWildUnresolved: boolean): string | null {
+  if (cursed) return null;
+  if (card.pilgrim) return 'Pilgrim';
+  if (isWildUnresolved) return 'Any suit';
+  if (!card.name) return classForCard(card).name;
+  if (card.name === 'High Arcana') return 'Arcana';
+
+  const withoutState = card.name.split(',')[0];
+  const withoutTitle = withoutState.replace(/^(Sister|Brother|Mother|Squire|Dame)\s+/i, '');
+  const shortName = withoutTitle.replace(/\s+the\s+.*$/i, '').trim().split(/\s+/)[0];
+  return shortName || null;
+}
+
 export function cardLabel(card: Card): string {
   if (card.kind === 'jester') return 'Jester';
   const rankLabel = tieredRankLabel(card);
@@ -111,7 +169,7 @@ export function cardAbilityText(card: Card): string {
     const reaverSuffix = card.reaver
       ? " Reveals cards off the reserve deck equal to this attack's total value (including anything combo'd with it), then choose one to add its strength to the attack — every revealed card is banished. Always doubles the play's total damage."
       : '';
-    const displayName = card.name ?? (card.wildSuit ? 'Any-Suit Ace' : 'Mercenary');
+    const displayName = card.name ?? (card.wildSuit ? 'Any-Suit Ace' : cls.name);
     return `${displayName} — ${cls.name}, strength ${cardValue(card)}. ${cls.tag}.${specialSuffix}${dualSuffix}${extraSuffix}${stickerSuffix}${flexSuffix}${wildSuffix}${corruptedSuffix}${restoredSuffix}${reaverSuffix}`;
   }
   const tierSuffix = card.tier ? ` (upgraded ${card.tier} tier${card.tier > 1 ? 's' : ''} past King, from an Endless Mode win)` : '';
@@ -164,7 +222,6 @@ export function PlayingCard({
   const red = !legacy && RED_SUITS.has(card.suit);
   const rankLabel = rankLabelOverride ?? tieredRankLabel(card);
   const classInfo = legacy ? classForCard(card) : null;
-  const classThemes = legacy ? cardClasses(card) : [];
   // An unresolved Mercenary any-suit Ace (see SuitedCard.wildSuit) still carries its inert placeholder suit ('H')
   // in-hand — classForCard would otherwise render it as a plain Cleric card, misleadingly hiding that it needs a
   // suit chosen before it can be played (see GamePage's chosenSuits picker).
@@ -173,43 +230,32 @@ export function PlayingCard({
     ...(small ? { width: 44, height: 62 } : {}),
     ...(isWildUnresolved ? { color: CLASS_THEME.MERCENARY.color } : classInfo ? { color: classInfo.color } : {}),
   };
-  const glyph = SUIT_GLYPH[card.suit];
-  const iconId = isWildUnresolved ? 'MERCENARY' : classInfo?.id;
+  const abilityMarks = cardAbilityMarks(card, legacy, cursed, isWildUnresolved);
+  const visibleAbilityMarks = small ? abilityMarks.slice(0, 1) : abilityMarks;
   const abilityText = cardAbilityText(card);
+  const faceLabel = legacy && !small ? cardFaceLabel(card, cursed, isWildUnresolved) : null;
   const art = cardArtFor(card);
   return (
     <button
       type="button"
-      className={`playing-card art-skin-${skin}${art ? ' illustrated' : ''}${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}${cursed ? ' cursed' : ''}${card.corrupted ? ' corrupted' : ''}${card.restored ? ' restored' : ''}${card.evergreen ? ' evergreen' : ''}`}
+      className={`playing-card art-skin-${skin}${art ? ' illustrated' : ''}${red ? ' red' : ''}${selected ? ' selected' : ''}${blocked ? ' blocked' : ''}${card.special ? ' special' : ''}${cursed ? ' cursed' : ''}${card.corrupted ? ' corrupted' : ''}${card.restored ? ' restored' : ''}${card.evergreen ? ' evergreen' : ''}${card.pilgrim ? ' pilgrim' : ''}`}
       onClick={onClick}
       style={Object.keys(style).length > 0 ? style : undefined}
       aria-label={cardLabel(card)}
       title={blocked ? `${abilityText} — no effect on this boss` : abilityText}
     >
       {art && <span className="card-art" style={cardArtStyle(art, skin)} aria-hidden="true" />}
-      {card.special && !small && <span className="special-badge" aria-hidden="true">✦</span>}
-      {card.corrupted && !small && <span className="corrupted-badge" aria-label="Corrupted"><ClassIcon id="CORRUPTED" /></span>}
-      {card.restored && !small && <span className="restored-badge" aria-label="Restored"><ClassIcon id="RESTORED" /></span>}
       <span className="rank">{rankLabel}</span>
-      {/* Every class the card carries, side by side at one size (John, 2026-09-06) — they resolve together when
-          the card is played, so none of them is a footnote to the others. A single-class card is the common
-          case and looks exactly as it always did; only a multi-class card spreads. See cardClasses. */}
-      {classThemes.length > 1 && !small && !isWildUnresolved ? (
-        <span className={`glyph class-glyph-row count-${Math.min(classThemes.length, 4)}`}>
-          {classThemes.map((t) => (
-            <span key={t.id} className="class-glyph" style={{ color: t.color }}>
-              <ClassIcon id={t.id} />
+      {visibleAbilityMarks.length > 0 && (
+        <span className={`ability-stack count-${Math.min(visibleAbilityMarks.length, 6)}${small ? ' compact' : ''}`} aria-hidden="true">
+          {visibleAbilityMarks.map((mark, index) => (
+            <span key={`${mark.id}-${index}`} className={`ability-mark${mark.status ? ' status' : ''}`} style={{ color: mark.color }}>
+              <ClassIcon id={mark.id} />
             </span>
           ))}
         </span>
-      ) : (
-        <span className="glyph">{iconId ? <ClassIcon id={iconId} /> : glyph}</span>
       )}
-      {legacy && !small && (
-        <span className="legacy-card-name">
-          {blocked ? 'No effect' : isWildUnresolved ? 'Choose suit' : card.name ?? 'Mercenary'}
-        </span>
-      )}
+      {faceLabel && <span className="legacy-card-name">{faceLabel}</span>}
       {blocked && !small && !legacy && <span className="no-effect-badge">No effect</span>}
     </button>
   );

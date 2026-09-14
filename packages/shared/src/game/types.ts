@@ -312,6 +312,21 @@ export interface EnemyState {
   sourceCard?: Card;
 }
 
+/**
+ * A defeated Legacy enemy's public identity for the playmat tracker. It deliberately omits combat state and
+ * any deck position: the tracker can cross off the specific boss that fell without exposing the next draw.
+ */
+export interface DefeatedLegacyEnemy {
+  suit: Suit;
+  secondSuit?: Suit;
+  noClass?: boolean;
+  rank: 'J' | 'Q' | 'K';
+  rankLabel?: string;
+  name?: string;
+  maxHealth: number;
+  baseAttack: number;
+}
+
 /** A mission-specific enemy spec used to build a Legacy mission's enemy deck (see legacy/missions.ts). */
 export interface LegacyEnemySpec {
   name: string;
@@ -465,6 +480,8 @@ export interface GameState {
   pendingDamage: number;
   castleDeck: EnemyState[];
   currentEnemy: EnemyState | null;
+  /** Legacy-only: enemy identities that have actually been defeated, in defeat order, for the public playmat tracker. */
+  defeatedLegacyEnemies: DefeatedLegacyEnemy[];
   tavernDeck: Card[];
   discardPile: Card[];
   maxHandSize: number;
@@ -1292,6 +1309,8 @@ export interface ClientGameState {
   turnPhase: TurnPhase;
   pendingDamage: number;
   currentEnemy: EnemyState | null;
+  /** See GameState.defeatedLegacyEnemies. The tracker needs identities, never the hidden deck order. */
+  defeatedLegacyEnemies: DefeatedLegacyEnemy[];
   /** See engine.ts's resolvedEnemyAttack — the enemy's true current attack after every mission-specific buff/shield is folded in. Null when there's no current enemy. */
   liveEnemyAttack: number | null;
   /**

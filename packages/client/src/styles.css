@@ -1020,10 +1020,58 @@ button {
   color: #f0d48e;
 }
 
+/* A card's rank stays in the corner, while every power it carries lives in one centered seal. This prevents a
+   suit, a class, a sticker, and a curse from competing in four different corners of the same small portrait. */
+.playing-card .ability-stack {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  min-width: 1.5em;
+  min-height: 1.35em;
+  padding: 3px 4px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: color-mix(in srgb, currentColor 12%, var(--bg-card));
+  line-height: 1;
+}
+
+.playing-card .ability-stack.count-1 { grid-template-columns: 1fr; }
+.playing-card .ability-stack.count-2 { grid-template-columns: repeat(2, 1fr); }
+.playing-card .ability-stack.count-3 { grid-template-columns: repeat(3, 1fr); }
+.playing-card .ability-stack.count-4,
+.playing-card .ability-stack.count-5,
+.playing-card .ability-stack.count-6 { grid-template-columns: repeat(2, 1fr); }
+
+.playing-card .ability-mark {
+  display: grid;
+  place-items: center;
+  font-size: 1.34rem;
+}
+
+.playing-card .ability-stack.count-3 .ability-mark { font-size: 1.05rem; }
+.playing-card .ability-stack.count-4 .ability-mark { font-size: 1rem; }
+.playing-card .ability-stack.count-5 .ability-mark,
+.playing-card .ability-stack.count-6 .ability-mark { font-size: 0.87rem; }
+.playing-card .ability-mark .class-icon { width: 1em; height: 1em; }
+
+.playing-card.illustrated .ability-stack {
+  position: absolute;
+  z-index: 1;
+  top: 49%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-color: rgba(255, 239, 174, 0.8);
+  background: linear-gradient(145deg, rgba(9, 27, 29, 0.95), rgba(33, 43, 52, 0.84));
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.72), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.playing-card .ability-stack.compact { padding: 1px 2px; }
+.playing-card .ability-stack.compact .ability-mark { font-size: 0.9rem; }
+
 .playing-card.illustrated .legacy-card-name {
   z-index: 1;
   left: 4px;
-  right: 22px;
+  right: 4px;
   bottom: 5px;
   color: #fff8df;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 1);
@@ -2191,7 +2239,7 @@ button {
 
 .playing-card.illustrated .legacy-card-name {
   left: 4px;
-  right: 27px;
+  right: 4px;
   bottom: 4px;
   padding: 2px 4px;
   border-radius: 4px;
@@ -2325,7 +2373,8 @@ body:has(.card-preview) {
 
 .playing-card.cursed .rank,
 .playing-card.cursed .glyph,
-.playing-card.cursed .class-glyph-row {
+.playing-card.cursed .class-glyph-row,
+.playing-card.cursed .ability-stack {
   border-color: rgba(232, 181, 225, 0.72);
   background: linear-gradient(145deg, rgba(31, 13, 44, 0.96), rgba(66, 32, 72, 0.88));
 }
@@ -2351,7 +2400,8 @@ body:has(.card-preview) {
 
 .playing-card.restored .rank,
 .playing-card.restored .glyph,
-.playing-card.restored .class-glyph-row {
+.playing-card.restored .class-glyph-row,
+.playing-card.restored .ability-stack {
   border-color: rgba(255, 245, 159, 0.9);
   background: linear-gradient(145deg, rgba(31, 91, 91, 0.88), rgba(74, 148, 132, 0.8));
 }
@@ -2373,7 +2423,8 @@ body:has(.card-preview) {
 
 .playing-card.evergreen .rank,
 .playing-card.evergreen .glyph,
-.playing-card.evergreen .class-glyph-row {
+.playing-card.evergreen .class-glyph-row,
+.playing-card.evergreen .ability-stack {
   border-color: rgba(239, 255, 175, 0.9);
   background: linear-gradient(145deg, rgba(40, 100, 50, 0.9), rgba(91, 156, 67, 0.82));
 }
@@ -2409,7 +2460,8 @@ body:has(.card-preview) {
 
 .playing-card.corrupted.illustrated .rank,
 .playing-card.corrupted.illustrated .glyph,
-.playing-card.corrupted.illustrated .class-glyph-row {
+.playing-card.corrupted.illustrated .class-glyph-row,
+.playing-card.corrupted.illustrated .ability-stack {
   border-color: rgba(220, 159, 239, 0.78);
   background: linear-gradient(145deg, rgba(27, 7, 38, 0.96), rgba(79, 26, 91, 0.88));
 }
@@ -2852,7 +2904,8 @@ body:has(.card-preview) {
 
 .playing-card.art-skin-realms.illustrated .rank,
 .playing-card.art-skin-realms.illustrated .glyph,
-.playing-card.art-skin-realms.illustrated .class-glyph-row {
+.playing-card.art-skin-realms.illustrated .class-glyph-row,
+.playing-card.art-skin-realms.illustrated .ability-stack {
   border-color: rgba(247, 224, 163, 0.7);
   background: linear-gradient(145deg, rgba(30, 23, 17, 0.96), rgba(70, 52, 35, 0.83));
 }
@@ -2882,4 +2935,59 @@ body:has(.card-preview) {
   .art-skin-tablist button {
     flex: 1;
   }
+}
+
+/* ---------- Card-face hierarchy refresh ----------
+   Names no longer compete with the power seal. Friendly cards get one small identity line at the bottom; enemy
+   names live in the encounter panel and tracker, where their longer text can actually be read. */
+.playing-card.illustrated .legacy-card-name {
+  position: absolute;
+  z-index: 2;
+  right: 6px;
+  bottom: 5px;
+  left: 6px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fff9df;
+  font-size: 0.48rem;
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: 0.085em;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 1), 0 0 6px rgba(2, 10, 8, 0.92);
+  text-transform: uppercase;
+}
+
+.playing-card.illustrated .ability-stack {
+  top: 51%;
+  min-width: 1.68em;
+  min-height: 1.48em;
+  padding: 4px 5px;
+}
+
+.playing-card .ability-stack.count-1 .ability-mark { font-size: 1.46rem; }
+.playing-card .ability-stack.count-2 .ability-mark { font-size: 1.24rem; }
+.playing-card .ability-stack.count-3 {
+  grid-template-columns: repeat(2, 1fr);
+}
+.playing-card .ability-stack.count-3 .ability-mark:last-child {
+  grid-column: 1 / -1;
+}
+.playing-card .ability-stack.count-3 .ability-mark { font-size: 1.05rem; }
+.playing-card .ability-stack.count-4 .ability-mark { font-size: 1rem; }
+
+.playing-card.pilgrim .card-art::after {
+  background:
+    linear-gradient(to bottom, rgba(55, 40, 22, 0.22), transparent 31%, transparent 72%, rgba(55, 40, 22, 0.42)),
+    linear-gradient(90deg, rgba(33, 22, 12, 0.14), transparent 26%, transparent 74%, rgba(33, 22, 12, 0.14));
+}
+
+.playing-card.pilgrim .legacy-card-name {
+  bottom: 8px;
+  color: #ffe1a0;
+  font-size: 0.46rem;
+  letter-spacing: 0.18em;
 }

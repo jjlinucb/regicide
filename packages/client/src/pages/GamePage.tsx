@@ -440,8 +440,8 @@ export function GamePage({
             {isLegacy && state.legacyMissionId !== null && (
               <EnemyTracker
                 missionId={state.legacyMissionId}
-                remaining={state.castleDeckCount + (state.currentEnemy ? 1 : 0)}
-                currentEnemyName={state.currentEnemy?.name}
+                defeatedEnemies={state.defeatedLegacyEnemies}
+                currentEnemy={state.currentEnemy}
               />
             )}
           </div>

@@ -1,4 +1,4 @@
-import type { Card, CapturedPile, ChanterResolution, EnemyState, EngineResult, EvergreenCostResume, GameAction, GameState, PlayerState, Rank, SpecialAbilityId, Suit, SuitedCard, SuitlessImmuneClass, TurnPhase } from './types.js';
+import type { Card, CapturedPile, ChanterResolution, DefeatedLegacyEnemy, EnemyState, EngineResult, EvergreenCostResume, GameAction, GameState, PlayerState, Rank, SpecialAbilityId, Suit, SuitedCard, SuitlessImmuneClass, TurnPhase } from './types.js';
 import {
   buildBeastDeck,
   buildCapturedPiles,
@@ -1248,6 +1248,20 @@ function enemyLabel(enemy: { name?: string; rank: 'J' | 'Q' | 'K'; suit: string 
   return enemy.name ?? `${enemy.rank} of ${enemy.suit}`;
 }
 
+/** Captures only what the public enemy tracker needs after a Legacy boss falls, never the deck's future order. */
+function defeatedLegacyEnemy(enemy: EnemyState): DefeatedLegacyEnemy {
+  return {
+    suit: enemy.suit,
+    secondSuit: enemy.secondSuit,
+    noClass: enemy.noClass,
+    rank: enemy.rank,
+    rankLabel: enemy.rankLabel,
+    name: enemy.name,
+    maxHealth: enemy.maxHealth,
+    baseAttack: enemy.baseAttack,
+  };
+}
+
 const RANK_NAME: Record<'J' | 'Q' | 'K', string> = { J: 'Jack', Q: 'Queen', K: 'King' };
 
 /**
@@ -1400,6 +1414,9 @@ function dealDamageAndCheckDefeat(
   }
 
   if (state.ruleset === 'legacy') {
+    // The tracker's visual order is fixed, while several missions shuffle their actual boss order. Record this
+    // particular defeated enemy before advancing the deck so the client crosses off the right marker.
+    state.defeatedLegacyEnemies.push(defeatedLegacyEnemy(enemy));
     // Legacy enemies always go to the discard pile — no exact-damage/return-to-deck effect (that's mission-specific
     // in the physical game, and doesn't apply cleanly since Legacy enemies don't carry a J/Q/K-style card value).
     // `state.exactKillOnly` alone used to be enough to tell this was an exact hit, since every overkill was caught
@@ -1896,12 +1913,14 @@ function startGame(state: GameState, action: Extract<GameAction, { type: 'START_
 
   state.phase = 'IN_PROGRESS';
   state.ruleset = 'regicide';
+  state.legacyMissionId = null;
   state.players = players;
   state.currentPlayerIndex = 0;
   state.turnPhase = 'AWAIT_PLAY';
   state.pendingDamage = 0;
   state.castleDeck = castleDeck.slice(1);
   state.currentEnemy = castleDeck[0];
+  state.defeatedLegacyEnemies = [];
   state.tavernDeck = tavernDeck;
   state.discardPile = [];
   state.maxHandSize = maxHandSize;
@@ -2083,6 +2102,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
   state.pendingDamage = 0;
   state.castleDeck = enemyDeck.slice(1);
   state.currentEnemy = enemyDeck[0];
+  state.defeatedLegacyEnemies = [];
   state.tavernDeck = reserveDeck;
   state.discardPile = [];
   state.maxHandSize = maxHandSize;
@@ -3909,6 +3929,7 @@ export function createLobbyState(): GameState {
     pendingDamage: 0,
     castleDeck: [],
     currentEnemy: null,
+    defeatedLegacyEnemies: [],
     tavernDeck: [],
     discardPile: [],
     maxHandSize: 5,

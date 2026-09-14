@@ -21,6 +21,19 @@ const STORY_STATES: CardEntry[] = [
   ['Evergreen', { id: 'state-evergreen', kind: 'suited', suit: 'C', rank: '6', evergreen: true }],
 ];
 
+// A compact visual proof for the one centered ability seal. It includes the story-state marks and stacked powers
+// that players earn later in the campaign, using the same PlayingCard component as a real game.
+const ABILITY_STACK_SHOWCASE: CardEntry[] = [
+  ['Cleric', { id: 'stack-cleric', kind: 'suited', suit: 'H', rank: '6', name: 'Merrin' }],
+  ['Dual class', { id: 'stack-dual', kind: 'suited', suit: 'H', rank: '6', name: 'Merrin the Valiant', secondSuit: 'C' }],
+  ['Three powers', { id: 'stack-triple', kind: 'suited', suit: 'H', rank: '6', name: 'Merrin the Versatile', secondSuit: 'C', extraSuits: ['D'] }],
+  ['Cursed boss', { id: 'stack-cursed', kind: 'suited', suit: 'S', rank: 'J', name: 'The Thorned Warden' }, undefined, true],
+  ['Corrupted dual', { id: 'stack-corrupted', kind: 'suited', suit: 'H', rank: '6', name: 'Merrin, Corrupted', secondSuit: 'C', corrupted: true }],
+  ['Restored triple', { id: 'stack-restored', kind: 'suited', suit: 'H', rank: '6', name: 'Merrin, Restored', secondSuit: 'C', extraSuits: ['D'], restored: true }],
+  ['Signature power', { id: 'stack-special', kind: 'suited', suit: 'C', rank: '6', name: 'Esme', special: 'CLEAVE' }],
+  ['Pilgrim', { id: 'stack-pilgrim', kind: 'suited', suit: 'H', rank: '4', name: 'A quiet pilgrim', pilgrim: true, noSuitPower: true }],
+];
+
 const CAMPAIGN_HEROES: CardEntry[] = [
   ['High Arcana', { id: 'high-arcana', kind: 'suited', suit: 'D', rank: '25', name: 'High Arcana', noSuitPower: true }],
   ['Ilyra Sparkwrit', { id: 'ilyra', kind: 'suited', suit: 'H', rank: '2', name: 'Ilyra Sparkwrit', arcane: true }],
@@ -49,7 +62,7 @@ const COURT: CardEntry[] = COURT_RANKS.flatMap((rank) =>
   SUITS.map((suit): CardEntry => [`${rank} ${suit}`, { id: `${rank}-${suit}`, kind: 'suited', suit, rank }, undefined, true]),
 );
 
-const CAMP_AND_PILGRIMS: CardEntry[] = [
+const MERCENARY_CAMP: CardEntry[] = [
   ['Ghali', { id: 'ghali', kind: 'suited', suit: 'H', rank: '12', name: 'Ghali' }],
   ['Pàviõ', { id: 'pavio', kind: 'suited', suit: 'D', rank: '12', name: 'Pàviõ' }],
   ['Argo', { id: 'argo', kind: 'suited', suit: 'C', rank: '12', name: 'Argo' }],
@@ -61,15 +74,14 @@ const CAMP_AND_PILGRIMS: CardEntry[] = [
   ['Nineteen', { id: 'nineteen', kind: 'suited', suit: 'H', rank: '19', noSuitPower: true }],
   ['Any-Suit Ace', { id: 'wild-ace', kind: 'suited', suit: 'H', rank: 'A', wildSuit: true }],
   ['Jester', { id: 'jester', kind: 'jester' }],
-  ['Old Yarrow', { id: 'old-yarrow', kind: 'suited', suit: 'H', rank: '2', name: 'Old Yarrow', pilgrim: true, noSuitPower: true }],
-  ['Little Mireille', { id: 'little-mireille', kind: 'suited', suit: 'D', rank: '3', name: 'Little Mireille', pilgrim: true, noSuitPower: true }],
-  ['Bosk the Carter', { id: 'bosk', kind: 'suited', suit: 'C', rank: '4', name: 'Bosk the Carter', pilgrim: true, noSuitPower: true }],
-  ['Sister Halvard', { id: 'halvard', kind: 'suited', suit: 'S', rank: '5', name: 'Sister Halvard', pilgrim: true, noSuitPower: true }],
-  ['Corin Drizzlecoat', { id: 'corin', kind: 'suited', suit: 'H', rank: '6', name: 'Corin Drizzlecoat', pilgrim: true, noSuitPower: true }],
-  ['Fenna Longrope', { id: 'fenna', kind: 'suited', suit: 'D', rank: '7', name: 'Fenna Longrope', pilgrim: true, noSuitPower: true }],
-  ['Scrap', { id: 'scrap', kind: 'suited', suit: 'H', rank: 'A', name: 'Scrap', pilgrim: true, noSuitPower: true }],
-  ['Pilgrim', { id: 'pilgrim', kind: 'suited', suit: 'C', rank: '4', name: 'Pilgrim', pilgrim: true, noSuitPower: true }],
 ];
+
+// Use the live Mission 7 deck itself: six values, four identical Pilgrims at each value, 24 cards total. This
+// keeps the gallery honest about the actual game pool and makes the four matching rank-4s unmistakable.
+const PILGRIM_DECK: CardEntry[] = (MISSIONS.find((mission) => mission.id === 7)?.pilgrimCards ?? []).map((card, index) => [
+  `Rank ${card.kind === 'suited' ? card.rank : '?'} · copy ${(index % 4) + 1}`,
+  card,
+]);
 
 // All named bosses are generated straight from the live mission data, so this private gallery cannot drift from
 // which portrait appears during a real Legacy campaign. Mission 1 uses the standard court above and Mission 10
@@ -95,10 +107,12 @@ export function CardPreview() {
   const groups: [string, CardEntry[]][] = [
     ['Starting Party', STARTING_PARTY],
     ['Character States', STORY_STATES],
+    ['Ability Seal Showcase', ABILITY_STACK_SHOWCASE],
     ['Campaign Heroes', CAMPAIGN_HEROES],
     ['Court Enemies', COURT],
     ...MISSION_BOSS_GALLERIES,
-    ['Mercenary Camp and Pilgrims', CAMP_AND_PILGRIMS],
+    ['Mercenary Camp', MERCENARY_CAMP],
+    ['Pilgrim Deck — 24 cards', PILGRIM_DECK],
   ];
 
   return (

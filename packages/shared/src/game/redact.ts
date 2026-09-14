@@ -22,6 +22,9 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
     turnPhase: state.turnPhase,
     pendingDamage: state.pendingDamage,
     currentEnemy: state.currentEnemy,
+    // This is a defeat history, not the castle deck itself, so the tracker can mark a randomised boss only
+    // after it falls without leaking the order of future enemies.
+    defeatedLegacyEnemies: state.defeatedLegacyEnemies ?? [],
     liveEnemyAttack: state.currentEnemy ? resolvedEnemyAttack(state) : null,
     // Mission 11's live pile-top immunity — see ClientGameState.pileImmuneSuits. Gated on the mission's own flag
     // so every other mission ships two empty arrays rather than a rule that doesn't apply there.
