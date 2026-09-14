@@ -1,4 +1,5 @@
 import type { ClientGameState } from '@regicide/shared';
+import { ClassIcon, type GameIconId } from './ClassIcon';
 
 // The Kinfolk Flute took the feather glyph before the Druid class existed; the Druid's own card is a feather in
 // the physical game (see legacy/classes.ts's DRUID), so the flute gets an actual flute and the feather is the
@@ -9,12 +10,12 @@ import type { ClientGameState } from '@regicide/shared';
 // listed here but NO MISSION GRANTS IT — John hasn't said where the relic heals (see legacy/missions.ts's
 // Mission 9), so its chip stays permanently "not in play" for now. Kept visible on purpose: the tray shows every
 // relic the campaign can hold, held or not. Nothing here is ever "switched off" — a relic is in play or it isn't.
-const RELIC_INFO: Record<string, { glyph: string; name: string }> = {
-  KINFOLK_FLUTE: { glyph: '🪈', name: 'Kinfolk Flute' },
-  SCARLET_WHISTLE: { glyph: '🎗️', name: 'Scarlet Whistle' },
-  AZURE_EMBLEM: { glyph: '🔷', name: 'Azure Emblem' },
-  CORRUPTED_EVERGREEN_MOTHER: { glyph: '🥀', name: 'Corrupted Evergreen Mother' },
-  EVERGREEN_MOTHER: { glyph: '🌲', name: 'Evergreen Mother' },
+const RELIC_INFO: Record<string, { icon: GameIconId; name: string }> = {
+  KINFOLK_FLUTE: { icon: 'FLUTE', name: 'Kinfolk Flute' },
+  SCARLET_WHISTLE: { icon: 'WHISTLE', name: 'Scarlet Whistle' },
+  AZURE_EMBLEM: { icon: 'EMBLEM', name: 'Azure Emblem' },
+  CORRUPTED_EVERGREEN_MOTHER: { icon: 'CORRUPTED', name: 'Corrupted Evergreen Mother' },
+  EVERGREEN_MOTHER: { icon: 'EVERGREEN', name: 'Evergreen Mother' },
 };
 
 const ALL_RELIC_IDS = Object.keys(RELIC_INFO);
@@ -37,7 +38,7 @@ export function RelicsTray({ state, myPlayerId }: { state: ClientGameState; myPl
               : 'not in play';
         return (
           <span key={id} className={`relic-chip${held ? ' filled' : ' empty'}`} title={`${RELIC_INFO[id].name} — ${sub}`}>
-            <span className="relic-glyph">{RELIC_INFO[id].glyph}</span>
+            <span className="relic-glyph"><ClassIcon id={RELIC_INFO[id].icon} /></span>
             {RELIC_INFO[id].name}
           </span>
         );

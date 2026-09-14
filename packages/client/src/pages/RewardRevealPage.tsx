@@ -1,4 +1,5 @@
 import { CLASS_THEME, getMission } from '@regicide/shared';
+import { ClassIcon } from '../components/ClassIcon';
 
 export function RewardRevealPage({ missionId, onContinue }: { missionId: number; onContinue: () => void }) {
   const mission = getMission(missionId);
@@ -26,7 +27,7 @@ export function RewardRevealPage({ missionId, onContinue }: { missionId: number;
             return (
               <div key={r.name} className="legacy-recruit-chip" style={{ borderColor: r.noSuitPower ? 'var(--ink-dim)' : cls.color }}>
                 <span className="legacy-recruit-glyph" style={{ background: r.noSuitPower ? 'var(--ink-dim)' : cls.color }}>
-                  {r.noSuitPower ? '—' : cls.glyph}
+                  {r.noSuitPower ? '—' : <ClassIcon id={cls.id} />}
                 </span>
                 <span>
                   <strong>{r.name}</strong>

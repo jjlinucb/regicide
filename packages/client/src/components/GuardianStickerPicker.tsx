@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { SuitedCard } from '@regicide/shared';
 import { PlayingCard } from './PlayingCard';
+import { ClassIcon } from './ClassIcon';
 
 /**
  * Mission 6's reward, confirmed live 2026-09-02 (see legacy/party.ts's MissionReward.guardianStickerChoice doc):
@@ -31,7 +32,7 @@ export function GuardianStickerPicker({
 
   return (
     <div className="panel legacy-panel mercenary-camp">
-      <h3>🪨 Guardian Sticker</h3>
+      <h3><ClassIcon id="GUARDIAN" className="inline-icon" />Guardian Sticker</h3>
       <p style={{ fontSize: '0.85rem', color: 'var(--ink-dim)', margin: 0 }}>
         Pick one rank-8 Warrior, Bard, or Cleric to permanently gain the Guardian's absolute shield — it keeps its
         own class power too. This choice is final.

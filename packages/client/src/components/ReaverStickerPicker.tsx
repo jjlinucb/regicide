@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { SuitedCard } from '@regicide/shared';
 import { PlayingCard } from './PlayingCard';
+import { ClassIcon } from './ClassIcon';
 
 /**
  * Mission 5's reward, sourced fix (confirmed live 2026-08-30, see legacy/party.ts's MissionReward.reaverStickerChoice
@@ -31,7 +32,7 @@ export function ReaverStickerPicker({
 
   return (
     <div className="panel legacy-panel mercenary-camp">
-      <h3>🔨 Reaver Sticker</h3>
+      <h3><ClassIcon id="REAVER" className="inline-icon" />Reaver Sticker</h3>
       <p style={{ fontSize: '0.85rem', color: 'var(--ink-dim)', margin: 0 }}>
         Pick one Bard, Cleric, or Paladin party member (rank 6) to permanently gain the Reaver's "Reveal and Add" —
         it keeps its own class power too. This choice is final.

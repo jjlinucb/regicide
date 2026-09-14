@@ -29,6 +29,8 @@ import { ChanterCountPicker } from '../components/ChanterCountPicker';
 import { RelicsTray } from '../components/RelicsTray';
 import { RegrowthWindow } from '../components/RegrowthWindow';
 import { ArtSkinTabs } from '../components/ArtSkinTabs';
+import { ClassIcon } from '../components/ClassIcon';
+import { EnemyTracker } from '../components/EnemyTracker';
 
 const MEDAL_INFO: Record<'gold' | 'silver' | 'bronze', { emoji: string; label: string }> = {
   gold: { emoji: '🥇', label: 'Gold Victory' },
@@ -365,7 +367,7 @@ export function GamePage({
         </div>
         {isLegacy && state.jesterClaim && (
           <div className="legacy-jester-claim-banner">
-            <span>🃏 A Jester is up for grabs — claim it for a free 8-strength attack with no counter-attack in return, then refill your hand.</span>
+            <span><ClassIcon id="JESTER" className="inline-icon" />A Jester is up for grabs — claim it for a free 8-strength attack with no counter-attack in return, then refill your hand.</span>
             <div className="jester-picker-choices">
               <button type="button" className="btn" onClick={() => sendAction({ type: 'CLAIM_JESTER', playerId: myPlayerId })}>
                 Claim it
@@ -376,7 +378,7 @@ export function GamePage({
         {isLegacy && isMyTurn && state.turnPhase === 'AWAIT_PLAY' && state.standingJesters.length > 0 && (
           <div className="legacy-jester-claim-banner">
             <span>
-              🃏 {state.standingJesters.length} standing Jester{state.standingJesters.length > 1 ? 's' : ''} available — use one now for a
+              <ClassIcon id="JESTER" className="inline-icon" />{state.standingJesters.length} standing Jester{state.standingJesters.length > 1 ? 's' : ''} available — use one now for a
               free 8-strength attack with no counter-attack in return, then draw back up to your hand limit.
             </span>
             <div className="jester-picker-choices">
@@ -390,14 +392,14 @@ export function GamePage({
           <div className="legacy-jester-claim-banner">
             {isComboAttacker ? (
               <>
-                <span>🎗️ Scarlet Whistle: your attack is open — anyone else may silently add a matching card before you resolve it.</span>
+                <span><ClassIcon id="WHISTLE" className="inline-icon" />Scarlet Whistle: your attack is open — anyone else may silently add a matching card before you resolve it.</span>
                 <button type="button" className="btn" onClick={() => sendAction({ type: 'RESOLVE_COMBO', playerId: myPlayerId })}>
                   Resolve attack
                 </button>
               </>
             ) : (
               <span>
-                🎗️ Scarlet Whistle: {state.players.find((p) => p.id === state.comboAssist!.attackerId)?.name} committed an attack —
+                <ClassIcon id="WHISTLE" className="inline-icon" />Scarlet Whistle: {state.players.find((p) => p.id === state.comboAssist!.attackerId)?.name} committed an attack —
                 pick a matching card from your hand below to silently add it, or leave it alone.
               </span>
             )}
@@ -405,7 +407,7 @@ export function GamePage({
         )}
         {isMyChantTrim && (
           <div className="legacy-jester-claim-banner">
-            <span>🎼 The chant drew everyone up — pick exactly {myChantOverflow} card(s) below to discard back down to your hand limit.</span>
+            <span><ClassIcon id="CHANTER" className="inline-icon" />The chant drew everyone up — pick exactly {myChantOverflow} card(s) below to discard back down to your hand limit.</span>
             <button
               type="button"
               className="btn"
@@ -433,6 +435,13 @@ export function GamePage({
                 pileImmuneSuits={state.pileImmuneSuits}
                 pileImmuneClasses={state.pileImmuneClasses}
                 zoneImmuneClasses={state.zoneImmuneClasses}
+              />
+            )}
+            {isLegacy && state.legacyMissionId !== null && (
+              <EnemyTracker
+                missionId={state.legacyMissionId}
+                remaining={state.castleDeckCount + (state.currentEnemy ? 1 : 0)}
+                currentEnemyName={state.currentEnemy?.name}
               />
             )}
           </div>
@@ -500,7 +509,7 @@ export function GamePage({
                 }
               }}
             >
-              🃏 Flip Jester ({MAX_SOLO_JESTERS - state.soloJestersUsed} left)
+              <ClassIcon id="JESTER" className="inline-icon" />Flip Jester ({MAX_SOLO_JESTERS - state.soloJestersUsed} left)
             </button>
           )}
           {canBankKinfolk && (
@@ -513,7 +522,7 @@ export function GamePage({
                 setSelectedIds(new Set());
               }}
             >
-              🎵 Bank onto Kinfolk Flute
+              <ClassIcon id="FLUTE" className="inline-icon" />Bank onto Kinfolk Flute
             </button>
           )}
         </div>
@@ -620,7 +629,7 @@ export function GamePage({
       {isMyAzureEmblemTurn && (
         <div className="jester-picker">
           <span>
-            🔷 Azure Emblem: pick one of your Mage card(s) below to bank onto the reserve deck, or decline — anything you don't bank stays in
+            <ClassIcon id="EMBLEM" className="inline-icon" />Azure Emblem: pick one of your Mage card(s) below to bank onto the reserve deck, or decline — anything you don't bank stays in
             play against this enemy and is banished when it falls.
           </span>
           <EnemyCardPicker
@@ -637,7 +646,7 @@ export function GamePage({
 
       {isMyZoneVengeanceWindow && (
         <div className="jester-picker">
-          <span>☠️ The kill draws a card permanently into the mission zone — choose one from the enemy's table below.</span>
+          <span><ClassIcon id="CORRUPTED" className="inline-icon" />The kill draws a card permanently into the mission zone — choose one from the enemy's table below.</span>
           <EnemyCardPicker
             cards={state.currentEnemy?.tableCards ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_ZONE_VENGEANCE_SACRIFICE', playerId: myPlayerId, cardId })}
@@ -647,7 +656,7 @@ export function GamePage({
 
       {isMyZoneReliefWindow && (
         <div className="jester-picker">
-          <span>🥀 An exact hit! Choose one card from the mission zone (other than Myla) to discard for good.</span>
+          <span><ClassIcon id="CORRUPTED" className="inline-icon" />An exact hit! Choose one card from the mission zone (other than Myla) to discard for good.</span>
           <EnemyCardPicker
             cards={zoneReliefEligibleCards}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_ZONE_RELIEF_CARD', playerId: myPlayerId, cardId })}
@@ -658,7 +667,7 @@ export function GamePage({
       {isMyMageRevealWindow && (
         <div className="jester-picker">
           <span>
-            🔮 {mageTriggerLabel}'s reveal turns up these cards — choose one to banish and add to the attack.
+            <ClassIcon id="MAGE" className="inline-icon" />{mageTriggerLabel}'s reveal turns up these cards — choose one to banish and add to the attack.
             {mageTriggerIsCursed && ' The chosen card will ignore enemy immunity, courtesy of the corrupted Mage.'}
             {mageQueueRemaining > 0 && ` (${mageQueueRemaining} more Mage card${mageQueueRemaining === 1 ? '' : 's'} still to resolve after this.)`}
           </span>
@@ -672,7 +681,7 @@ export function GamePage({
       {isMyChanterCountWindow && (
         <div className="jester-picker">
           <span>
-            🎼 A Chanter leads the chant — choose how many cards everyone draws (1-{state.chanterCountChoice?.maxCount}). This has
+            <ClassIcon id="CHANTER" className="inline-icon" />A Chanter leads the chant — choose how many cards everyone draws (1-{state.chanterCountChoice?.maxCount}). This has
             nothing to do with the Chanter card's own rank.
           </span>
           <ChanterCountPicker
@@ -685,7 +694,7 @@ export function GamePage({
       {isMyReaverRevealCountWindow && (
         <div className="jester-picker">
           <span>
-            🔨 {reaverCountTriggerLabel} opens a reveal — choose how many cards (1-{state.reaverRevealCountChoice?.maxCount}) to pull from
+            <ClassIcon id="REAVER" className="inline-icon" />{reaverCountTriggerLabel} opens a reveal — choose how many cards (1-{state.reaverRevealCountChoice?.maxCount}) to pull from
             the reserve deck. Every card revealed is banished either way, and you must use one of them, so fewer is safer.
           </span>
           <ReaverRevealCountPicker
@@ -697,7 +706,7 @@ export function GamePage({
 
       {isMyReaverRevealWindow && (
         <div className="jester-picker">
-          <span>🔨 {reaverTriggerLabel}'s reveal turns up these cards — you must use one of them, so choose which to add to the attack.</span>
+          <span><ClassIcon id="REAVER" className="inline-icon" />{reaverTriggerLabel}'s reveal turns up these cards — you must use one of them, so choose which to add to the attack.</span>
           <EnemyCardPicker
             cards={state.reaverReveal?.candidates ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_REAVER_REVEAL_CARD', playerId: myPlayerId, cardId })}
@@ -707,7 +716,7 @@ export function GamePage({
 
       {isMyScarletWhistleSoloWindow && (
         <div className="jester-picker">
-          <span>🎗️ Scarlet Whistle — choose any one card from the discard pile to pair with your Companion, or attack alone.</span>
+          <span><ClassIcon id="WHISTLE" className="inline-icon" />Scarlet Whistle — choose any one card from the discard pile to pair with your Companion, or attack alone.</span>
           <EnemyCardPicker
             cards={state.scarletWhistleSoloChoice?.candidates ?? []}
             onChoose={(cardId) => sendAction({ type: 'CHOOSE_SCARLET_WHISTLE_DISCARD_CARD', playerId: myPlayerId, cardId })}

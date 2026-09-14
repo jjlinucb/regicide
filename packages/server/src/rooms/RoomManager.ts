@@ -620,6 +620,7 @@ export class RoomManager {
       playerIds: room.playerOrder,
       playerNames,
       seed: `${code}-${Date.now()}`,
+      missionId,
       party: missionParty,
       enemies: mission.standardCastle ? [] : missionEnemiesToSpecs(mission.enemies),
       jesterCount: LEGACY_JESTER_COUNT,

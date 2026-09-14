@@ -7,6 +7,7 @@ import { RewardRevealPage } from './pages/RewardRevealPage';
 import { GamePage } from './pages/GamePage';
 import { RulesPage } from './pages/RulesPage';
 import { CardPreview } from './CardPreview';
+import { TrackerPreview } from './TrackerPreview';
 import { ArtSkinProvider, useArtSkin } from './artSkin';
 
 function useRoute() {
@@ -34,11 +35,12 @@ export function App() {
 function AppContents() {
   const { skin } = useArtSkin();
   const { path, navigate } = useRoute();
-  // Scratch preview of card faces (?preview=cards) — not linked from anywhere in the app.
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('preview') === 'cards') {
+  // Scratch previews are not linked from the app: cards for portraits, trackers for all twelve compact mission maps.
+  const preview = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('preview') : null;
+  if (preview === 'cards' || preview === 'trackers') {
     return (
       <div className={'app art-skin-' + skin}>
-        <CardPreview />
+        {preview === 'cards' ? <CardPreview /> : <TrackerPreview />}
       </div>
     );
   }

@@ -2076,6 +2076,7 @@ function startLegacyMission(state: GameState, action: Extract<GameAction, { type
 
   state.phase = 'IN_PROGRESS';
   state.ruleset = 'legacy';
+  state.legacyMissionId = action.missionId ?? null;
   state.players = players;
   state.currentPlayerIndex = 0;
   state.turnPhase = 'AWAIT_PLAY';
@@ -3901,6 +3902,7 @@ export function createLobbyState(): GameState {
   return {
     phase: 'LOBBY',
     ruleset: 'regicide',
+    legacyMissionId: null,
     players: [],
     currentPlayerIndex: 0,
     turnPhase: 'AWAIT_PLAY',

@@ -1,6 +1,7 @@
 import { cardValue, classForCard, CLASS_THEME, JESTER_ABILITY_TEXT, SUIT_ABILITY_TEXT, SUIT_TO_CLASS, type Card } from '@regicide/shared';
 import { cardArtFor, cardArtStyle, JESTER_ART } from '../cardArt';
 import { useArtSkin } from '../artSkin';
+import { ClassIcon } from './ClassIcon';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
 const SUIT_NAME: Record<string, string> = { H: 'Hearts', D: 'Diamonds', C: 'Clubs', S: 'Spades' };
@@ -71,7 +72,7 @@ export function cardLabel(card: Card): string {
   if (card.kind === 'jester') return 'Jester';
   const rankLabel = tieredRankLabel(card);
   if (isLegacyCard(card)) {
-    return `${rankLabel} ${cardClasses(card).map((t) => t.glyph).join('')}`;
+    return `${rankLabel} ${cardClasses(card).map((t) => t.name).join(', ')}`;
   }
   return `${rankLabel}${SUIT_GLYPH[card.suit]}`;
 }
@@ -154,7 +155,7 @@ export function PlayingCard({
         title={cardAbilityText(card)}
       >
         <span className="card-art" style={cardArtStyle(JESTER_ART, skin)} aria-hidden="true" />
-        <span className="glyph">🃏</span>
+        <span className="glyph"><ClassIcon id="JESTER" /></span>
         {!small && <span className="jester-label">JESTER</span>}
       </button>
     );
@@ -172,7 +173,8 @@ export function PlayingCard({
     ...(small ? { width: 44, height: 62 } : {}),
     ...(isWildUnresolved ? { color: CLASS_THEME.MERCENARY.color } : classInfo ? { color: classInfo.color } : {}),
   };
-  const glyph = isWildUnresolved ? '★' : classInfo ? classInfo.glyph : SUIT_GLYPH[card.suit];
+  const glyph = SUIT_GLYPH[card.suit];
+  const iconId = isWildUnresolved ? 'MERCENARY' : classInfo?.id;
   const abilityText = cardAbilityText(card);
   const art = cardArtFor(card);
   return (
@@ -186,8 +188,8 @@ export function PlayingCard({
     >
       {art && <span className="card-art" style={cardArtStyle(art, skin)} aria-hidden="true" />}
       {card.special && !small && <span className="special-badge" aria-hidden="true">✦</span>}
-      {card.corrupted && !small && <span className="corrupted-badge" aria-hidden="true">🥀</span>}
-      {card.restored && !small && <span className="restored-badge" aria-hidden="true">🌱</span>}
+      {card.corrupted && !small && <span className="corrupted-badge" aria-label="Corrupted"><ClassIcon id="CORRUPTED" /></span>}
+      {card.restored && !small && <span className="restored-badge" aria-label="Restored"><ClassIcon id="RESTORED" /></span>}
       <span className="rank">{rankLabel}</span>
       {/* Every class the card carries, side by side at one size (John, 2026-09-06) — they resolve together when
           the card is played, so none of them is a footnote to the others. A single-class card is the common
@@ -196,12 +198,12 @@ export function PlayingCard({
         <span className={`glyph class-glyph-row count-${Math.min(classThemes.length, 4)}`}>
           {classThemes.map((t) => (
             <span key={t.id} className="class-glyph" style={{ color: t.color }}>
-              {t.glyph}
+              <ClassIcon id={t.id} />
             </span>
           ))}
         </span>
       ) : (
-        <span className="glyph">{glyph}</span>
+        <span className="glyph">{iconId ? <ClassIcon id={iconId} /> : glyph}</span>
       )}
       {legacy && !small && (
         <span className="legacy-card-name">

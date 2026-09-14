@@ -12,6 +12,15 @@ const STARTING_PARTY: CardEntry[] = buildInitialParty().map((card) => [
   card,
 ]);
 
+// A stable visual reference for the three player-card story states. It uses the same Human portrait in every
+// entry, so the gallery makes the corruption and recovery treatment easy to inspect in either art skin.
+const STORY_STATES: CardEntry[] = [
+  ['Unchanged', { id: 'state-unchanged', kind: 'suited', suit: 'C', rank: '6' }],
+  ['Corrupted', { id: 'state-corrupted', kind: 'suited', suit: 'C', rank: '6', corrupted: true }],
+  ['Restored', { id: 'state-restored', kind: 'suited', suit: 'C', rank: '6', restored: true }],
+  ['Evergreen', { id: 'state-evergreen', kind: 'suited', suit: 'C', rank: '6', evergreen: true }],
+];
+
 const CAMPAIGN_HEROES: CardEntry[] = [
   ['High Arcana', { id: 'high-arcana', kind: 'suited', suit: 'D', rank: '25', name: 'High Arcana', noSuitPower: true }],
   ['Ilyra Sparkwrit', { id: 'ilyra', kind: 'suited', suit: 'H', rank: '2', name: 'Ilyra Sparkwrit', arcane: true }],
@@ -85,6 +94,7 @@ const MISSION_BOSS_GALLERIES: [string, CardEntry[]][] = MISSIONS.filter((mission
 export function CardPreview() {
   const groups: [string, CardEntry[]][] = [
     ['Starting Party', STARTING_PARTY],
+    ['Character States', STORY_STATES],
     ['Campaign Heroes', CAMPAIGN_HEROES],
     ['Court Enemies', COURT],
     ...MISSION_BOSS_GALLERIES,

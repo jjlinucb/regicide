@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ClassIcon } from '../components/ClassIcon';
 
 /** Layered mountain silhouette banner, drawn from scratch in the spirit of the official Regicide site. */
 function MountainBanner({ title, subtitle }: { title: string; subtitle: string }) {
@@ -174,19 +175,19 @@ function LegacyTab() {
         <section className="rules-section">
           <h2>The Classes</h2>
           <div className="rules-grid">
-            <ClassCard icon="⚔" name="Warrior" tag="Double Damage" color="#8a3b3b">
+            <ClassCard icon={<ClassIcon id="WARRIOR" />} name="Warrior" tag="Double Damage" color="#8a3b3b">
               Plays like Clubs — the attack's damage is doubled against the enemy's health.
             </ClassCard>
-            <ClassCard icon="🎵" name="Bard" tag="Draw Cards" color="#c99a3a">
+            <ClassCard icon={<ClassIcon id="BARD" />} name="Bard" tag="Draw Cards" color="#c99a3a">
               Plays like Diamonds — the party draws cards, in turn order, up to the attack's strength.
             </ClassCard>
-            <ClassCard icon="✚" name="Cleric" tag="Heal" color="#b8434a">
+            <ClassCard icon={<ClassIcon id="CLERIC" />} name="Cleric" tag="Heal" color="#b8434a">
               Plays like Hearts — shuffles the discard pile and tucks that many cards back under the reserve deck.
             </ClassCard>
-            <ClassCard icon="🛡" name="Paladin" tag="Reduce Strength" color="#3f4f6b">
+            <ClassCard icon={<ClassIcon id="PALADIN" />} name="Paladin" tag="Reduce Strength" color="#3f4f6b">
               Plays like Spades — knocks down the enemy's strength for the rest of the fight.
             </ClassCard>
-            <ClassCard icon="🔮" name="Mage" tag="Arcane Bolt" color="#5b3f8c">
+            <ClassCard icon={<ClassIcon id="MAGE" />} name="Mage" tag="Arcane Bolt" color="#5b3f8c">
               Unlocked at Mission 3. No suit power of its own — instead it fires its own bolt, at its own card's
               strength, before the rest of the attack resolves. Never blocked by an enemy's suit immunity.
             </ClassCard>

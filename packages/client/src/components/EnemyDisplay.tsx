@@ -1,6 +1,7 @@
 import type { EnemyState, Suit, SuitlessImmuneClass } from '@regicide/shared';
 import { CLASS_THEME, SUIT_TO_CLASS } from '@regicide/shared';
 import { PlayingCard } from './PlayingCard';
+import { ClassIcon } from './ClassIcon';
 
 const SUIT_GLYPH: Record<string, string> = { H: '♥', D: '♦', C: '♣', S: '♠' };
 const RANK_NAME: Record<string, string> = { J: 'Jack', Q: 'Queen', K: 'King' };
@@ -11,7 +12,7 @@ function ImmunityChip({ suit, legacy }: { suit: Suit; legacy: boolean }) {
   const cls = SUIT_TO_CLASS[suit];
   return (
     <span className="immunity-chip" style={{ color: cls.color, borderColor: cls.color }} title={`Immune to ${cls.name}`}>
-      {legacy ? cls.glyph : SUIT_GLYPH[suit]}
+      {legacy ? <ClassIcon id={cls.id} /> : SUIT_GLYPH[suit]}
     </span>
   );
 }
@@ -29,7 +30,7 @@ function ClassImmunityChip({ cls }: { cls: SuitlessImmuneClass }) {
       style={{ color: theme.color, borderColor: theme.color }}
       title={`Immune to ${theme.name}`}
     >
-      {theme.glyph}
+      <ClassIcon id={theme.id} />
     </span>
   );
 }

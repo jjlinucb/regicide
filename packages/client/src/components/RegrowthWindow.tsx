@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Card, GameAction } from '@regicide/shared';
 import { PlayingCard } from './PlayingCard';
+import { ClassIcon } from './ClassIcon';
 
 /** The four destinations a Regrowth pick can send a card to, in the order the action field expects them. */
 const DESTINATIONS = [
@@ -57,7 +58,7 @@ export function RegrowthWindow({
   return (
     <div className="legacy-jester-claim-banner" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.5rem' }}>
       <span>
-        🪶 Regrowth — {dealt.length} card(s) from the discard pile were dealt to you. Assign {required} of them, one
+        <ClassIcon id="DRUID" className="inline-icon" />Regrowth — {dealt.length} card(s) from the discard pile were dealt to you. Assign {required} of them, one
         per destination. The rest go back to the discard pile.
       </span>
 

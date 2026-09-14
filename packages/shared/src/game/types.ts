@@ -456,6 +456,8 @@ export interface GameState {
   phase: GamePhase;
   /** Defaults to 'regicide' everywhere existing code constructs a GameState — every Legacy-only field/branch below is inert unless this is 'legacy'. */
   ruleset: Ruleset;
+  /** The active Legacy campaign mission, retained in live game state so every player sees the matching playmat tracker. */
+  legacyMissionId: number | null;
   players: PlayerState[];
   currentPlayerIndex: number;
   turnPhase: TurnPhase;
@@ -993,6 +995,8 @@ export type GameAction =
       playerIds: string[];
       playerNames: string[];
       seed: string;
+      /** Campaign mission being started. Optional for older direct engine callers; live rooms always send it. */
+      missionId?: number;
       /** The campaign's current party roster (not a fresh standard deck). */
       party: Card[];
       /** This mission's enemies, in the fixed order they'll be faced. Ignored when `standardCastle` is true. */
@@ -1281,6 +1285,8 @@ export interface ClientPlayerView {
 export interface ClientGameState {
   phase: GamePhase;
   ruleset: Ruleset;
+  /** The playmat's current Legacy mission, or null outside a Legacy campaign. */
+  legacyMissionId: number | null;
   players: ClientPlayerView[];
   currentPlayerIndex: number;
   turnPhase: TurnPhase;

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { CLASS_THEME, classForSuit, MERCENARY_CATALOG, mercenaryCoinsForLosses } from '@regicide/shared';
 import type { MercenaryProgress, MercenaryTypeId, Suit } from '@regicide/shared';
+import { ClassIcon } from './ClassIcon';
 
 /** The suit a catalog entry's own card belongs to — `null` for the three suitless types (19 / wild Ace / Jester). */
 function mercenarySuit(id: MercenaryTypeId): Suit | null {
@@ -71,7 +72,7 @@ export function MercenaryCamp({
           return (
             <div key={spec.id} className="mercenary-row" style={{ borderColor: theme.color }}>
               <span className="mercenary-glyph" style={{ background: theme.color }}>
-                {theme.glyph}
+                <ClassIcon id={theme.id} />
               </span>
               <span className="mercenary-label">
                 {spec.label}

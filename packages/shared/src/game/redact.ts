@@ -7,6 +7,9 @@ export function redactStateFor(state: GameState, viewerPlayerId: string): Client
   return {
     phase: state.phase,
     ruleset: state.ruleset,
+    // `?? null` keeps clients connected through a hot reload of an older in-memory room from receiving an
+    // undefined value before the next freshly-created lobby state has the tracker field.
+    legacyMissionId: state.legacyMissionId ?? null,
     players: state.players.map((p) => ({
       id: p.id,
       name: p.name,

@@ -1057,6 +1057,34 @@ button {
   line-height: 1;
 }
 
+/* All class and relic marks are original SVG silhouettes, sized from their surrounding text rather than from a
+   platform's emoji font. This keeps an axe, note, heart, and shield crisp and consistent across browsers. */
+.class-icon {
+  display: block;
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+}
+
+.inline-icon {
+  display: inline-block;
+  width: 1.1em;
+  height: 1.1em;
+  margin-right: 0.18em;
+  vertical-align: -0.18em;
+}
+
+.playing-card .glyph .class-icon,
+.playing-card .class-glyph .class-icon {
+  width: 1em;
+  height: 1em;
+}
+
+.playing-card .class-glyph {
+  display: grid;
+  place-items: center;
+}
+
 .playing-card.red {
   color: var(--heart);
 }
@@ -1229,6 +1257,11 @@ button {
   font-size: 0.7rem;
   line-height: 1;
 }
+
+.corrupted-badge { color: #edb2ff; }
+.restored-badge { color: #f5f0a7; }
+.corrupted-badge .class-icon,
+.restored-badge .class-icon { width: 1em; height: 1em; }
 
 .confirm-bar {
   display: flex;
@@ -1890,6 +1923,171 @@ button {
   box-shadow: 0 6px 0 rgba(29, 64, 47, 0.3), 0 12px 22px rgba(8, 31, 27, 0.2);
 }
 
+/* The physical campaign keeps its enemy cards on a small tracker beside the current foe. This version sits
+   directly under the portrait: it preserves the familiar wave-and-marker language while fitting a 14-inch
+   laptop playmat. A faded marker is a defeated enemy, the glowing one is the active fight, and the rest remain
+   clean so the table can see the road ahead at a glance. */
+.legacy-playmat .enemy-tracker {
+  position: relative;
+  z-index: 1;
+  margin-top: 7px;
+  padding: 6px 7px;
+  border: 1px solid rgba(203, 184, 108, 0.88);
+  border-radius: 10px;
+  background:
+    linear-gradient(122deg, transparent 0 74%, rgba(92, 130, 92, 0.1) 74.5% 75.5%, transparent 76%),
+    linear-gradient(155deg, rgba(255, 251, 218, 0.96), rgba(220, 236, 195, 0.93));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 231, 0.68), 0 2px 5px rgba(5, 31, 22, 0.24);
+  color: #283a31;
+}
+
+.enemy-tracker-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: #38503c;
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.enemy-tracker-heading span:last-child {
+  color: #637055;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
+.enemy-tracker-waves {
+  display: grid;
+  gap: 3px;
+}
+
+.enemy-tracker-wave {
+  display: grid;
+  grid-template-columns: minmax(63px, 0.8fr) 1.4fr;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.enemy-tracker-wave-label {
+  display: grid;
+  min-width: 0;
+  padding: 2px 4px;
+  border-left: 3px solid #597861;
+  background: rgba(55, 85, 65, 0.1);
+  line-height: 1.05;
+}
+
+.enemy-tracker-wave-label strong {
+  overflow: hidden;
+  color: #354b39;
+  font-size: 0.54rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enemy-tracker-wave-label span {
+  margin-top: 1px;
+  color: #6b5a45;
+  font-size: 0.52rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.enemy-tracker-markers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+}
+
+.enemy-tracker-marker {
+  position: relative;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1.5px solid #49634f;
+  border-radius: 50%;
+  background: #f8f4d7;
+  color: #47644f;
+  box-shadow: 0 1px 1px rgba(38, 64, 43, 0.22);
+  transition: opacity 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.enemy-tracker-marker .class-icon {
+  width: 11px;
+  height: 11px;
+}
+
+.enemy-tracker-marker.defeated {
+  opacity: 0.28;
+  filter: grayscale(1);
+}
+
+.enemy-tracker-marker.defeated::after {
+  position: absolute;
+  width: 21px;
+  height: 1.5px;
+  background: currentColor;
+  content: '';
+  transform: rotate(-42deg);
+}
+
+.enemy-tracker-marker.current {
+  border-color: #c5803c;
+  background: #fff7bf;
+  color: #a64c35;
+  box-shadow: 0 0 0 2px rgba(225, 171, 67, 0.4), 0 1px 3px rgba(93, 48, 29, 0.4);
+  transform: translateY(-1px);
+}
+
+.enemy-tracker-marker.goran {
+  border-color: #71455e;
+  background: #eee2d2;
+  color: #63394f;
+}
+
+.enemy-tracker-letter {
+  font-size: 0.62rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.tracker-preview-playmat {
+  margin-top: 15px;
+}
+
+.tracker-preview-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(218px, 1fr));
+  gap: 10px;
+}
+
+.tracker-preview-item {
+  min-width: 0;
+}
+
+.tracker-preview-item h2 {
+  margin: 0;
+  color: #fff8df;
+  font-size: 0.86rem;
+}
+
+.tracker-preview-item p {
+  min-height: 1.9em;
+  margin: 1px 0 4px;
+  color: #e4edc5;
+  font-size: 0.65rem;
+  line-height: 1.25;
+}
+
 .legacy-playmat .z-enemy .enemy-card::before {
   content: 'ENEMY';
   color: #73581d;
@@ -2194,6 +2392,27 @@ body:has(.card-preview) {
 .playing-card.cursed .card-art::before { opacity: 0.34; }
 .playing-card.restored .card-art::before { opacity: 0.07; }
 .playing-card.evergreen .card-art::before { opacity: 0.1; }
+
+/* Corruption keeps the card's character legible, but pulls its color into a bruised violet palette and lets
+   thorn-like fissures creep over the edges. This is distinct from a cursed boss: the player can recognize
+   their own companion or hero underneath the blight, then see the bright restoration state reverse it. */
+.playing-card.corrupted.illustrated .card-art {
+  filter: saturate(0.68) contrast(1.16) brightness(0.72) sepia(0.18) hue-rotate(238deg);
+}
+
+.playing-card.corrupted.illustrated .card-art::after {
+  background:
+    repeating-linear-gradient(130deg, transparent 0 17px, rgba(116, 35, 122, 0.28) 18px 20px, transparent 21px 43px),
+    radial-gradient(ellipse at 50% 48%, transparent 18%, rgba(65, 12, 77, 0.22) 52%, rgba(18, 3, 27, 0.72) 100%),
+    linear-gradient(to bottom, rgba(21, 4, 31, 0.58), rgba(69, 16, 80, 0.06) 39%, rgba(21, 4, 31, 0.62) 100%);
+}
+
+.playing-card.corrupted.illustrated .rank,
+.playing-card.corrupted.illustrated .glyph,
+.playing-card.corrupted.illustrated .class-glyph-row {
+  border-color: rgba(220, 159, 239, 0.78);
+  background: linear-gradient(145deg, rgba(27, 7, 38, 0.96), rgba(79, 26, 91, 0.88));
+}
 
 .legacy-playmat .deck-inspector-hint {
   position: relative;
