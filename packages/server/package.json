@@ -1,6 +1,6 @@
 {
   "name": "@regicide/server",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@regicide/shared": "^1.0.0",
+    "@regicide/shared": "^2.0.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "pg": "^8.22.0",
